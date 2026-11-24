@@ -29,10 +29,10 @@ import Testing
     #expect(Set(names) == expected)
   }
 
-  @Test func theReadmeStatesTheToolCount() throws {
-    let readme = try String(contentsOf: Instance.root.appendingPathComponent("README.md"), encoding: .utf8)
+  @Test func theManagerPageStatesTheToolCount() throws {
+    let page = try String(contentsOf: Instance.root.appendingPathComponent("docs/manager.md"), encoding: .utf8)
 
-    #expect(readme.contains("Its \(MCPToolServerTests.allTools.count) tools"))
+    #expect(page.contains("Its \(MCPToolServerTests.allTools.count) tools"))
   }
 
   @Test func everyToolDescriptionSaysSessionTextIsData() throws {

@@ -301,7 +301,7 @@ private func withBench(scripts: Bool = true, _ body: (SiteBench) throws -> Void)
       let local = localSession("mac", cwd: "\(home.path)/repo")
       let remote = remoteSession("box", cwd: local.cwd)
       service.queue.sync {
-        service.checkouts[SitePath(local.cwd, at: service.mac)] = ("/main/checkout", nowMs())
+        service.checkouts[SitePath(local.cwd, at: service.mac)] = ("/main/checkout", nowMs(), false)
 
         #expect(service.checkout(local) == "/main/checkout")
         #expect(service.checkout(remote) == nil)
@@ -317,7 +317,7 @@ private func withBench(scripts: Bool = true, _ body: (SiteBench) throws -> Void)
       let local = localSession("mac", cwd: "\(home.path)/repo")
       let remote = remoteSession("box", cwd: local.cwd)
       service.queue.sync {
-        service.checkouts[SitePath(remote.cwd, at: service.site(for: remote))] = (nil, nowMs())
+        service.checkouts[SitePath(remote.cwd, at: service.site(for: remote))] = (nil, nowMs(), false)
 
         #expect(service.checkout(remote) == nil)
         #expect(service.checkoutLookups.isEmpty, "the host's folder was read less than a minute ago")
@@ -904,14 +904,15 @@ func withReadyService(
 
   @Test(.timeLimit(.minutes(1)))
   func autoContinueSkipsASessionWhoseHostNamesNoAccount() throws {
-    try withReadyService(config: ["claudeConfigDirs": []]) { _, service, facts in
+    try withReadyService(config: ["claudeConfigDirs": [], "codexHomes": []]) { _, service, facts in
       #expect(blocker(service, facts) == Self.noAccount)
     }
   }
 
   @Test(.timeLimit(.minutes(1)))
   func autoContinueSkipsASessionWhoseHostNamesAnAccountThatDoesNotResolve() throws {
-    try withReadyService(host: ["account": "nobody"], config: ["claudeConfigDirs": []]) { b, service, facts in
+    try withReadyService(host: ["account": "nobody"], config: ["claudeConfigDirs": [], "codexHomes": []]) {
+      b, service, facts in
       #expect(blocker(service, facts) == Self.noAccount)
     }
   }
@@ -922,7 +923,7 @@ func withReadyService(
     defer { try? FileManager.default.removeItem(atPath: account) }
     try Data("{}".utf8).write(to: URL(fileURLWithPath: "\(account)/.claude.json"))
     try withReadyService(
-      host: ["account": .string(account)], config: ["claudeConfigDirs": [.string(account)]]
+      host: ["account": .string(account)], config: ["claudeConfigDirs": [.string(account)], "codexHomes": []]
     ) { _, service, facts in
       let resolved = try service.queue.sync { try service.resolveAccount(account).folder }
       service.quota = SpentFor(account: resolved)
@@ -931,9 +932,25 @@ func withReadyService(
     }
   }
 
+  /// Risk 1: a host session runs under the host's Claude login, so a Codex account's quota never stands in for it.
+  @Test(.timeLimit(.minutes(1)))
+  func autoContinueSkipsASessionWhoseHostNamesACodexAccount() throws {
+    let root = try makeShortTempFolder()
+    defer { try? FileManager.default.removeItem(atPath: root) }
+    let codex = "\(root)/.codex-work"
+    try FileManager.default.createDirectory(atPath: codex, withIntermediateDirectories: true)
+    for ref in ["codex-work", codex] {
+      try withReadyService(
+        host: ["account": .string(ref)], config: ["claudeConfigDirs": [], "codexHomes": [.string(codex)]]
+      ) { _, service, facts in
+        #expect(blocker(service, facts) == Self.noAccount, "\(ref)")
+      }
+    }
+  }
+
   @Test(.timeLimit(.minutes(1)))
   func autoContinueSkipsASessionWhoseHostHasNotAnswered() throws {
-    try withHostService(config: ["claudeConfigDirs": []]) { service, _ in
+    try withHostService(config: ["claudeConfigDirs": [], "codexHomes": []]) { service, _ in
       let reason = service.queue.sync {
         service.entries["s1"] = Service.Entry(session: remoteSession("s1"))
         return service.autoContinueBlocker("s1", canContinue(), live: 0, now: nowMs())

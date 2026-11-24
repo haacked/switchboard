@@ -344,10 +344,10 @@ private func blocks(_ decision: ManagerSkillGate.Decision) -> Bool {
     #expect(
       reason
         == "Switchboard blocked /go in this Manager conversation. /go is a work skill, and a Manager rereads "
-        + "everything it loads on every later turn. Start a session for it instead: in Switchboard's chat pane, "
-        + "send it again and pick Spawn a session with this, or run sb spawn --repo <owner/name> --branch <branch> "
-        + "--prompt \"/go …\". To run it here once, pick Run here anyway, or run sb send swb_ab12c --run-here "
-        + "\"/go …\" in a terminal. sb manager skills lists the labels.")
+        + "everything it loads on every later turn. Start a session for it instead: send it again from the "
+        + "conversation's Message Claude field in Switchboard (⇧⌘E) and pick Spawn a session with this, or run "
+        + "sb spawn --repo <owner/name> --branch <branch> --prompt \"/go …\". To run it here once, pick Run here "
+        + "anyway, or run sb send swb_ab12c --run-here \"/go …\" in a terminal. sb manager skills lists the labels.")
   }
 
   @Test func theToolReasonIsTheTextOfD17() {

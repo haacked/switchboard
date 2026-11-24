@@ -16,8 +16,8 @@ struct GroupAccountMenu: View {
   }
 
   var body: some View {
-    if model.accounts.count > 1 || group.account != nil {
-      let rows = AccountMenu.rows(accounts: model.accounts, usage: model.usage)
+    if model.sessionAccounts.count > 1 || group.account != nil {
+      let rows = AccountMenu.rows(accounts: model.sessionAccounts, usage: model.usage)
       Menu {
         ForEach(rows) { row in
           Button {
@@ -44,11 +44,11 @@ struct GroupAccountMenu: View {
       .help("The Claude account that this group's sessions run under")
       .accessibilityIdentifier("group-account-\(group.id)")
       .confirmationDialog(
-        confirming.map { "Run \(group.name)'s sessions under \(ClaudeAccount(folder: $0.folder).name)?" } ?? "",
+        confirming.map { "Run \(group.name)'s sessions under \(Account.name(ofFolder: $0.folder))?" } ?? "",
         isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
         presenting: confirming
       ) { choice in
-        Button("Use \(ClaudeAccount(folder: choice.folder).name)") { model.setGroupAccount(group.id, choice.folder) }
+        Button("Use \(Account.name(ofFolder: choice.folder))") { model.setGroupAccount(group.id, choice.folder) }
         Button("Cancel", role: .cancel) {}
       } message: { choice in
         Text(Self.moveMessage(choice.moves))
@@ -71,7 +71,7 @@ struct GroupAccountMenu: View {
   /// because sbd moves no session to it.
   static func label(_ folder: String?, accounts: [AccountInfo], usage: [AccountUsage]) -> String {
     guard let folder else { return "Account: for new sessions" }
-    let name = ClaudeAccount(folder: folder).name
+    let name = Account.name(ofFolder: folder)
     if !accounts.contains(where: { $0.folder == folder }) { return "Account: \(name) (missing)" }
     if usage.first(where: { $0.folder == folder })?.signedOut == true { return "Account: \(name) (not signed in)" }
     return "Account: \(name)"

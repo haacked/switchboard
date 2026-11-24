@@ -990,27 +990,17 @@ private let longOverdueWait = Wait(
       TranscriptAnchor.of(item: built, facts: f) == .toolCall(tool: "Bash", input: f.openPermission?.input ?? [:]))
   }
 
-  @Test func theOperatorsWaitItemAndAWorkItemOfTheSameLongReasonShareARef() throws {
-    let f = facts(opIdle)
-    let v = Attention.evaluate(operatorSession(waits: [longOverdueWait]), f, now: 1000)
-    try #require(v.byWaitRule, "\(v.state) \(v.reason)")
-    try #require(v.reason.count > Triage.titleLength)
-
-    let op = try #require(Triage.item(f, v, kind: .operator))
-    let work = try #require(Triage.item(f, v, kind: .work))
-
-    #expect(op.title == Triage.capitalized(v.reason))
-    #expect(op.ref == Triage.ruleRef(Triage.ruleTitle(v.reason)))
-    #expect(op.ref == work.ref)
-  }
-
-  @Test func theOperatorsWaitItemHasTheWholeLongReason() throws {
-    let f = facts(opIdle)
-    let v = Attention.evaluate(operatorSession(waits: [longOverdueWait]), f, now: 1000)
+  /// An overdue wait that sbd could not route stays on the operator. Its item is a held item, not a rule item, so its
+  /// ref names the wait instead of the reason.
+  @Test func theOperatorsHeldWaitItemNamesItsWaitInItsRef() throws {
+    let s = operatorSession(waits: [longOverdueWait])
+    var f = facts(opIdle)
+    f.operatorItems = OperatorItems(heldWaits: [longOverdueWait])
+    let v = Attention.evaluate(s, f, now: 1000)
 
     let op = try #require(Triage.item(f, v, kind: .operator))
 
-    #expect(op.title == "The-flag-cache-rollout-followup to reach Done: still open after 1m")
+    #expect(op.ref == "held:w1")
   }
 }
 

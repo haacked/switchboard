@@ -4,8 +4,9 @@ import Testing
 @testable import SwitchboardCore
 
 /// The operator's reports and its Inbox policy (Risk 2): the operator has an
-/// item if and only if a blocking prompt, an open `needsYou` report, or the
-/// wait rule's Needs you exists. The suites nest under one name, so
+/// item if and only if a blocking prompt, a trust exit, a `notify` outcome, or
+/// an open report or overdue wait that sbd could not route to another session
+/// exists (Decision 43). The suites nest under one name, so
 /// `--filter TriageOperatorTests` runs them all.
 @Suite struct TriageOperatorTests {}
 
@@ -109,6 +110,18 @@ func opSummary(_ s: Session, _ f: SessionFacts) -> SessionSummary {
   out.chat = s.chat
   out.triage = Triage.itemAndDecisions(f, verdict, kind: s.kind).item
   return out
+}
+
+/// The operator's facts with the items that sbd routes back to it: `OperatorItems.assign` over its open reports and
+/// waits. Only the operator and `conversation` are live, so without a conversation every item stays on the operator.
+func opRouted(_ s: Session, _ f: SessionFacts, conversation: String? = nil) -> SessionFacts {
+  var f = f
+  let live: Set<String> = conversation.map { [s.id, $0] } ?? [s.id]
+  let items = OperatorItems.assign(
+    openReports: f.openReports, reportOwners: f.reportOwners, waits: s.waits ?? [], operatorID: s.id,
+    isLive: { live.contains($0) }, newestConversation: conversation)
+  f.operatorItems = items[s.id] ?? .init()
+  return f
 }
 
 // MARK: The policy
@@ -248,11 +261,13 @@ extension TriageOperatorTests {
 
     /// A report whose text repeats an acknowledged reason is a new item.
     @Test func aReportAfterAnAckIsNotHeldByThatAck() throws {
-      let f = facts(opIdle + [opReport(10, "Merge it?"), opAck(11, reason: "Merge it?"), opReport(12, "Merge it?")])
-      let verdict = Attention.shown(opVerdict(operatorSession(), f), f, now: opNow, acknowledgedMs: 3_600_000)
+      let s = operatorSession()
+      let f = opRouted(
+        s, facts(opIdle + [opReport(10, "Merge it?"), opAck(11, reason: "Merge it?"), opReport(12, "Merge it?")]))
+      let verdict = Attention.shown(opVerdict(s, f), f, now: opNow, acknowledgedMs: 3_600_000)
 
       #expect(verdict.state == .needsYou)
-      #expect(try #require(item(f, session: operatorSession())).source == .report)
+      #expect(try #require(item(f, session: s)).source == .report)
     }
 
     /// "Before" is the log's order, so events recorded in the same millisecond still close in order.
@@ -417,11 +432,12 @@ extension TriageOperatorTests {
       #expect(try #require(item(f, session: operatorSession())).source == .card)
     }
 
-    /// The wait rule's Needs you is the operator's item. The acknowledged reports must not hide it.
+    /// An overdue wait that sbd could not route is the operator's item. The acknowledged reports must not hide it.
     @Test func anOverdueWaitAfterTheAckStaysInTheInbox() throws {
-      let f = facts(opIdle + [opReport(10, "a"), opAck(11)])
-      let verdict = opVerdict(operatorSession(waits: [overdueWait]), f)
-      try #require(verdict.byWaitRule, "\(verdict.state) \(verdict.reason)")
+      let s = operatorSession(waits: [overdueWait])
+      let f = opRouted(s, facts(opIdle + [opReport(10, "a"), opAck(11)]))
+      let verdict = opVerdict(s, f)
+      try #require(verdict.fromOperator, "\(verdict.state) \(verdict.reason)")
 
       let shown = opShown(verdict, f)
 
@@ -429,16 +445,17 @@ extension TriageOperatorTests {
       #expect(!shown.acknowledged)
     }
 
-    /// An idle operator's verdict after the ack is the reply rule's Needs you, which gives the operator no item.
-    /// The service's undo accepts only an acknowledged verdict, so this one must read as acknowledged.
+    /// An idle operator's verdict after the ack is Waiting, which gives the operator no item. The service's undo
+    /// accepts only an acknowledged verdict, so this one must read as acknowledged.
     @Test func theIdleOperatorAfterAnAckThatClosedItsReportsIsAcknowledged() throws {
-      let before = facts(opIdle + [opReport(10, "Merge it?")])
+      let s = operatorSession()
+      let before = opRouted(s, facts(opIdle + [opReport(10, "Merge it?")]))
       let ack = Event(
         id: 11, session: "s1", t: 11, kind: "ack",
-        data: try JSON(encoding: Acknowledgment(opVerdict(operatorSession(), before), before)))
-      let f = facts(opIdle + [opReport(10, "Merge it?"), ack])
-      let verdict = opVerdict(operatorSession(), f)
-      try #require(item(f, session: operatorSession()) == nil)
+        data: try JSON(encoding: Acknowledgment(opVerdict(s, before), before)))
+      let f = opRouted(s, facts(opIdle + [opReport(10, "Merge it?"), ack]))
+      let verdict = opVerdict(s, f)
+      try #require(item(f, session: s) == nil)
 
       #expect(opShown(verdict, f).acknowledged, "\(verdict.state) \(verdict.reason)")
     }
@@ -449,8 +466,11 @@ extension TriageOperatorTests {
 
 extension TriageOperatorTests {
   @Suite struct ReportItem {
+    /// The facts with the open reports that sbd could not route to another session, so they stay on the operator.
+    func routed(_ events: [Event]) -> SessionFacts { opRouted(operatorSession(), facts(events)) }
+
     @Test func anOpenReportGivesAReportItem() throws {
-      let f = facts(opIdle + [opReport(10, "PR #12 is green. Merge it?")])
+      let f = routed(opIdle + [opReport(10, "PR #12 is green. Merge it?")])
 
       let report = try #require(item(f, session: operatorSession()))
 
@@ -458,7 +478,7 @@ extension TriageOperatorTests {
     }
 
     @Test func theReportItemHasAReplyOption() throws {
-      let f = facts(opIdle + [opReport(10, "PR #12 is green. Merge it?")])
+      let f = routed(opIdle + [opReport(10, "PR #12 is green. Merge it?")])
 
       let report = try #require(item(f, session: operatorSession()))
 
@@ -468,7 +488,7 @@ extension TriageOperatorTests {
     @Test func theReportItemListsEveryOpenReportUpToTheSummaryLines() throws {
       let texts = ["PR alpha is green.", "PR bravo is green.", "PR charlie is green."]
       try #require(texts.count == TriageCard.summaryLines)
-      let f = facts(opIdle + texts.enumerated().map { opReport(Int64(10 + $0.offset), $0.element) })
+      let f = routed(opIdle + texts.enumerated().map { opReport(Int64(10 + $0.offset), $0.element) })
 
       let report = try #require(item(f, session: operatorSession()))
 
@@ -479,7 +499,7 @@ extension TriageOperatorTests {
       let texts = [
         "PR alpha is green.", "PR bravo is green.", "PR charlie is green.", "PR delta is green.", "PR echo.",
       ]
-      let f = facts(opIdle + texts.enumerated().map { opReport(Int64(10 + $0.offset), $0.element) })
+      let f = routed(opIdle + texts.enumerated().map { opReport(Int64(10 + $0.offset), $0.element) })
 
       let report = try #require(item(f, session: operatorSession()))
 
@@ -489,7 +509,7 @@ extension TriageOperatorTests {
     }
 
     @Test func theReportItemLeavesOutAClosedReport() throws {
-      let f = facts(opIdle + [opReport(10, "PR alpha is green."), opAck(11), opReport(12, "PR bravo is green.")])
+      let f = routed(opIdle + [opReport(10, "PR alpha is green."), opAck(11), opReport(12, "PR bravo is green.")])
 
       let report = try #require(item(f, session: operatorSession()))
 
@@ -499,8 +519,8 @@ extension TriageOperatorTests {
 
     /// `choose` refuses a ref that is no longer the session's, so a new report must change the ref.
     @Test func aNewReportChangesTheItemsRef() throws {
-      let one = facts(opIdle + [opReport(10, "a")])
-      let two = facts(opIdle + [opReport(10, "a"), opReport(11, "b")])
+      let one = routed(opIdle + [opReport(10, "a")])
+      let two = routed(opIdle + [opReport(10, "a"), opReport(11, "b")])
 
       let first = try #require(item(one, session: operatorSession()))
       let second = try #require(item(two, session: operatorSession()))
@@ -510,7 +530,7 @@ extension TriageOperatorTests {
     }
 
     @Test func theOperatorsItemHasNoDecisionList() {
-      let f = facts(opIdle + [opReport(10, "a")])
+      let f = routed(opIdle + [opReport(10, "a")])
 
       let built = Triage.itemAndDecisions(f, opVerdict(operatorSession(), f), kind: .operator)
 
@@ -522,121 +542,138 @@ extension TriageOperatorTests {
 
 // MARK: The shapes of Risk 2, against both itemAndDecisions and inInbox
 
-/// What the operator holds, and the source of the item that it must get, or nil for none.
+/// What the operator holds, and the source of the item that it must get, or nil for none. sbd routes the operator's
+/// open reports and waits to a Manager conversation while one exists, and back to the operator while none does.
 struct OperatorShape: CustomTestStringConvertible, Sendable {
   var name: String
   var events: @Sendable () throws -> [Event]
   var waits: [Wait] = []
+  /// The item's source while no conversation exists, so every report and wait stays on the operator.
   var item: TriageSource?
+  /// The item's source while a conversation exists, so the reports and waits go to it.
+  var routed: TriageSource?
   var testDescription: String { name }
+
+  func source(conversation: Bool) -> TriageSource? { conversation ? routed : item }
 }
 
 let operatorShapes: [OperatorShape] = [
   OperatorShape(
     name: "a reply that reads as a question, with no report",
-    events: { [opPrompt(1, "go"), stop(2, 2, proseQuestion)] }, item: nil),
+    events: { [opPrompt(1, "go"), stop(2, 2, proseQuestion)] }, item: nil, routed: nil),
   OperatorShape(
     name: "a reply that offers a next step, with no report",
-    events: { [opPrompt(1, "go"), stop(2, 2, "I removed the worktree. Want me to top up the queue?")] }, item: nil),
-  OperatorShape(name: "an informational reply, with no report", events: { opIdle }, item: nil),
+    events: { [opPrompt(1, "go"), stop(2, 2, "I removed the worktree. Want me to top up the queue?")] }, item: nil,
+    routed: nil),
+  OperatorShape(name: "an informational reply, with no report", events: { opIdle }, item: nil, routed: nil),
   OperatorShape(
     name: "an sb summary set card, with no report", events: { opIdle + [try summaryEvent(9, 9, sessionCard)] },
-    item: nil),
-  OperatorShape(name: "a new operator that never had a prompt", events: { [] }, item: nil),
-  OperatorShape(name: "an exit at the trust dialog", events: { trustLaunch() + [trustClosed(5)] }, item: nil),
-  OperatorShape(name: "an open wait that is not overdue", events: { opIdle }, waits: [openWait], item: nil),
+    item: nil, routed: nil),
+  OperatorShape(name: "a new operator that never had a prompt", events: { [] }, item: nil, routed: nil),
+  OperatorShape(
+    name: "an exit at the trust dialog", events: { trustLaunch() + [trustClosed(5)] }, item: .rule, routed: .rule),
+  OperatorShape(
+    name: "an open wait that is not overdue", events: { opIdle }, waits: [openWait], item: nil, routed: nil),
   OperatorShape(
     name: "a report without needsYou", events: { opIdle + [opReport(10, "Removed it.", needsYou: false)] },
-    item: nil),
-  OperatorShape(name: "one open report", events: { opIdle + [opReport(10, "Merge it?")] }, item: .report),
+    item: nil, routed: nil),
+  OperatorShape(name: "one open report", events: { opIdle + [opReport(10, "Merge it?")] }, item: .report, routed: nil),
   OperatorShape(
     name: "three open reports", events: { opIdle + [opReport(10, "a"), opReport(11, "b"), opReport(12, "c")] },
-    item: .report),
+    item: .report, routed: nil),
   OperatorShape(
     name: "four open reports",
     events: { opIdle + [opReport(10, "a"), opReport(11, "b"), opReport(12, "c"), opReport(13, "d")] },
-    item: .report),
+    item: .report, routed: nil),
   OperatorShape(
     name: "a report, then a blocking permission card",
-    events: { [opReport(0, "Merge it?", t: 0)] + permissionTurn() }, item: .card),
+    events: { [opReport(0, "Merge it?", t: 0)] + permissionTurn() }, item: .card, routed: .card),
   OperatorShape(
     name: "a blocking permission card, then a report",
-    events: { permissionTurn() + [opReport(10, "Merge it?")] }, item: .card),
+    events: { permissionTurn() + [opReport(10, "Merge it?")] }, item: .card, routed: .card),
   OperatorShape(
     name: "a blocking question card and a report", events: { questionTurn() + [opReport(10, "Merge it?")] },
-    item: .card),
+    item: .card, routed: .card),
   OperatorShape(
     name: "a report and a send card that does not block",
-    events: { opIdle + [sendPending(), opReport(10, "Merge it?")] }, item: .report),
+    events: { opIdle + [sendPending(), opReport(10, "Merge it?")] }, item: .report, routed: nil),
   OperatorShape(
     name: "a report closed by the user's message",
-    events: { opIdle + [opReport(10, "Merge it?"), opUserSent(11, "yes")] + opTurn(12, "yes") }, item: nil),
+    events: { opIdle + [opReport(10, "Merge it?"), opUserSent(11, "yes")] + opTurn(12, "yes") }, item: nil,
+    routed: nil),
   OperatorShape(
     name: "a report closed by ack",
-    events: { opIdle + [opReport(10, "Merge it?"), opAck(11)] }, item: nil),
+    events: { opIdle + [opReport(10, "Merge it?"), opAck(11)] }, item: nil, routed: nil),
   OperatorShape(
     name: "a report closed by ack, then a later report",
-    events: { opIdle + [opReport(10, "Merge it?"), opAck(11), opReport(12, "Remove kid?")] }, item: .report),
+    events: { opIdle + [opReport(10, "Merge it?"), opAck(11), opReport(12, "Remove kid?")] }, item: .report,
+    routed: nil),
   OperatorShape(
     name: "a report, then a wait message that sbd sent",
     events: {
       let text = "Switchboard: kid to reach Done: it did."
       return opIdle + [opReport(10, "Merge it?"), opSbdSent(11, text)] + opTurn(12, text)
-    }, item: .report),
+    }, item: .report, routed: nil),
   OperatorShape(
     name: "a report, then a message from a conversation",
     events: {
       let text = "Keep 10 sessions on the queue."
       return opIdle + [opReport(10, "Merge it?"), opClaudeSent(11, text, from: "c1")] + opTurn(12, text)
-    }, item: .report),
+    }, item: .report, routed: nil),
   OperatorShape(
     name: "a report, then a message that a Claude Code outside a session wrote",
     events: {
       let text = "Keep 10 sessions on the queue."
       return opIdle + [opReport(10, "Merge it?"), opClaudeSent(11, text)] + opTurn(12, text)
-    }, item: .report),
+    }, item: .report, routed: nil),
   OperatorShape(
     name: "a report, then a message with neither by nor from",
     events: { opIdle + [opReport(10, "Merge it?"), opUnattributedSent(11, "yes")] + opTurn(12, "yes") },
-    item: .report),
-  OperatorShape(name: "an overdue wait", events: { opIdle }, waits: [overdueWait], item: .rule),
-  OperatorShape(name: "a notify outcome", events: { opIdle + [try opNotified(5)] }, item: .rule),
+    item: .report, routed: nil),
+  OperatorShape(name: "an overdue wait", events: { opIdle }, waits: [overdueWait], item: .report, routed: nil),
+  OperatorShape(name: "a notify outcome", events: { opIdle + [try opNotified(5)] }, item: .rule, routed: .rule),
   OperatorShape(
     name: "a report and an overdue wait", events: { opIdle + [opReport(10, "Merge it?")] }, waits: [overdueWait],
-    item: .report),
+    item: .report, routed: nil),
   OperatorShape(
     name: "a notify outcome, then a report", events: { opIdle + [try opNotified(5), opReport(10, "Merge it?")] },
-    item: .report),
+    item: .report, routed: .rule),
   OperatorShape(
     name: "a report and an open wait that is not overdue", events: { opIdle + [opReport(10, "Merge it?")] },
-    waits: [openWait], item: .report),
+    waits: [openWait], item: .report, routed: nil),
 ]
 
 extension TriageOperatorTests {
   @Suite struct Shapes {
-    @Test(arguments: operatorShapes) func theOperatorsItemComesFromTheShape(_ shape: OperatorShape) throws {
+    @Test(arguments: operatorShapes, [false, true])
+    func theOperatorsItemComesFromTheShape(_ shape: OperatorShape, _ conversation: Bool) throws {
       let s = operatorSession(waits: shape.waits)
-      let f = facts(try shape.events())
+      let f = opRouted(s, facts(try shape.events()), conversation: conversation ? "c1" : nil)
 
       let built = item(f, session: s)
 
-      #expect(built?.source == shape.item, "\(built.map { "\($0.source): \($0.title)" } ?? "no item")")
+      #expect(
+        built?.source == shape.source(conversation: conversation),
+        "\(built.map { "\($0.source): \($0.title)" } ?? "no item")")
     }
 
     /// sbd's `summary(_:)` builds the item, and the app's `inInbox` must give the same answer.
-    @Test(arguments: operatorShapes) func inInboxAgreesWithTheItemThatSbdBuilds(_ shape: OperatorShape) throws {
-      let s = opSummary(operatorSession(waits: shape.waits), facts(try shape.events()))
+    @Test(arguments: operatorShapes, [false, true])
+    func inInboxAgreesWithTheItemThatSbdBuilds(_ shape: OperatorShape, _ conversation: Bool) throws {
+      let session = operatorSession(waits: shape.waits)
+      let s = opSummary(session, opRouted(session, facts(try shape.events()), conversation: conversation ? "c1" : nil))
+      let expected = shape.source(conversation: conversation) != nil
 
-      #expect(Triage.inInbox(s) == (shape.item != nil))
-      #expect(Triage.needsYou(s) == (shape.item != nil))
-      #expect(Triage.order([s]).map(\.id) == (shape.item != nil ? ["s1"] : []))
+      #expect(Triage.inInbox(s) == expected)
+      #expect(Triage.needsYou(s) == expected)
+      #expect(Triage.order([s]).map(\.id) == (expected ? ["s1"] : []))
     }
 
-    @Test func aQuestionLikeReplyLeavesTheOperatorInNeedsYouWithNoItem() {
+    @Test func aQuestionLikeReplyLeavesTheOperatorWaitingWithNoItem() {
       let f = facts([opPrompt(1, "go"), stop(2, 2, proseQuestion)])
       let s = opSummary(operatorSession(), f)
 
-      #expect(s.state == .needsYou)
+      #expect(s.state == .waiting)
       #expect(s.triage == nil)
       #expect(!Triage.inInbox(s))
     }
@@ -650,12 +687,16 @@ extension TriageOperatorTests {
       #expect(!Triage.inInbox(s))
     }
 
-    /// Without a report, the operator matches a conversation on every shape that it shares with one.
+    /// Without a report, the operator matches a conversation on every shape that it shares with one, except an exit
+    /// at the trust dialog. That exit gives the operator a `.rule` item (Decision 43) and a conversation none.
     @Test(arguments: inboxShapes) func withoutAReportTheOperatorMatchesAConversation(_ shape: InboxShape) throws {
-      let s = opSummary(kindSession(.operator, done: shape.done), facts(try shape.events()))
+      let f = facts(try shape.events())
+      let trustExit = f.exitedAtTrust && !shape.done
 
-      #expect((s.triage != nil) == shape.conversation)
-      #expect(Triage.inInbox(s) == shape.conversation)
+      let s = opSummary(kindSession(.operator, done: shape.done), f)
+
+      #expect((s.triage != nil) == (shape.conversation || trustExit))
+      #expect(Triage.inInbox(s) == (shape.conversation || trustExit))
     }
   }
 }
@@ -713,12 +754,12 @@ extension TriageOperatorTests {
       #expect(Triage.needsYou(s) == shape.included)
     }
 
-    /// A report item belongs to the operator alone. A conversation keeps only its blocking prompts.
+    /// A report item comes from background follow-through, which routes it to a conversation too (#410).
     @Test(arguments: [SessionKind.manager, .chat], [[], [Card.Kind.send]] as [[Card.Kind]])
-    func aConversationWithAReportItemIsNotInTheInbox(_ kind: SessionKind, _ cards: [Card.Kind]) {
-      let s = summary(kind, ForgedShape(cards: cards, openPrompt: false, item: .report, included: false))
+    func aConversationWithAReportItemIsInTheInbox(_ kind: SessionKind, _ cards: [Card.Kind]) {
+      let s = summary(kind, ForgedShape(cards: cards, openPrompt: false, item: .report, included: true))
 
-      #expect(!Triage.inInbox(s))
+      #expect(Triage.inInbox(s))
     }
   }
 }
@@ -786,7 +827,8 @@ extension TriageOperatorTests {
       #expect(shownWith.acknowledged == shownWithout.acknowledged, "\(shownWith.state) \(shownWith.reason)")
     }
 
-    /// A conversation's and a chat's item is only its blocking prompt's item.
+    /// Report events route nothing on their own, so a conversation's and a chat's item is still only its blocking
+    /// prompt's item.
     @Test(arguments: [SessionKind.manager, .chat], reportParityShapes)
     func aConversationsItemIsStillOnlyItsPromptItem(_ kind: SessionKind, _ shape: ReportParityShape) throws {
       let s = kindSession(kind, waits: shape.waits)

@@ -140,43 +140,12 @@ import Testing
 
   // MARK: What the parent hears
 
-  /// kid's line is queued while the parent's turn runs. The unlink must drop it, so the parent's one message after
-  /// the turn names only `a`.
-  @Test func aBusyParentDoesNotHearAnUnlinkedChild() throws {
-    let sbd = try Instance()
-    // The parent's turn lasts until the test writes the report file. Both children change during the turn.
-    let parent = try sbd.new(prompt: "slow held", name: "p")
-    try sbd.waitFor(parent.id, "its turn") { $0.state == .working }
-    let a = try family.child(sbd, of: parent.id, name: "a")
-    let kid = try family.child(sbd, of: parent.id, name: "kid")
-    for child in [a, kid] {
-      try sbd.waitFor(child.id, "\(child.name)'s first reply", timeout: 30) {
-        $0.lastReply == "Done: hello" && $0.state == .needsYou
-      }
-    }
-    // sbd ticks every 0.2 s. The wait lets a tick queue kid's line before the unlink.
-    sleep(2)
-    try #require(try sbd.get(parent.id).state == .working, "the parent's turn ended before the children's replies")
-    try #require(try sbd.messagesFromSbd(parent.id).isEmpty)
-
-    try sbd.sb("parent", kid.id, "--clear")
-    sbd.hold("report")
-
-    let told = try sbd.waitFor(parent.id, "the message", timeout: 30) {
-      $0.lastReply?.hasPrefix("Done: Switchboard:") == true
-    }
-    #expect(told.lastReply?.contains("(\(a.id)) needs you") == true, "\(told.lastReply ?? "")")
-    #expect(told.lastReply?.contains(kid.id) == false, "\(told.lastReply ?? "")")
-    // A later tick must not send kid's line either.
-    sleep(1)
-    let check7 = try sbd.messagesFromSbd(parent.id).allSatisfy { !$0.contains(kid.id) }
-    #expect(check7)
-  }
-
-  @Test func anUnlinkedChildLeavesTheManagersDigest() throws {
+  @Test(arguments: DigestTests.Parent.allCases) func anUnlinkedChildLeavesTheParentsDigest(
+    _ kind: DigestTests.Parent
+  ) throws {
     let sbd = try Instance()
     let digest = DigestTests()
-    let m = try digest.parent(sbd, .manager)
+    let m = try digest.parent(sbd, kind)
     let kid = try digest.child(sbd, of: m, name: "kid", prompt: "one")
     let kept = try digest.child(sbd, of: m, name: "kept", prompt: "one")
     for child in [kid, kept] {

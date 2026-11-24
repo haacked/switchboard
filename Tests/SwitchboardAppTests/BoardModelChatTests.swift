@@ -53,6 +53,35 @@ import Testing
     #expect(sent.args == ["session": "c"])
   }
 
+  @Test func loadChatLogStoresSbdsAnswer() async throws {
+    let model = offlineModel()
+    let log = [ChatMessage(role: .user, text: "How is it going?", t: 100)]
+    let answer = try JSONCoding.convert(log, to: JSON.self)
+    model.send = { op, _ in op == "chat-log" ? answer : .null }
+
+    model.loadChatLog("m")
+    await settle { model.chatLogs["m"] != nil }
+
+    #expect(model.chatLogs["m"] == log)
+  }
+
+  @Test func aFailedChatLogReadKeepsTheStoredLog() async {
+    let model = offlineModel()
+    let log = [ChatMessage(role: .user, text: "How is it going?", t: 100)]
+    model.chatLogs["m"] = log
+    let read = Counter()
+    model.send = { _, _ in
+      read.increment()
+      throw Boom()
+    }
+
+    model.loadChatLog("m")
+    await settle { read.value > 0 }
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    #expect(model.chatLogs["m"] == log)
+  }
+
   @Test func loadBlockSourcesAsksForClaudesMessagesOnly() async {
     let sent = await firstRequest { $0.loadBlockSources("w") { _ in } }
 

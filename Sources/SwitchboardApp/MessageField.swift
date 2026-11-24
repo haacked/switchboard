@@ -6,7 +6,7 @@ import SwitchboardCore
 struct MessageField: View {
   @EnvironmentObject var model: BoardModel
   let session: String
-  /// From `BoardModel.messageDraft(for:)`, so that the text survives a switch to another view.
+  /// From `BoardModel.messageDraft(for:)` or `inboxDraft(for:)`, so that the text survives a switch to another view.
   @ObservedObject var draft: Draft
   var shortcut: KeyboardShortcut?
   /// The ref of the Inbox item that the field answers, so sbd can hold the session while it works on the
@@ -19,8 +19,8 @@ struct MessageField: View {
   var onEmptyEscape: (() -> Void)?
   /// Runs after sbd accepts a message from this field.
   var onSent: (() -> Void)?
-  /// Takes Send's draft in place of the plain submit, so a Manager's pane can check it first.
-  var intercept: ((Draft) -> Void)?
+  /// Takes Send's draft and `onSent` in place of the plain submit, so the session view can check a Manager's or the operator's draft for a work skill first.
+  var intercept: ((Draft, (() -> Void)?) -> Void)?
   @FocusState private var focused: Bool
   /// The paste monitor reads this view's focus here. The draft can't hold it, because several views share one draft.
   @State private var focus = Focus()
@@ -68,7 +68,8 @@ struct MessageField: View {
 
   private var field: some View {
     let slash = slash
-    return TextField("Message Claude…", text: $draft.text, axis: .vertical)
+    let prompt = Draft.answersOperator(ref: ref) ? "Answer background follow-through…" : "Message Claude…"
+    return TextField(prompt, text: $draft.text, axis: .vertical)
       .textFieldStyle(.roundedBorder)
       .focused($focused)
       .onChange(of: focused) { focus.held = focused }
@@ -205,7 +206,7 @@ struct MessageField: View {
 
   private func send() {
     if let intercept {
-      intercept(draft)
+      intercept(draft, onSent)
     } else {
       draft.submit(session, ref: ref, to: model, then: onSent)
     }

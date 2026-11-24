@@ -95,6 +95,11 @@ public struct Session: Codable, Equatable, Sendable {
   public var pinned: Bool?
   /// True while the user or a session highlighted it. sbd clears it when the session reaches Done.
   public var highlighted: Bool?
+  /// The links that the user or Claude added by hand, oldest first, or nil when there are none.
+  public var addedLinks: [ExternalLink]?
+  /// The URLs of the found links that the user hid, or nil when there are none. A found link stays hidden while
+  /// its page matches one of them, so replay doesn't bring it back.
+  public var hiddenLinks: [String]?
   /// True when every launch starts claude in auto mode, so a resumed session
   /// keeps it. Otherwise sbd passes no permission mode, and Claude's settings
   /// choose one. Nil in a session that an older sbd stored.
@@ -163,10 +168,11 @@ public enum SessionKind: String, Codable, Sendable {
     self = isOperator == true ? .operator : manager == true ? .manager : chat != nil ? .chat : .work
   }
 
-  /// Whether the app shows a session of this kind as a chat. `chat-log`
-  /// reads only these kinds, because a work session's transcript can hold
-  /// what its user never meant to show in the chat pane.
-  public var showsAsChat: Bool {
+  /// Whether sbd counts the session's unread replies, starts it with its shell
+  /// closed, and lets `chat-log` read its transcript. `chat-log` reads only
+  /// these kinds, because a work session's transcript can hold what its user
+  /// never meant to share.
+  public var isConversation: Bool {
     switch self {
     case .work: false
     case .manager, .chat, .operator: true
@@ -207,10 +213,11 @@ public enum InboxItems: Sendable {
   /// Only a prompt that stops the conversation until the user answers it.
   /// The conversation's replies and group messages repeat or name the
   /// sessions it manages, and those sessions have their own items. A reply
-  /// waits on the user's next message, which the chat pane takes.
+  /// waits on the user's next message in the conversation's own view.
   case blockingPrompts
-  /// A blocking prompt, then the open `needsYou` reports, then the wait rule's Needs you. The operator's
-  /// replies and `sb summary set` cards never reach the Inbox, because nobody reads its chat.
+  /// A blocking prompt, then an exit at the trust dialog, then an open permission or question dialog, then the
+  /// asks that no other session owns, then a `notify` outcome, then the overdue waits that no other session owns.
+  /// The operator's replies and `sb summary set` cards never reach the Inbox, because nobody sees its chat.
   case operatorItems
 }
 
@@ -338,12 +345,18 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   public var plans: [PlanSummary]?
   /// The artifacts that the session published, in first-publish order, or nil when there are none.
   public var artifacts: [SessionArtifact]?
+  /// The session's links, oldest first, or nil when there are none: the links of known kinds that sbd found in the
+  /// session's prompts and sent Slack messages, less the hidden ones, and the links that the user or Claude added.
+  public var links: [ExternalLink]?
   /// When sbd last started a fresh conversation for the operator, or nil before the first one and for other kinds.
   public var conversationStarted: Int64?
   /// The review that a docket row tracks, or nil for any other session.
   public var docket: DocketSummary?
   /// gh's error from the last failed merge of the PR's head commit.
   public var mergeError: String?
+  /// The name of the session that owns the PR this session works on. sbd shows no PR on this session while that
+  /// session owns it.
+  public var prOwnedBy: String?
   /// True when the user acknowledged the session's Inbox item, which moves
   /// it to Waiting until its reason changes or a new turn starts.
   /// For the operator it is also true while an undo would reopen the reports that the acknowledgment closed.
@@ -389,6 +402,13 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// The session's place in sbd's removal job, or nil when no removal is
   /// queued, running, or failed.
   public var removal: Removal?
+  /// The input context of a Manager conversation's latest turn, or nil for every other session and while no turn
+  /// has reported one since the last `/clear` or compaction.
+  public var contextTokens: Int?
+  /// The suggestion in a Manager conversation's header to end it, or nil when there is none.
+  public var endHint: EndHint?
+  /// The operator's waits that a Manager conversation handed off, or nil when there are none.
+  public var handedWaits: [Wait]?
 
   public init(
     id: String, name: String, cwd: String, repo: String?, branch: String?, claudeSessionId: String,

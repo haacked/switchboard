@@ -12,7 +12,8 @@ struct PlanProposalList: View {
       VStack(alignment: .leading, spacing: 8) {
         ForEach(proposals) { PlanProposalCard(proposal: $0) }
       }
-      .padding(8)
+      .padding(.horizontal, Design.listInset / 2)
+      .padding(.vertical, 8)
     }
     .frame(maxHeight: 320)
     .fixedSize(horizontal: false, vertical: true)
@@ -54,7 +55,8 @@ struct PlanProposalCard: View {
         }
       }
     }
-    .padding(10)
+    .padding(.horizontal, Design.listInset / 2)
+    .padding(.vertical, 10)
     .background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.08)))
     .disabled(model.answeringProposals.contains(proposal.id))
     .accessibilityElement(children: .contain)

@@ -35,9 +35,9 @@ extension Service {
     "queued: \(liveCount(onHost: host)) of \(liveCap(onHost: host)) live\(host.map { " on \($0)" } ?? "")"
   }
 
-  /// The session, when its folder exists, its claude is stopped, it isn't paused, no `rm` is removing it, and
-  /// the removal job doesn't hold it. Every start of claude calls it, so a start that misses the pause check of
-  /// its own still refuses.
+  /// The session, when its folder exists, its claude is stopped, it isn't paused, no `rm` is removing it,
+  /// the removal job doesn't hold it, and the account that its pane would set is no Codex folder. Every start
+  /// of claude calls it, so a start that misses the pause check of its own still refuses.
   func requireStartable(_ id: String) throws -> Session {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     if let refusal = beingDeletedRefusal(id) { throw refusal }
@@ -47,6 +47,7 @@ extension Service {
     try requireRead(id)
     try requireFolder(session)
     guard claudeState(id) == .stopped else { throw APIError("\(id) is already running") }
+    if let refusal = codexLaunchRefusal(id) { throw APIError("\(mention(id)) can't start: \(refusal)") }
     return session
   }
 
@@ -141,7 +142,7 @@ extension Service {
   func livePriorityEntry(_ e: Entry) -> String? {
     let priority = livePriority
     guard !priority.entries.isEmpty, e.session.kind == .work else { return nil }
-    return priority.entry(of: checkout(e.session).flatMap { repository($0, of: e.session) })
+    return priority.entry(of: repository(of: e.session))
   }
 
   /// The sessions of the site that sbd may stop to free a slot, in the order to stop them. A session whose

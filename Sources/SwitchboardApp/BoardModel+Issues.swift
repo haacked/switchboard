@@ -254,28 +254,39 @@ extension BoardModel {
       failed: { done("\($0)") })
   }
 
-  func removeIssueSource(_ source: IssueSource) {
+  /// Removes the source. `done` gets sbd's refusal, or nil, so Settings ▸ Issues can show it.
+  func removeIssueSource(_ source: IssueSource, done: @escaping (String?) -> Void) {
     var args: [String: JSON] = ["source": .string(source.name)]
     if let label = source.label { args["label"] = .string(label) }
     if let person = source.person { args["person"] = .string(person) }
-    perform("issues-source-rm", args)
+    perform("issues-source-rm", args, then: { _ in done(nil) }, failed: { done("\($0)") })
   }
 
-  /// Saves the team's labels and logins and the default preset.
-  func saveIssueSettings(labels: [String], people: [String], backlog: [String], defaultPreset: String?) {
+  /// Saves the team's labels and logins and the default preset. `done` gets sbd's refusal, or nil, so Settings ▸
+  /// Issues can show it.
+  func saveIssueSettings(
+    labels: [String], people: [String], backlog: [String], defaultPreset: String?,
+    done: @escaping (String?) -> Void
+  ) {
     var args: [String: JSON] = [
       "labels": .array(labels.map(JSON.string)), "people": .array(people.map(JSON.string)),
       "backlog": .array(backlog.map(JSON.string)),
     ]
     if let defaultPreset { args["defaultPreset"] = .string(defaultPreset) }
-    perform("issues-settings", args) { self.apply(issueReply: $0) }
+    perform(
+      "issues-settings", args,
+      then: { reply in
+        self.apply(issueReply: reply)
+        done(nil)
+      },
+      failed: { done("\($0)") })
   }
 
   /// The known repositories with a GitHub `owner/name` that are not sources yet, in `knownRepos` order. The Issues
   /// view offers them as sources. Two checkouts of one repository give one entry.
   var offeredIssueRepos: [String] { newIssueSources(knownGitHubRepos) }
 
-  /// The orgs and repositories of the sessions and the known repositories, which the setup sheet suggests as
+  /// The orgs and repositories of the sessions and the known repositories, which Settings ▸ Issues suggests as
   /// sources.
   var suggestedIssueSources: [String] {
     let repos = allSessions.compactMap(\.repository) + knownGitHubRepos

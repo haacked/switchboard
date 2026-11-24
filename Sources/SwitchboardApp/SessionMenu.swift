@@ -6,6 +6,7 @@ enum SessionMenuAction: Hashable {
   case highlight
   case snooze
   case copyLink
+  case notes
   case pause
   case resume
   case startNow
@@ -23,7 +24,8 @@ enum SessionMenu {
   /// last. `selectionCount` is the removable count of the sidebar's multi-selection when the row belongs to it, and
   /// nil otherwise. A row in a multi-selection offers to delete the selection instead of the row alone. A session
   /// whose delete failed offers no Delete, because its Inbox item has Retry and Keep. A docket row offers Delete
-  /// only in Done, because the confirmation describes a session that runs claude in a worktree.
+  /// only in Done, because the confirmation describes a session that runs claude in a worktree. A Manager
+  /// conversation offers Delete through `manager-end`. A group chat and the Operator offer none.
   /// `movesAccount` is true when the session can move to another account. `parentName` names the parent that the
   /// session can be unlinked from, and is nil when it has none.
   static func actions(
@@ -33,6 +35,7 @@ enum SessionMenu {
     if HighlightMenuItem.title(for: s) != nil { safe.append(.highlight) }
     if s.canSnooze { safe.append(.snooze) }
     safe.append(.copyLink)
+    safe.append(.notes)
     if s.pause != nil {
       safe.append(.resume)
     } else if s.canPause {
@@ -48,6 +51,8 @@ enum SessionMenu {
       destructive.append(.deleteSelection(count: selectionCount))
     } else if s.removal == nil && (s.isRemovableDone || (s.isRemovableWork && s.docket == nil)) {
       destructive.append(.delete("Delete \(BoardModel.deletePlan(s).summary)…"))
+    } else if s.removal == nil && s.kind == .manager {
+      destructive.append(.delete(ConversationRemovalText.deleteTitle))
     }
     return destructive.isEmpty ? safe : safe + [.divider] + destructive
   }
@@ -77,7 +82,7 @@ struct SessionMenuItems<Extra: View>: View {
       multiSelection: model.multiSelection)
     let actions = SessionMenu.actions(
       for: session, selectionCount: selectionCount,
-      movesAccount: SessionAccountMenu.shows(session, accountCount: model.accounts.count),
+      movesAccount: SessionAccountMenu.shows(session, accountCount: model.sessionAccounts.count),
       parentName: model.linkedParentName(of: session))
     let split = actions.firstIndex(of: .divider) ?? actions.endIndex
     ForEach(actions[..<split], id: \.self, content: item)
@@ -94,8 +99,10 @@ struct SessionMenuItems<Extra: View>: View {
       SnoozeMenuItems(session: session)
     case .copyLink:
       CopyLinkMenuItem(session: session)
+    case .notes:
+      Button("Notes…") { model.editingNotes = id }
     case .pause:
-      Button("Pause") { model.pause(id) }.help(PauseBanner.pauseHelp)
+      PauseMenuItems(id: id)
     case .resume:
       Button("Resume") { model.resume(id) }.help(PauseBanner.resumeHelp)
     case .startNow:

@@ -94,8 +94,10 @@ private final class Strays {
 @Suite(.blocking(timeLimit: .seconds(120))) struct RemovalWaitTests {
   /// A session in a worktree that sbd made on PR 122953's branch, after a commit of a.txt. GitHub reports the PR
   /// as merged at the branch tip, so both `sb cleanup` and `sb rm --worktree` accept it.
-  private func finishedSession(_ github: FakeGitHub) throws -> (Instance, String, SessionSummary) {
-    let sbd = try Instance.withGitHub(github)
+  private func finishedSession(_ github: FakeGitHub, config: [String: JSON] = [:]) throws
+    -> (Instance, String, SessionSummary)
+  {
+    let sbd = try Instance.withGitHub(github, config: config)
     let repo = try Repos.create("\(sbd.home.path)/posthog", origin: "https://github.com/PostHog/posthog.git")
     let s = try sbd.worktreeSession(repo, branch: mergedBranch)
     try sbd.commit(s.cwd, "a.txt")
@@ -131,7 +133,7 @@ private final class Strays {
     _ start: (Instance, SessionSummary, Terminals, Strays) throws -> Void
   ) throws {
     let github = try FakeGitHub()
-    let (sbd, repo, s) = try finishedSession(github)
+    let (sbd, repo, s) = try finishedSession(github, config: Instance.shortStopWait)
     let terminals = try sbd.client.terminals(s.id)
     let strays = Strays(sbd)
     defer { strays.killAll() }
@@ -190,14 +192,14 @@ private final class Strays {
 
   // MARK: claude that has not exited
 
-  /// The stub outlives the first 5 s wait and exits within the retry's wait. The refusal leaves the Claude pane
+  /// The stub outlives the first 4 s wait and exits within the retry's wait. The refusal leaves the Claude pane
   /// open, which is how the retry finds that claude.
   @Test func rmRefusesAClaudeThatHasNotExitedAfterTheWait() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.lingerStopWait)
     let repo = try sbd.repoWithOrigin()
     let s = try sbd.worktreeSession(repo)
-    try sbd.sb("send", s.id, "linger 7")
-    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 7 s when I stop." }
+    try sbd.sb("send", s.id, "linger 6")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "I'll linger 6 s when I stop." }
     let pid = try #require(try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }.claudePid)
     let terminals = try sbd.client.terminals(s.id)
 
@@ -455,7 +457,7 @@ private final class Strays {
 
   /// The folder scan refuses after the pane stop began, which is after the first check accepted the to-do's id.
   @Test func aRefusalAfterThePaneStopBeganLeavesTheToDoOpen() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.shortStopWait)
     let s = try sbd.worktreeSession(try sbd.repoWithOrigin())
     let todo = try sbd.addTodo(s.id, "tell Alex in #flags that the fix shipped")
     let strays = try holdFolder(sbd, s)

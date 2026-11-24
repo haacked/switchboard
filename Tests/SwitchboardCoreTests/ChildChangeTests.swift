@@ -9,32 +9,31 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
   return marks
 }
 
-@Suite struct ParentNoticeTests {
+@Suite struct ChildChangeTests {
   func lines(_ before: ChildMark, _ after: ChildMark, reason: String = "answer: which?", url: String? = nil)
     -> [String]
   {
-    ParentNotice.lines(name: "fix", id: "s1", before: before, after: after, reason: reason, prURL: url)
+    ParentDigest.line(name: "fix", id: "s1", heard: before, now: after, reason: reason, prURL: url).map { [$0] } ?? []
   }
 
   @Test func saysWhenAChildNeedsYou() {
     let result = lines(.fresh, ChildMark(state: .needsYou, pr: nil))
-    #expect(result == ["fix (s1) needs you in its own Inbox item (switchboard://session/s1): answer: which?"])
+    #expect(result == ["fix (s1): needs you in its own Inbox item (switchboard://session/s1): answer: which?"])
   }
 
   @Test func saysWhenAChildIsDone() {
-    #expect(lines(.fresh, ChildMark(state: .done, pr: nil)) == ["fix (s1) is done"])
+    #expect(lines(.fresh, ChildMark(state: .done, pr: nil)) == ["fix (s1): done"])
   }
 
   @Test func saysWhenAChildOpensAPR() {
     let result = lines(.fresh, ChildMark(state: .working, pr: 7), url: "https://github.com/o/r/pull/7")
-    #expect(result == ["fix (s1) opened PR #7: https://github.com/o/r/pull/7"])
+    #expect(result == ["fix (s1): opened PR #7: https://github.com/o/r/pull/7"])
   }
 
   @Test func listsAPRBeforeTheStateItCaused() {
     let result = lines(.fresh, ChildMark(state: .needsYou, pr: 7))
-    #expect(result.count == 2)
-    #expect(result[0].contains("opened PR #7"))
-    #expect(result[1].contains("needs you"))
+    #expect(result.count == 1)
+    #expect(result[0].contains("opened PR #7; needs you"))
   }
 
   @Test func saysNothingForOtherChanges() {
@@ -57,13 +56,10 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
     let drafted = ChildMark(state: .needsYou, pr: nil, needs: "draft ready to submit")
     #expect(
       lines(failed, drafted, reason: "draft ready to submit") == [
-        "fix (s1) needs you in its own Inbox item (switchboard://session/s1): draft ready to submit"
+        "fix (s1): needs you in its own Inbox item (switchboard://session/s1): draft ready to submit"
       ])
     #expect(lines(drafted, drafted).isEmpty)
     #expect(lines(drafted, ChildMark(state: .working, pr: nil)).isEmpty)
-    #expect(
-      ParentDigest.line(name: "fix", id: "s1", heard: failed, now: drafted, reason: "draft ready to submit", prURL: nil)
-        == "fix (s1): needs you in its own Inbox item (switchboard://session/s1): draft ready to submit")
   }
 
   func announced(_ prs: [Int?]) -> [String] {
@@ -72,49 +68,20 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
   }
 
   @Test func saysNothingWhenAHeardPRDropsOutAndReturns() {
-    #expect(announced([26, nil, 26]) == ["fix (s1) opened PR #26"])
+    #expect(announced([26, nil, 26]) == ["fix (s1): opened PR #26"])
   }
 
   @Test func saysWhenAPRThatReturnsHasANewNumber() {
-    #expect(announced([26, nil, 28]) == ["fix (s1) opened PR #26", "fix (s1) opened PR #28"])
+    #expect(announced([26, nil, 28]) == ["fix (s1): opened PR #26", "fix (s1): opened PR #28"])
   }
 
   @Test func saysNothingWhenAnEarlierHeardNumberReturns() {
-    #expect(announced([26, 28, nil, 26]) == ["fix (s1) opened PR #26", "fix (s1) opened PR #28"])
+    #expect(announced([26, 28, nil, 26]) == ["fix (s1): opened PR #26", "fix (s1): opened PR #28"])
   }
 
   @Test func keepsTheHeardNumbersWhenTheChildIsSeenAfresh() {
     let marks = heard([26])
     #expect(marks.last!.updated(to: .fresh).heardPRs == [26])
-  }
-
-  @Test func saysEachLineOnce() {
-    let message = ParentNotice.message(["a needs you", "b is done", "a needs you"])
-    #expect(message == "Switchboard: sessions you started changed: b is done; a needs you.")
-  }
-
-  @Test func endsWithTheChildsLatestLine() {
-    let message = ParentNotice.message(["a needs you: read", "a needs you: answer: Q", "a needs you: read"])
-    #expect(message == "Switchboard: sessions you started changed: a needs you: answer: Q; a needs you: read.")
-  }
-
-  @Test func countsOnlyTheDistinctLinesPastTheLimit() {
-    let many = (1...25).map { "s\($0) is done" }
-    #expect(ParentNotice.message(many + many).hasSuffix("and 5 more."))
-  }
-
-  @Test func joinsEveryChangeIntoOneLine() {
-    let message = ParentNotice.message(["a needs you", "b is done"])
-    #expect(message == "Switchboard: sessions you started changed: a needs you; b is done.")
-    #expect(!message.contains("\n"))
-  }
-
-  @Test func countsTheLinesPastTheLimit() {
-    let many = (1...25).map { "s\($0) is done" }
-    let message = ParentNotice.message(many)
-    #expect(message.contains("s20 is done"))
-    #expect(!message.contains("s21 is done"))
-    #expect(message.hasSuffix("and 5 more."))
   }
 }
 
@@ -193,12 +160,5 @@ private func heard(_ prs: [Int?]) -> [ChildMark] {
     let output = ParentDigest.hookOutput("t", event: "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["hookEventName"] == "UserPromptSubmit")
     #expect(output["hookSpecificOutput"]?["additionalContext"] == "t")
-  }
-
-  @Test func onlyAWorkSessionHearsChildNotices() {
-    #expect(SessionKind.work.hearsChildNotices)
-    #expect(!SessionKind.manager.hearsChildNotices)
-    #expect(!SessionKind.chat.hearsChildNotices)
-    #expect(!SessionKind.operator.hearsChildNotices)
   }
 }

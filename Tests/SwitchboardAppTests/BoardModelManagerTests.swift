@@ -120,17 +120,6 @@ import Testing
 
   // MARK: The operator
 
-  /// The operator, with the newest activity of any session. One that needs
-  /// you has an open prompt, which is what `ChatMark` reads.
-  func operatorItem(_ id: String = "op", state: AttentionState = .needsYou) -> SessionSummary {
-    var s = needsItem(id, manager: true, state: state)
-    s.openPrompt = state == .needsYou
-    s.kind = .operator
-    s.name = Manager.operatorName
-    s.lastActivity = 1_000
-    return s
-  }
-
   func conversation(_ id: String, state: AttentionState = .working, lastActivity: Int64 = 1) -> SessionSummary {
     var s = needsItem(id, manager: true, state: state)
     s.openPrompt = state == .needsYou

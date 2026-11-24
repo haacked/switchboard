@@ -5,16 +5,18 @@ import Testing
 extension Instance {
   /// A private sbd whose poller asks `github`, with Fixtures/gh-merge-stub as
   /// its gh. Polls run only when a test asks. `mergeRepos` sets
-  /// `operator.mergeRepos` in config.json, and nil leaves the key out.
-  static func withMergeStub(_ github: FakeGitHub, mergeRepos: [String]? = nil) throws -> Instance {
+  /// `operator.mergeRepos` in config.json, and nil leaves the key out. `accounts` are the Claude config folders that
+  /// `Instance` creates. `extra` replaces top-level keys of config.json.
+  static func withMergeStub(
+    _ github: FakeGitHub, mergeRepos: [String]? = nil, accounts: [String] = [], config extra: [String: JSON] = [:]
+  ) throws -> Instance {
     var config: [String: JSON] = [
       "github": [
         "gh": .string("\(FakeGitHub.fixtures)/gh-merge-stub"), "url": .string(github.url), "pollSeconds": 0,
-      ],
-      "tickSeconds": 1,
+      ]
     ]
     if let mergeRepos { config["operator"] = ["mergeRepos": .array(mergeRepos.map(JSON.string))] }
-    return try Instance(config: config)
+    return try Instance(accounts: accounts, config: config.merging(extra) { $1 })
   }
 
   /// The arguments of each gh call that the stub ran and that starts with
@@ -406,17 +408,17 @@ extension Instance {
     #expect(got["acknowledged"]?.bool == true)
   }
 
-  @Test func mergeByAPRNumberThatTwoSessionsShareIsRefused() throws {
+  @Test func mergeByAPRNumberGoesToTheSessionThatOwnsIt() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withMergeStub(github)
-    _ = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch, folder: "one")
+    _ = try readySession(sbd)
     _ = try sbd.session(in: MergeTests.charts, branch: MergeTests.branch, folder: "two")
     try sbd.poll()
 
-    let r = try sbd.run(["merge", "18303"])
+    try sbd.sb("merge", "18303")
 
-    #expect(r.status != 0)
-    #expect(sbd.ghMerges().isEmpty)
+    #expect(
+      sbd.ghMerges() == ["pr merge 18303 --repo PostHog/charts --merge --match-head-commit \(head(github))"])
   }
 
   /// The second PR has #18303's number in another repository.

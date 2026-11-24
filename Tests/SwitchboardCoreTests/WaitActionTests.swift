@@ -345,6 +345,7 @@ extension WaitActionTests {
       status.subjectSince = 4
       status.asked = MergeGuard.Approval(head: samplePRHead, replyDigest: MergeGuard.replyDigest("Done."))
       status.approval = MergeGuard.Approval(head: samplePRHead, replyDigest: MergeGuard.replyDigest("Done."))
+      status.judged = MergeGuard.Approval(head: samplePRHead, replyDigest: MergeGuard.replyDigest("Done."))
       status.messageKey = "a@b"
       let wait = WaitActionTests.storedWait(action: WaitAction(kind: .merge), status: status)
 
@@ -440,10 +441,21 @@ extension WaitActionTests {
       #expect(c.`operator`.holdLimitSeconds == 21600)
     }
 
-    @Test func configWithoutOperatorJudgesWithSonnet() throws {
+    @Test func configWithoutOperatorRunsTheDefaultModel() throws {
       let c = try JSONCoding.decode(Config.self, from: "{}")
 
-      #expect(c.`operator`.judgeModel == "sonnet")
+      #expect(c.`operator`.model == OperatorSettings.defaultModel)
+    }
+
+    @Test func theOperatorModelComesFromModelThenFromTheLegacyJudgeModelThenTheDefault() throws {
+      func model(_ operatorJSON: String) throws -> String {
+        try JSONCoding.decode(Config.self, from: #"{"operator": \#(operatorJSON)}"#).`operator`.model
+      }
+
+      #expect(try model(#"{"model": "haiku"}"#) == "haiku")
+      #expect(try model(#"{"judgeModel": "opus"}"#) == "opus")
+      #expect(try model(#"{"model": "haiku", "judgeModel": "opus"}"#) == "haiku")
+      #expect(try model("{}") == OperatorSettings.defaultModel)
     }
 
     @Test func theDefaultSettingsMatchAnEmptyOperatorObject() throws {
@@ -457,13 +469,13 @@ extension WaitActionTests {
         Config.self,
         from: #"""
           {"operator": {"mergeRepos": ["haacked/switchboard", "PostHog/charts"], "holdRetrySeconds": 30,
-           "holdLimitSeconds": 600, "judgeModel": "haiku"}}
+           "holdLimitSeconds": 600, "model": "haiku"}}
           """#)
 
       #expect(c.`operator`.mergeRepos == ["haacked/switchboard", "PostHog/charts"])
       #expect(c.`operator`.holdRetrySeconds == 30)
       #expect(c.`operator`.holdLimitSeconds == 600)
-      #expect(c.`operator`.judgeModel == "haiku")
+      #expect(c.`operator`.model == "haiku")
     }
 
     @Test func aPartialOperatorKeepsTheOtherDefaults() throws {
@@ -472,7 +484,7 @@ extension WaitActionTests {
       #expect(c.`operator`.mergeRepos == ["haacked/switchboard"])
       #expect(c.`operator`.holdRetrySeconds == 120)
       #expect(c.`operator`.holdLimitSeconds == 21600)
-      #expect(c.`operator`.judgeModel == "sonnet")
+      #expect(c.`operator`.model == OperatorSettings.defaultModel)
     }
 
     @Test func theOperatorKeyLeavesTheOtherSettingsAlone() throws {
@@ -758,6 +770,19 @@ extension WaitActionTests {
 
       #expect(!text.contains("sb operator approve"), Comment(rawValue: text))
       #expect(!text.contains("the reply text"), Comment(rawValue: text))
+    }
+
+    /// A question that is not about the action, such as failed checks, keeps the wait, so the action still runs later.
+    @Test func aQuestionThatKeepsTheWaitNeverAsksToClearIt() {
+      let wait = WaitActionTests.actionWait(.session, .merge, state: .readyToMerge)
+
+      let text = wait.keepWaitMessage(
+        question: "The checks on #18303 failed again after sbd reran them", byOperator: true)
+
+      #expect(!text.contains("--clear"), Comment(rawValue: text))
+      #expect(!text.contains("sb operator approve"), Comment(rawValue: text))
+      #expect(text.contains("sb operator report --needs-you"), Comment(rawValue: text))
+      #expect(text.contains("Keep the wait"), Comment(rawValue: text))
     }
 
     /// A conversation that holds the wait can't run `sb operator report`, and `sb wait Operator` would name another

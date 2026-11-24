@@ -44,12 +44,10 @@ enum BoardRect {
     Set(frames.filter { $0.value.intersects(rect) }.keys)
   }
 
-  /// Whether a drag or a click at `point` acts on empty Board space. A start on a card, in the lane label
-  /// column left of `labelEdge`, or on the pinned header belongs to the view there.
-  static func startsSelection(at point: CGPoint, frames: [String: CGRect], labelEdge: CGFloat, header: CGRect)
-    -> Bool
-  {
-    point.x >= labelEdge && !header.contains(point) && !frames.values.contains { $0.contains(point) }
+  /// Whether a drag or a click at `point` acts on empty Board space. A start on a card or in a `blocked` rect,
+  /// such as the pinned header or a lane's header, belongs to the view there.
+  static func startsSelection(at point: CGPoint, frames: [String: CGRect], blocked: [CGRect]) -> Bool {
+    !blocked.contains { $0.contains(point) } && !frames.values.contains { $0.contains(point) }
   }
 
   /// How far to scroll while a rectangle drag's pointer is within 24 points of an edge of the visible area,

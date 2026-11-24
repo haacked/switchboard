@@ -706,7 +706,7 @@ extension ScheduleFireTests {
     let sbd = try Instance()
     let s = try sbd.idleSession()
     let made = try add(sbd, s.id, "tick now")
-    // sbd pastes only 1.5 s after SessionStart, so a run right after the first reply would be queued.
+    // sbd pastes only `pasteSettleSeconds` after SessionStart, so a run right after the first reply would be queued.
     try sbd.advanceClock(2_000)
 
     _ = try runNow(sbd, made.schedule.id)

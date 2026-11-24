@@ -67,15 +67,41 @@ extension Service {
   /// group chat, unless `role` is `assistant`. That read returns only
   /// Claude's messages, which the session's terminal already shows, so it
   /// serves any session. It reads the transcript off the state queue.
+  /// With `sent`, the id of a `sent` event of the session, the answer marks that message's prompt and reaches
+  /// back to it, as `Transcript.messages` with a mark does. An id that names no `sent` event of the session marks
+  /// nothing. `role: assistant` leaves the prompts out, so it ignores `sent`.
   func chatLog(_ args: JSON) throws -> JSON {
     let assistantOnly = args["role"]?.string == ChatMessage.Role.assistant.rawValue
-    let (findTranscript, machine) = try queue.sync { () -> (() -> String?, any Machine) in
+    let sent: Int64?
+    if assistantOnly || args["sent"] == nil {
+      sent = nil
+    } else if let id = args["sent"]?.int {
+      sent = Int64(id)
+    } else {
+      throw APIError("sent is the id of a sent event")
+    }
+    let (findTranscript, machine, mark) = try queue.sync { () -> (() -> String?, any Machine, SentMark?) in
       let id = try chatTarget(args, op: "chat-log", anyKind: assistantOnly)
-      return (transcriptFinder(id), try site(of: id).machine)
+      return (transcriptFinder(id), try site(of: id).machine, try sent.flatMap { try sentMark($0, of: id) })
     }
     let limit = args["limit"]?.int ?? 50
-    let messages = findTranscript().map { Transcript.messages($0, limit: limit, on: machine) } ?? []
+    var messages: [ChatMessage] = []
+    if let path = findTranscript() {
+      // A `/clear` or a reset starts another conversation, so a mark from an earlier one names another file.
+      let usable = mark.flatMap { Transcript.isFile(path, of: $0.conversation) ? $0 : nil }
+      messages = Transcript.messages(path, limit: limit, mark: usable, on: machine)
+    }
     return try JSON(encoding: assistantOnly ? messages.filter { $0.role == .assistant } : messages)
+  }
+
+  /// The mark of the message whose `sent` event has the id `sent`, or nil when that event is not a `sent` event
+  /// of the session `id`. It runs on the state queue.
+  private func sentMark(_ sent: Int64, of id: String) throws -> SentMark? {
+    guard let event = try store.event(id: sent), event.session == id, event.kind == "sent",
+      let text = event.data["text"]?.string
+    else { return nil }
+    let later = try store.events(since: sent, session: id, kinds: ["pasting", "sent"])
+    return SentMark.of(sent: event, later: later, text: pastedText(text, id))
   }
 
   /// The session that `manager`, `session`, or `group` names, as `chat-log`
@@ -99,7 +125,7 @@ extension Service {
       id = chat
     }
     let session = entries[id]!.session
-    guard anyKind || session.kind.showsAsChat else {
+    guard anyKind || session.kind.isConversation else {
       throw APIError("\(session.name) is not a Manager conversation or a group chat. \(op) reads only those")
     }
     return id

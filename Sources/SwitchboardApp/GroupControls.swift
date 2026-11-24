@@ -13,7 +13,7 @@ struct NewGroupRow: View {
     if model.namingGroup {
       TextField("Group name", text: $name)
         .textFieldStyle(.roundedBorder)
-        .frame(width: BoardView.labelWidth)
+        .frame(width: 160)
         .focused($focused)
         .onAppear { focused = true }
         .onDisappear { name = "" }

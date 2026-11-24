@@ -140,7 +140,7 @@ struct TerminalWakeTests {
       }
     }
 
-    /// A stopped chat or Manager shows its Claude terminal while the Terminal toggle is on.
+    /// A stopped chat or Manager shows its Claude terminal in its own view.
     @Test(arguments: Waking.allCases)
     func aStoppedSessionWithAClaudeTerminalWakes(_ kind: Waking) {
       #expect(kind.session.wakesOnTerminalInput)

@@ -78,6 +78,11 @@ struct HostedView {
     elements.filter { $0.role == "AXLink" && $0.label.hasPrefix("Pull request") }
   }
 
+  /// The static text elements that show `text`. A static text element carries its text as its value, not its label.
+  func staticTexts(_ text: String) -> [HostedElement] {
+    elements.filter { $0.role == "AXStaticText" && ($0.object.value(forKey: "accessibilityValue") as? String) == text }
+  }
+
   /// The buttons whose label names the session. The card's other buttons (notes, merge, delete) do not name it.
   func buttons(naming name: String) -> [HostedElement] {
     elements.filter { $0.role == "AXButton" && $0.label.contains(name) }

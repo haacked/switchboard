@@ -20,12 +20,14 @@ extension Wait.Then {
   }
 }
 
-/// What the session view's side panel shows: the session's open waits, its schedules, its notes, and its artifacts.
+/// What the session view's side panel shows: the session's open waits, its schedules, its notes, its artifacts, and
+/// its links.
 struct SidePanel {
   static let width: CGFloat = 240
   static let noWaits = "No open waits."
   static let noNotes = "No notes."
   static let noArtifacts = "No artifacts."
+  static let noLinks = "No links."
 
   let waitsCount: Int
   /// The panel leaves out the Schedules section of a session without a schedule.
@@ -42,8 +44,9 @@ struct SidePanel {
   /// True when the session lists any artifact, a removed one included.
   let hasArtifacts: Bool
   let artifacts: [SessionArtifact]
+  let links: [LinkRows.Row]
 
-  init(_ s: SessionSummary) {
+  init(_ s: SessionSummary, now: Int64 = nowMs()) {
     let schedules = s.schedules ?? []
     waitsCount = s.waits.count
     showsSchedules = !schedules.isEmpty
@@ -56,6 +59,7 @@ struct SidePanel {
     artifacts = (s.artifacts ?? []).newestFirst
     hasArtifacts = !artifacts.isEmpty
     artifactsCount = artifacts.count(where: { $0.removed == nil })
+    links = LinkRows(session: s, now: now).rows
   }
 
   /// True when `width` holds the panel beside content that needs `beside` points.
@@ -96,20 +100,19 @@ struct SidePanelView: View {
         ListSectionHeader(title: "Artifacts", count: panel.artifactsCount, inset: false)
         if !panel.hasArtifacts { Text(SidePanel.noArtifacts).foregroundStyle(.secondary) }
         ForEach(panel.artifacts, id: \.url) { artifact in
-          VStack(alignment: .leading, spacing: 2) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-              // The title is untrusted text from the tool result, so it never renders as Markdown.
-              Text(verbatim: artifact.title).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-              Spacer(minLength: 0)
-              if artifact.removed == nil, let url = URL(string: artifact.url) {
-                Button("Open") { NSWorkspace.shared.open(url) }
-                  .buttonStyle(.link)
-                  .help(artifact.url)
-                  .accessibilityLabel("Open artifact \(artifact.title)")
-              }
-            }
-            Text(artifact.caption()).font(.caption).foregroundStyle(.secondary)
-          }
+          PanelRow(
+            title: artifact.title,
+            open: artifact.removed == nil
+              ? URL(string: artifact.url).map {
+                PanelRow.Open(url: $0, help: artifact.url, label: "Open artifact \(artifact.title)")
+              } : nil,
+            caption: artifact.caption())
+        }
+        Divider()
+        ListSectionHeader(title: "Links", count: panel.links.count, inset: false)
+        if panel.links.isEmpty { Text(SidePanel.noLinks).foregroundStyle(.secondary) }
+        ForEach(panel.links) { row in
+          LinkRowView(row: row, anchor: "panel-link-\(row.link.id)")
         }
       }
       .padding(10)
@@ -118,5 +121,6 @@ struct SidePanelView: View {
     .frame(width: SidePanel.width)
     .frame(maxHeight: .infinity, alignment: .top)
     .accessibilityIdentifier("session-side-panel")
+    .clickAnchor("session-side-panel")
   }
 }

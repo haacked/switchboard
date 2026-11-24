@@ -2,14 +2,14 @@ import SwiftUI
 import SwitchboardCore
 
 /// The known repositories that are not issue sources yet, each with a checkbox, an optional label for all of
-/// them, and one button that adds the checked ones as sources. The Issues view's empty state and its setup sheet
+/// them, and one button that adds the checked ones as sources. The Issues view's empty state and Settings ▸ Issues
 /// show it while `offeredIssueRepos` is not empty.
 struct IssueRepoOffer: View {
   @EnvironmentObject var model: BoardModel
   /// The names the user unchecked. A repository that loads after the view appears starts checked. The empty state
-  /// and the setup sheet share one set, so the sheet opened from the empty state keeps the user's choices.
+  /// and Settings ▸ Issues share one set, so the pane opened from the empty state keeps the user's choices.
   @Binding var unchecked: Set<String>
-  /// Gets whether the label field has focus. Add takes Return while it does, so the setup sheet's other buttons give
+  /// Gets whether the label field has focus. Add takes Return while it does, so Settings ▸ Issues' other buttons give
   /// Return up then.
   var labelFocusChanged: (Bool) -> Void = { _ in }
   @FocusState private var labelFocused: Bool
@@ -46,8 +46,8 @@ struct IssueRepoOffer: View {
     }
     .announcesRefusal(addError)
     .onChange(of: labelFocused) { labelFocusChanged(labelFocused) }
-    // The setup sheet removes the offer once every repository is a source. The removed view's onChange never
-    // reports the lost focus, and the sheet's Add and Save buttons would not take Return.
+    // Settings ▸ Issues removes the offer once every repository is a source. The removed view's onChange never
+    // reports the lost focus, and the pane's Add and Save buttons would not take Return.
     .onDisappear { labelFocusChanged(false) }
   }
 

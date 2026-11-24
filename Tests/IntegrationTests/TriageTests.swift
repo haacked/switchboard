@@ -403,7 +403,7 @@ let offerDeleteBranchReply = Instance.root.appendingPathComponent(
   @Test func turnsSummariesOff() throws {
     let sbd = try Instance(config: ["triage": ["enabled": false]])
     let s = try sbd.new(prompt: "ask")
-    let after = try sbd.waitFor(s.id, "the reply") { $0.lastReply != nil && $0.state == .needsYou }
+    let after = try sbd.waitForReply(s)
     #expect(after.triage?.source == .fallback)
     #expect(sbd.summaryCalls().isEmpty)
     #expect(try sbd.events(s.id).allSatisfy { $0.kind != "triage" })

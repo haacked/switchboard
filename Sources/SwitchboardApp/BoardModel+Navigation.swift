@@ -31,12 +31,15 @@ extension BoardModel {
     showInSidebar(session)
   }
 
-  /// Selects the session as a sidebar click does. A work session's collapsed section opens, and so does the
-  /// archive for an archived conversation, so the sidebar shows the selected row.
+  /// Selects the session as a sidebar click does and makes the sidebar show its row. A work session's collapsed
+  /// section opens, and the search field clears when its query hides the session. The archive opens for an
+  /// archived conversation.
   func showInSidebar(_ session: SessionSummary) {
     if session.kind == .work { collapsed.remove(session.state) }
     if session.activity?.archived == true { showingArchive = true }
     selection = session.id
+    // Setting `selection` widens a filter that hides the session. The query check has to read the widened filter.
+    if session.kind == .work, sidebarQueryHides(session) { sidebarQuery = "" }
     // A list focus request would take keyboard focus from an open sheet's fields.
     if !presentingSheet { requestListFocus() }
   }
@@ -107,11 +110,10 @@ extension BoardModel {
     focusTerminal()
   }
 
-  /// Shows the session's whole conversation: a chat's messages, or another session's terminal.
+  /// Shows the session's whole conversation: a conversation's own view, or another session's terminal in the Inbox.
   func openTranscript(_ session: SessionSummary) {
     switch session.transcriptTarget {
-    case .chat:
-      showingTerminal = false
+    case .session:
       selection = session.id
     case .terminal: openInboxTerminal()
     case nil: break
@@ -123,8 +125,8 @@ extension BoardModel {
     if terminalFocus == id { terminalFocus = nil }
   }
 
-  /// The session whose terminal view shows now, where ⇧⌘E reveals the Message Claude field. The Board and a
-  /// pane that shows a chat's messages or an Inbox summary have no terminal view.
+  /// The session whose terminal view shows now, where ⇧⌘E reveals the Message Claude field. The Board and an
+  /// Inbox summary have no terminal view.
   var messageFieldTarget: SessionSummary? {
     guard let target = terminalTarget, target.docket == nil, showsClaudeTerminal(target) else { return nil }
     switch visibleView {
@@ -150,6 +152,11 @@ extension BoardModel {
     terminalFocus = id
   }
 
+  /// Hides the field after a send, unless the user typed more while the send was on its way.
+  func hideMessageFieldIfEmpty(_ id: String, draft: MessageField.Draft) {
+    if draft.isEmpty { hideMessageField(id) }
+  }
+
   /// Clears the reveal and the focus request of the session's Message Claude field while they still name `id`.
   func forgetMessageField(_ id: String) {
     if revealedMessageField == id { revealedMessageField = nil }
@@ -161,10 +168,8 @@ extension BoardModel {
     if messageFieldFocus == id { messageFieldFocus = nil }
   }
 
-  /// A chat pane shows its terminal only while the Terminal toggle is on. A request for a hidden terminal would
-  /// take focus later, when the user turns the toggle on.
   private func showsClaudeTerminal(_ session: SessionSummary) -> Bool {
-    session.hasTerminals && !session.waitsToStart && (!session.kind.showsAsChat || showingTerminal)
+    session.hasTerminals && !session.waitsToStart
   }
 }
 
@@ -213,14 +218,16 @@ extension BoardModel {
 
 /// Where "Open in transcript" shows a session's whole conversation.
 enum TranscriptTarget: Equatable {
-  case chat
+  /// The session's own view. The Inbox leaves out some of a conversation's cards, such as a group message that waits for the user.
+  case session
+  /// The terminal of the Inbox item.
   case terminal
 }
 
 extension SessionSummary {
-  /// A chat's messages, or the terminal of another session that runs claude.
+  /// A conversation's own view, or the terminal of another session that runs claude.
   var transcriptTarget: TranscriptTarget? {
     guard runsClaude, !waitsToStart else { return nil }
-    return kind.showsAsChat ? .chat : .terminal
+    return kind.isConversation ? .session : .terminal
   }
 }

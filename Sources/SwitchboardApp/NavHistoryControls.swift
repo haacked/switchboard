@@ -2,30 +2,70 @@ import AppKit
 import SwiftUI
 import SwitchboardCore
 
-/// The toolbar's Back, Forward, and History buttons. History opens a popover, not a menu, because the
-/// snapshot hook draws popovers and not menus.
-struct NavHistoryControls: View {
+/// The toolbar's Back, Forward, and Recent Places buttons. Each is its own toolbar item, so the toolbar spaces them as
+/// it spaces its other buttons.
+struct NavHistoryControls: ToolbarContent {
+  var body: some ToolbarContent {
+    ToolbarItem(placement: .navigation) { NavButton(direction: .back) }
+    ToolbarItem(placement: .navigation) { NavButton(direction: .forward) }
+    ToolbarItem(placement: .navigation) { RecentPlacesButton() }
+  }
+}
+
+private struct NavButton: View {
+  @EnvironmentObject var model: BoardModel
+  let direction: NavDirection
+
+  var body: some View {
+    switch direction {
+    case .back:
+      HistoryButton("Back", "arrow.left", help: "Back (⌘[)", id: "nav-back", enabled: model.canGoBack) {
+        model.goBack()
+      }
+    case .forward:
+      HistoryButton("Forward", "arrow.right", help: "Forward (⌘])", id: "nav-forward", enabled: model.canGoForward) {
+        model.goForward()
+      }
+    }
+  }
+}
+
+/// Opens a popover, not a menu, because the snapshot hook draws popovers and not menus.
+private struct RecentPlacesButton: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
-    HStack(spacing: 2) {
-      button("Back", "arrow.left", help: "Back (⌘[)", id: "nav-back", enabled: model.canGoBack) { model.goBack() }
-      button("Forward", "arrow.right", help: "Forward (⌘])", id: "nav-forward", enabled: model.canGoForward) {
-        model.goForward()
-      }
-      button("Recent Places", "clock", help: "Recent places (⌘Y)", id: "nav-history", enabled: model.hasRecentPlaces) {
-        model.showingRecentPlaces.toggle()
-      }
-      .popover(isPresented: $model.showingRecentPlaces, arrowEdge: .bottom) { RecentPlacesList() }
+    HistoryButton(
+      "Recent Places", "clock", help: "Recent places (⌘Y)", id: "nav-history", enabled: model.hasRecentPlaces
+    ) {
+      model.showingRecentPlaces.toggle()
     }
-    .labelStyle(.iconOnly)
-    .buttonStyle(.borderless)
+    .popover(isPresented: $model.showingRecentPlaces, arrowEdge: .bottom) { RecentPlacesList() }
+  }
+}
+
+private struct HistoryButton: View {
+  let title: String
+  let icon: String
+  let help: String
+  let id: String
+  let enabled: Bool
+  let action: () -> Void
+
+  init(
+    _ title: String, _ icon: String, help: String, id: String, enabled: Bool, action: @escaping () -> Void
+  ) {
+    self.title = title
+    self.icon = icon
+    self.help = help
+    self.id = id
+    self.enabled = enabled
+    self.action = action
   }
 
-  private func button(
-    _ title: String, _ icon: String, help: String, id: String, enabled: Bool, action: @escaping () -> Void
-  ) -> some View {
+  var body: some View {
     Button(action: action) { Label(title, systemImage: icon) }
+      .labelStyle(.iconOnly)
       .help(help)
       .accessibilityIdentifier(id)
       .disabled(!enabled)

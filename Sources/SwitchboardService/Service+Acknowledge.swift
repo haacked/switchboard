@@ -18,14 +18,33 @@ extension Service {
         throw APIError("\(e.session.name) isn't acknowledged")
       }
       record(id, "unack")
+    } else if let op = operatorID(),
+      let ref = Triage.item(e.facts, shown(id, verdict, now: now), kind: e.session.kind)?.ref, Triage.isReportRef(ref)
+    {
+      try closeAsks(id, on: op, args)
     } else {
       // An ack closes the operator's open reports. Claude Code may not ack them for the user, as with `choose`.
-      if e.session.kind == .operator, e.facts.ackClosesReports {
-        try Service.refuseClaude(args, "an ack closes the operator's reports")
+      let closesReports = e.session.kind == .operator && e.facts.ackClosesReports
+      if closesReports { try Service.refuseClaude(args, "an ack closes the operator's reports") }
+      // A report from before routing shows on the session that it is about, so the operator can be out of the
+      // Inbox. An ack on the operator still closes it (Decision 51 in the notes repo's
+      // `plans/410-invisible-operator.md`).
+      if closesReports, !AttentionState.inbox.contains(verdict.state) {
+        record(id, "ack", try JSON(encoding: Acknowledgment(verdict, e.facts)))
+      } else {
+        try acknowledge(id, verdict)
       }
-      try acknowledge(id, verdict)
     }
     return try JSON(encoding: summary(id))
+  }
+
+  /// Closes the asks that the user saw on `id`'s item with a `report-closed` event on the operator `op`, which has
+  /// no undo. It records no `ack` on `id`, so the item that the ask hid shows again (Decision 40 in the notes repo's
+  /// `plans/410-invisible-operator.md`).
+  private func closeAsks(_ id: String, on op: String, _ args: JSON) throws {
+    try Service.refuseClaude(args, "an ack closes the operator's question")
+    let ids = entries[id]!.facts.operatorItems.asks.map { JSON.number(Double($0.id)) }
+    try recordStored(op, SessionFacts.reportClosedEvent, ["reports": .array(ids)])
   }
 
   /// Records the acknowledgment of the Inbox verdict that `evaluate` gave,

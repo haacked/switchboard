@@ -8,8 +8,9 @@ import SwiftUI
 /// `click close` clicks the × on the Shell pane's label with mouse events at the button's place in the
 /// window. `click open` clicks Open Shell on the Claude pane's label the same way. SwiftUI builds no
 /// accessibility elements without an assistive app, so the test can't press a button by its label.
-/// `menu <menu> <item>` runs a menu item. `show-terminal` shows the terminals of a chat pane or an Inbox item,
-/// as their Terminal toggle does. `select <session>` selects a session. `type <text>` types the text and
+/// `menu <menu> <item>` runs a menu item. `titles <menu>` reports the menu's item titles, each between bars, as in
+/// `|Back|Forward|`. `show-terminal` shows the terminals of an Inbox item, as its Terminal
+/// toggle does. `select <session>` selects a session. `type <text>` types the text and
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
 /// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
 /// `NavShortcuts` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
@@ -23,12 +24,28 @@ import SwiftUI
 /// sheet's step: `none`, `checking`, or `confirming <number of sessions it deletes>`. `board-click <session>
 /// [count] [cmd|shift]` clicks the session's Board card `count` times, as a double click does for 2, with ⌘ or ⇧
 /// held. `board-click-empty <session>` clicks the empty space just below the card. `board-drag <session>
-/// <session> [cmd]` drags from the empty space beside the first card, on the side that faces the second, to the
-/// middle of the second. The three report `posted on` the hit view's type and send their events over the next
-/// half second. `board-selection` reports the selected ids, sorted and joined by commas, or `none`.
+/// <session> [cmd] [card]` drags from the empty space beside the first card, on the side that faces the second, to
+/// the middle of the second. With `card`, the drag starts at the middle of the first card. The three report
+/// `posted on` the hit view's type and send their events over the next half second. `board-selection` reports the
+/// selected ids, sorted and joined by commas, or `none`. `drag-control` adds a draggable text view outside the
+/// Board to the window, drags it the same way, and also reports `posted on`. `drags` reports how many drag
+/// sessions have started since launch from the view each drag pressed or one of its superviews. `settings-key`
+/// sends ⌘, to the menu bar and reports the menu item that ran, as `nav-keys` does. `settings` reports `shown
+/// <tab>` while the Settings window is on screen, else `hidden`. `open-settings <tab>` opens Settings at the tab,
+/// as the Issues view's gear button does. `width <points>` sets the window's content width and keeps its height. It
+/// stops AppKit from saving the window's frame until `width restore` puts the frame from before the first `width`
+/// back. It reports `width <content width>`, and `width restore` reports `restored`. `anchors <prefix>
+/// [<container>]` scrolls each click anchor whose name starts with the prefix into view, in every window, and
+/// reports `none` or the sorted names joined by commas, each followed by `:in` when the anchor lies inside its
+/// window's content and inside the container anchor's frame, else `:out`. `click-anchor <name>` clicks the view
+/// with that click anchor in the main window, as `click-delete-selected` does.
 @MainActor
 enum ShellSelfTest {
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
+  /// `board-drag` hides this view so that it can't take a card drag.
+  private static var dragControl: NSView?
+  /// The window's frame and autosave name from before the first `width`.
+  private static var savedFrame: (frame: NSRect, name: NSWindow.FrameAutosaveName)?
 
   static func start(_ model: BoardModel) {
     guard let folder else { return }
@@ -59,15 +76,15 @@ enum ShellSelfTest {
       return "shown"
     case "menu":
       let names = rest.split(separator: " ", maxSplits: 1).map(String.init)
-      guard names.count == 2, let menu = NSApp.mainMenu?.item(withTitle: names[0])?.submenu else { return "no menu" }
-      // SwiftUI sets the items' titles when the menu opens.
-      menu.delegate?.menuNeedsUpdate?(menu)
-      menu.update()
+      guard names.count == 2, let menu = refreshedMenu(names[0]) else { return "no menu" }
       let index = menu.indexOfItem(withTitle: names[1])
       guard index >= 0 else { return "not found in \(menu.items.map(\.title))" }
       guard menu.items[index].isEnabled else { return "disabled" }
       menu.performActionForItem(at: index)
       return "ran"
+    case "titles":
+      guard let menu = refreshedMenu(rest) else { return "no menu" }
+      return "|" + menu.items.filter { !$0.isSeparatorItem }.map(\.title).joined(separator: "|") + "|"
     case "select":
       model.selection = rest
       return "selected"
@@ -99,6 +116,15 @@ enum ShellSelfTest {
     case "nav-keys":
       guard let window else { return "no window" }
       return NavShortcuts.all.map { menuItem(running: $0, in: window) }.joined(separator: "; ")
+    case "settings-key":
+      guard let window else { return "no window" }
+      return menuItem(running: KeyboardShortcut(","), in: window)
+    case "settings":
+      return model.settingsShown ? "shown \(model.settingsTab.rawValue)" : "hidden"
+    case "open-settings":
+      guard let tab = SettingsTab(rawValue: rest) else { return "no tab \(rest)" }
+      model.openSettings(tab)
+      return "opened"
     case "mouse":
       guard let window else { return "no window" }
       guard let button = Int(rest), let event = otherMouseDown(button, in: window) else { return "no event" }
@@ -135,20 +161,52 @@ enum ShellSelfTest {
       guard let card = boardCard(rest) else { return "no card" }
       return press(at: NSPoint(x: card.midX, y: card.minY - 4))
     case "board-drag":
+      dragControl?.isHidden = true
       let args = rest.split(separator: " ").map(String.init)
       // Scrolling the second card into view can move the first, so both frames are read after both scrolls.
       guard args.count >= 2, boardCard(args[1]) != nil, let from = boardCard(args[0]),
         let to = boardCard(args[1], scroll: false)
       else { return "no card" }
-      // The drag starts in the gap on the side of the first card that faces the second, so it crosses both.
-      let start = NSPoint(x: from.midX, y: to.midY < from.midY ? from.maxY + 4 : from.minY - 4)
+      // Without `card`, the drag starts in the gap on the side of the first card that faces the second, so it
+      // crosses both.
+      let gap = to.midY < from.midY ? from.maxY + 4 : from.minY - 4
+      let start = NSPoint(x: from.midX, y: args.contains("card") ? from.midY : gap)
       return drag(from: start, to: NSPoint(x: to.midX, y: to.midY), flags: args.contains("cmd") ? .command : [])
+    case "drag-control":
+      // The control goes in the window's frame view, above every other view, so the drag hits it.
+      guard let frameView = window?.contentView?.superview else { return "no window" }
+      let control = NSHostingView(rootView: Text(verbatim: "drag control").padding(20).draggable("drag control"))
+      control.frame = NSRect(x: frameView.bounds.midX - 80, y: frameView.bounds.midY - 30, width: 160, height: 60)
+      frameView.addSubview(control, positioned: .above, relativeTo: nil)
+      dragControl = control
+      frameView.layoutSubtreeIfNeeded()
+      let start = control.convert(NSPoint(x: control.bounds.midX, y: control.bounds.midY), to: nil)
+      return drag(from: start, to: NSPoint(x: start.x + 100, y: start.y + 100), flags: [])
+    case "drags":
+      return "\(DragWatch.sessions)"
+    case "width":
+      return setWidth(rest)
+    case "anchors":
+      let args = rest.split(separator: " ").map(String.init)
+      guard let prefix = args.first else { return "no prefix" }
+      return anchors(prefix: prefix, container: args.count > 1 ? args[1] : nil)
+    case "click-anchor":
+      return click(anchor: rest, throughWindow: false)
     case "board-selection":
       let ids = model.multiSelection.sorted()
       return ids.isEmpty ? "none" : ids.joined(separator: ",")
     default:
       return "unknown command"
     }
+  }
+
+  /// The menu bar's menu with `title`. SwiftUI sets the items' titles when the menu opens. This function asks for
+  /// them first.
+  private static func refreshedMenu(_ title: String) -> NSMenu? {
+    guard let menu = NSApp.mainMenu?.item(withTitle: title)?.submenu else { return nil }
+    menu.delegate?.menuNeedsUpdate?(menu)
+    menu.update()
+    return menu
   }
 
   /// The frame of the session's Board card in window coordinates, after the Board scrolls the card and 24 pt
@@ -202,6 +260,7 @@ enum ShellSelfTest {
   private static func drag(from start: NSPoint, to end: NSPoint, flags: NSEvent.ModifierFlags) -> String {
     guard let view = hitView(at: start) else { return "nothing at \(Int(start.x)),\(Int(start.y))" }
     acceptFirstMouse(view)
+    DragWatch.watch(view)
     Task { @MainActor in
       guard let down = mouse(.leftMouseDown, at: start, flags: flags) else { return }
       window?.sendEvent(down)
@@ -234,7 +293,11 @@ enum ShellSelfTest {
     root.layoutSubtreeIfNeeded()
     let frame = anchor.convert(anchor.bounds, to: nil)
     let point = NSPoint(x: frame.minX + clickInset, y: frame.midY)
-    guard let hit = (root.superview ?? root).hitTest(point) else { return "nothing at \(name)" }
+    guard let hit = (root.superview ?? root).hitTest(point) else {
+      let frameView = root.superview ?? root
+      return "nothing at \(name) (\(Int(point.x)),\(Int(point.y)) in a window of \(size(frameView.frame)), content "
+        + "\(size(root.frame)) at \(Int(root.frame.minX)),\(Int(root.frame.minY)))"
+    }
     if let row = enclosingRow(of: anchor), !hit.isDescendant(of: row) {
       return "\(type(of: hit)) covers \(name)"
     }
@@ -242,6 +305,57 @@ enum ShellSelfTest {
       return "no event"
     }
     return "clicked at \(Int(point.x)),\(Int(point.y)) on \(type(of: hit))"
+  }
+
+  private static func setWidth(_ arg: String) -> String {
+    guard let window else { return "no window" }
+    if arg == "restore" {
+      guard let saved = savedFrame else { return "restored" }
+      // Setting the name saves the frame at once. The frame has to go back first.
+      window.setFrame(saved.frame, display: true)
+      window.setFrameAutosaveName(saved.name)
+      savedFrame = nil
+      return "restored"
+    }
+    guard let width = Double(arg), width > 0 else { return "no width" }
+    if savedFrame == nil {
+      savedFrame = (window.frame, window.frameAutosaveName)
+      // AppKit saves the main window's frame on every change. A killed app would keep the test's width.
+      window.setFrameAutosaveName("")
+    }
+    let height = window.contentView?.frame.height ?? window.frame.height
+    window.setContentSize(NSSize(width: width, height: height))
+    window.contentView?.layoutSubtreeIfNeeded()
+    return "width \(Int(window.contentView?.frame.width ?? 0))"
+  }
+
+  private static func anchors(prefix: String, container: String?) -> String {
+    var found: [String] = []
+    for root in NSApp.windows.compactMap(\.contentView) {
+      // The frame view is the window's whole area. A content view can be larger than it, and a click outside it
+      // hits nothing.
+      let frameView = root.superview ?? root
+      let bounds = root.convert(root.bounds, to: nil).intersection(frameView.convert(frameView.bounds, to: nil))
+      let box = container.flatMap { ClickAnchorView.find($0, in: root) }
+      for anchor in ClickAnchorView.all(prefix: prefix, in: root) {
+        anchor.scrollToVisible(anchor.bounds)
+        root.layoutSubtreeIfNeeded()
+        let frame = anchor.convert(anchor.bounds, to: nil)
+        // A container that the window doesn't hold puts every anchor out.
+        let inside =
+          (container == nil || box != nil)
+          && anchorIsInside(frame, window: bounds, container: box.map { $0.convert($0.bounds, to: nil) })
+        found.append("\(anchor.name):\(inside ? "in" : "out")")
+      }
+    }
+    return found.isEmpty ? "none" : found.sorted().joined(separator: ",")
+  }
+
+  private static func size(_ rect: NSRect) -> String { "\(Int(rect.width))x\(Int(rect.height))" }
+
+  /// Whether `frame` lies inside the window's content and inside the container, give or take 1 pt for rounding.
+  static func anchorIsInside(_ frame: NSRect, window: NSRect, container: NSRect?) -> Bool {
+    [window, container].compactMap { $0 }.allSatisfy { $0.insetBy(dx: -1, dy: -1).contains(frame) }
   }
 
   /// Adds the table row that holds the anchor named `name` to that table's selection. A posted ⌘-click
@@ -375,11 +489,48 @@ final class ClickAnchorView: NSView {
   /// The anchored view gets every click.
   override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
+  static func all(prefix: String, in view: NSView) -> [ClickAnchorView] {
+    let mine = (view as? ClickAnchorView).flatMap { $0.name.hasPrefix(prefix) ? [$0] : nil } ?? []
+    return mine + view.subviews.flatMap { all(prefix: prefix, in: $0) }
+  }
+
   static func find(_ name: String, in view: NSView) -> ClickAnchorView? {
     if let anchor = view as? ClickAnchorView, anchor.name == name { return anchor }
     for subview in view.subviews {
       if let found = find(name, in: subview) { return found }
     }
     return nil
+  }
+}
+
+/// Counts the drag sessions that views start. It hooks `beginDraggingSession(with:event:source:)` on the class of a
+/// view and of each of its superviews, because SwiftUI starts the session on a hosting view, which overrides
+/// the method.
+@MainActor
+private enum DragWatch {
+  static var sessions = 0
+  private static var hooked: Set<ObjectIdentifier> = []
+
+  static func watch(_ view: NSView?) {
+    var next = view
+    while let view = next {
+      hook(type(of: view))
+      next = view.superview
+    }
+  }
+
+  private static func hook(_ cls: AnyClass) {
+    guard hooked.insert(ObjectIdentifier(cls)).inserted else { return }
+    let selector = #selector(NSView.beginDraggingSession(with:event:source:))
+    guard let method = class_getInstanceMethod(cls, selector) else { return }
+    typealias Begin =
+      @convention(c) (NSView, Selector, [NSDraggingItem], NSEvent, NSDraggingSource) -> NSDraggingSession
+    let original = unsafeBitCast(method_getImplementation(method), to: Begin.self)
+    let block: @convention(block) (NSView, [NSDraggingItem], NSEvent, NSDraggingSource) -> NSDraggingSession = {
+      view, items, event, source in
+      MainActor.assumeIsolated { sessions += 1 }
+      return original(view, selector, items, event, source)
+    }
+    class_replaceMethod(cls, selector, imp_implementationWithBlock(block), method_getTypeEncoding(method))
   }
 }

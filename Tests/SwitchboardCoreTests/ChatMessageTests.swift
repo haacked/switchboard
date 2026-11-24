@@ -114,4 +114,51 @@ import Testing
   func aMessageThatIsNotACommandsOutputHasNone(_ role: ChatMessage.Role, _ text: String) {
     #expect(ChatMessage(role: role, text: text).commandOutput == nil)
   }
+
+  // MARK: records
+
+  @Test(
+    arguments: [
+      ("Run the nightly report", "Run the nightly report"),
+      ("Run the nightly report", "  Run the nightly report\n"),
+      ("[Image #1] Run the nightly report", "Run the nightly report"),
+      ("<command-name>/review</command-name>\n<command-args>42</command-args>", "/review 42"),
+      ("<command-message>review</command-message>\n<command-name>/review</command-name>", "/review"),
+    ])
+  func aUserMessageThatHoldsTheWantedTextRecordsIt(_ text: String, _ wanted: String) {
+    #expect(ChatMessage(role: .user, text: text).records(wanted))
+  }
+
+  /// A prompt of only images has no text, so any user message that can record a prompt records it.
+  @Test(arguments: ["", "  \n "])
+  func aUserMessageRecordsEmptyWantedText(_ wanted: String) {
+    #expect(ChatMessage(role: .user, text: "Run the nightly report").records(wanted))
+  }
+
+  @Test func aUserMessageThatLacksTheWantedTextDoesNotRecordIt() {
+    #expect(!ChatMessage(role: .user, text: "Run the nightly report").records("Run the weekly report"))
+  }
+
+  /// The match reads a command's name and args, not the elements the transcript wraps them in.
+  @Test(arguments: ["<command-name>", "command-args", "<command-name>/review</command-name>"])
+  func aSlashCommandDoesNotRecordTheTextOfItsElements(_ wanted: String) {
+    let text = "<command-name>/review</command-name>\n<command-args>42</command-args>"
+
+    #expect(!ChatMessage(role: .user, text: text).records(wanted))
+  }
+
+  /// The guards run before the empty-text check, so even empty wanted text is refused.
+  @Test(
+    arguments: [
+      (ChatMessage.Role.user, "Switchboard: posthog-123 needs you.", "posthog-123 needs you."),
+      (.user, "Switchboard: posthog-123 needs you.", ""),
+      (.user, "<local-command-stdout>Set model to opus</local-command-stdout>", "Set model to opus"),
+      (.user, "<local-command-stdout>Set model to opus</local-command-stdout>", ""),
+      (.user, "<local-command-stderr>Unknown model</local-command-stderr>", "Unknown model"),
+      (.assistant, "Run the nightly report", "Run the nightly report"),
+      (.assistant, "Run the nightly report", ""),
+    ] as [(ChatMessage.Role, String, String)])
+  func aNoticeCommandOutputOrReplyRecordsNothing(_ role: ChatMessage.Role, _ text: String, _ wanted: String) {
+    #expect(!ChatMessage(role: role, text: text).records(wanted))
+  }
 }

@@ -8,8 +8,9 @@
 # integration tests across N swift test processes and runs the other tests in
 # one more, all at once, then runs MeasureTests alone. With --part K/P after
 # the count, it splits the tests into P parts for P machines, such as the jobs
-# of a CI matrix, and runs part K (bin/lib/shard-plan). --shards is for CI. It
-# prints a warning elsewhere unless --force-shards follows the count.
+# of a CI matrix, and runs part K. With more than one part, the last part runs
+# only the other tests and MeasureTests (bin/lib/shard-plan). --shards is for
+# CI. It prints a warning elsewhere unless --force-shards follows the count.
 # bin/lib/swift-testing.sh sets the flags that swift needs to find Swift
 # Testing.
 # A run without --shards holds one machine-wide build slot (bin/lib/build-slot)
@@ -92,6 +93,12 @@ shards() {
   while read -r p i pattern; do
     if [ "$p" -eq "$part" ]; then patterns[i]=$pattern; fi
   done <<<"$plan"
+  # shard-plan can leave a part with no suite. It has already checked that
+  # every test matches one filter, so the other parts run every test.
+  if [ "${#patterns[@]}" -eq 0 ]; then
+    echo "bin/test: part $part of $parts has no tests to run" >&2
+    exit 0
+  fi
   total=$(grep -c -E "$(IFS='|'; echo "${patterns[*]}")" <<<"$list")
   rm -rf "$clones"
   mkdir "$clones"
@@ -100,14 +107,12 @@ shards() {
     bin/lib/swiftpm test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
       tee "$clones/$1.log" | awk -v p="[$1] " '{ print p $0; fflush() }'
   }
-  local pids=()
+  local pids=() scratch
   for i in "${!patterns[@]}"; do
     [ "$i" -le "$n" ] || continue
-    (scratch=.build
-      if [ "$i" -gt 0 ]; then
-        scratch="$clones/$i"
-        cp -c -R .build "$scratch"
-      fi
+    scratch=.build
+    [ "${#pids[@]}" -eq 0 ] || scratch="$clones/$i"
+    (if [ "$scratch" != .build ]; then cp -c -R .build "$scratch"; fi
       run_shard "$i" "$scratch") &
     pids[i]=$!
   done
@@ -148,36 +153,54 @@ if [ "${1:-}" = --claude ]; then
   fi
 fi
 
-# Builds the tests and sets `run` to the swift test arguments that filter them
-# to the selection. Leaves `run` empty, which runs every test, when it cannot
-# work out the changed files or the package's targets. Exits when no test can
-# read a changed file.
+# Builds the bundles of the tests it selects and sets `run` to the swift test
+# arguments that filter them to the selection. It never selects all of a
+# ci-only target (bin/lib/test-selection.sh), which CI runs on every push. Exits
+# when no test can read a changed file.
+# A bundle that it does not build keeps its last build, which can predate the
+# change, so every --filter must name a target whose bundle it built. The
+# selection names every test target that depends on a changed target.
+# test_filters can add smoke suites of a target that the selection did not
+# name, so it then builds the bundles of those targets too. When a test target
+# has no bundle of its own, it builds every bundle (test_bundles_exist).
 targeted() {
   source bin/lib/test-selection.sh
-  local base changed json selection filter
-  if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
-    echo "bin/test: no merge base with origin/main, so every test runs" >&2
+  local base changed json selection filters filter target built missing
+  if ! json=$(swift package dump-package) || ! jq -e .targets <<<"$json" >/dev/null 2>&1; then
+    for target in $ci_only_targets; do
+      echo "bin/test: could not read the package's targets, so every test outside $target runs. CI runs $target on every push." >&2
+      run+=(--skip "^$target\\.")
+    done
     return
   fi
-  changed=$({ git diff --name-only --no-renames "$base"; git ls-files --others --exclude-standard; } | sort -u)
-  if ! json=$(swift package dump-package) || ! selection=$(select_tests "$json" <<<"$changed"); then
-    echo "bin/test: could not read the package's targets, so every test runs" >&2
-    return
+  if ! base=$(git merge-base origin/main HEAD 2>/dev/null); then
+    echo "bin/test: no merge base with origin/main, so the unit test targets and the smoke suites run" >&2
+    selection=$(fallback_selection "$json")
+  else
+    changed=$({ git diff --name-only --no-renames "$base"; git ls-files --others --exclude-standard; } | sort -u)
+    selection=$(select_tests "$json" <<<"$changed")
   fi
   if [ -z "$selection" ]; then
     echo "bin/test: no test reads the files changed against origin/main. bin/test --all runs every test." >&2
     exit 0
   fi
-  if [ "$selection" = all ]; then
-    echo "bin/test: runs every test" >&2
-    return
+  if test_bundles_exist $(jq -r '.targets[] | select(.type == "test") | .name' <<<"$json"); then
+    built=$(selection_targets <<<"$selection")
+    build_test_bundles $built
+    filters=$(test_filters <<<"$selection")
+    missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
+    if [ -n "$missing" ]; then build_test_bundles $missing; fi
+  else
+    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
+    build_tests
+    filters=$(test_filters <<<"$selection")
   fi
-  build_tests
   run=(--skip-build)
   while IFS= read -r filter; do
     echo "bin/test: runs the tests that match $filter" >&2
     run+=(--filter "$filter")
-  done < <(test_filters <<<"$selection")
+  done <<<"$filters"
+  echo "bin/test: CI runs every other test on every push, so a local run does not need them" >&2
 }
 
 run=()

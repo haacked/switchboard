@@ -13,6 +13,10 @@ enum BackgroundLaunch {
     "SB_WAKE_TEST", "SB_QUIT_FILE",
   ]
 
+  /// True when this launch runs hidden. The hidden window can sit under the user's pointer, so a view that reads the
+  /// pointer's position ignores it while this is true.
+  static let isRunning = applies(to: ProcessInfo.processInfo.environment)
+
   static func applies(to env: [String: String]) -> Bool {
     env["SB_TEST_VISIBLE"] != "1" && hooks.contains { env[$0] != nil }
   }

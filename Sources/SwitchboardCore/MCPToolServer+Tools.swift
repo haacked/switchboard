@@ -37,7 +37,8 @@ extension MCPToolServer {
 
   static let session = string("A session: an id, a unique id prefix, or a unique name.")
   static let schedule = string("The id of the schedule.")
-  static let interval = string("The interval: one number and one unit, s, m, h, d, or w, such as 30m. The shortest is 1m.")
+  static let interval = string(
+    "The interval: one number and one unit, s, m, h, d, or w, such as 30m. The shortest is 1m.")
   static let group = string("A group: an id, a unique id prefix, or a unique name.")
   static let full = boolean("True returns every field. False, the default, returns the brief form.")
 
@@ -46,12 +47,12 @@ extension MCPToolServer {
   static let sessionTools: [Tool] = [
     Tool(
       "list_sessions",
-      "Lists the sessions, with the ones that need the user first. Each one shows its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as the last reply, notes, cards, and artifacts.",
+      "Lists the sessions, with the ones that need the user first. Each one shows its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as the last reply, notes, cards, artifacts, and links.",
       ["full": full]
     ),
     Tool(
       "get_session",
-      "Shows one session: its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as its folder, branch, last reply, notes, cards, its group's name and description, and its artifacts. Get the full form before you act on the session.",
+      "Shows one session: its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as its folder, branch, last reply, notes, cards, its group's name and description, and its artifacts and links. Get the full form before you act on the session.",
       ["session": session, "full": full],
       required: ["session"]),
     Tool(
@@ -95,7 +96,9 @@ extension MCPToolServer {
         "prompt": string("The first prompt."),
         "base": string("The commit that the branch starts from, such as origin/main. A follow-up takes none."),
         "name": string("The session's name."),
-        "model": string("The model to run, such as sonnet or opus."),
+        "model": string(
+          "The model to run, such as opus. Leave it out unless the user asked for a model: the session then runs config.json's `model`, opus by default."
+        ),
         "account": string("The Claude account, by name or folder."),
         "followup": boolean("Adds a follow-up instead of starting the session."),
         "planMode": boolean(
@@ -125,7 +128,7 @@ extension MCPToolServer {
         ),
         "note": string("What the wait is for."),
         "then": string(
-          "What happens when the wait ends. `resume` (the default) resumes the session. `notify` moves it to Needs you. sbd runs an action when the wait is met. When the wait ends without its condition, sbd runs nothing and resumes the session that holds the wait, which is the operator unless `here` keeps the wait on a conversation. `merge` lands the target's PR. It needs kind session and state ready_to_merge, can't be used with `here`, and runs only in a repository that `operator.mergeRepos` in config.json lists. sbd merges after every check passes and the operator approves the session's last reply. `rm-worktree` removes the session and its worktree after its PR merged. It needs kind session with state done, or kind merge with an owner/name#N target. `rm` removes the session. It needs kind session and state done. `report` records the note as a report. It works with any kind except manual and needs `note`. Only a Manager conversation or the operator can arm an action. sbd asks the session that holds the wait about anything that needs a decision."
+          "What happens when the wait ends. `resume` (the default) resumes the session. `notify` moves it to Needs you. sbd runs an action when the wait is met. When the wait ends without its condition, sbd runs nothing and resumes the session that holds the wait, which is the operator unless `here` keeps the wait on a conversation. `merge` lands the target's PR. It needs kind session and state ready_to_merge, can't be used with `here`, and runs only in a repository that `operator.mergeRepos` in config.json lists. sbd merges after every check passes and sbd's judge, or else the operator, finds that the session's last reply leaves nothing for the user. `rm-worktree` removes the session and its worktree after its PR merged. It needs kind session with state done, or kind merge with an owner/name#N target. `rm` removes the session. It needs kind session and state done. `report` records the note as a report. It works with any kind except manual and needs `note`. Only a Manager conversation or the operator can arm an action. sbd asks the session that holds the wait about anything that needs a decision."
         ),
         "needsYou": boolean("For then report, makes the report an Inbox item that needs the user."),
         "here": boolean(
@@ -144,8 +147,21 @@ extension MCPToolServer {
         "todo": boolean("Adds a to-do. The user must resolve it before the session can be deleted."),
       ], required: ["session", "text"]),
     Tool(
+      "add_link",
+      "Adds a link to the calling session, such as a page or thread that the session posted to by a path Switchboard can't see. It takes any http or https URL. Switchboard already lists the Slack, Linear, Notion, Google Docs, and Grafana links in the user's prompts and the messages sent with the Slack connector.",
+      [
+        "url": string("The http or https URL."),
+        "title": string(
+          "A title of one line, at most \(ExternalLink.titleLimit) characters. Without it, the title is the URL."),
+      ], required: ["url"]),
+    Tool(
+      "remove_link",
+      "Removes a link that `add_link` added to the calling session. It refuses a link that the user added and a link that Switchboard found.",
+      ["link": string("The link's id: the `id` of a link in `get_session` with `full`.")], required: ["link"]),
+    Tool(
       "list_groups",
-      "Lists the groups with their descriptions, sessions, notes, and artifacts, then the sessions in no group."),
+      "Lists the groups with their descriptions, sessions, notes, links, and artifacts, then the sessions in no group. A group's artifacts include its links to claude.ai artifacts."
+    ),
     Tool(
       "add_group", "Adds a group.",
       [
@@ -164,6 +180,15 @@ extension MCPToolServer {
     Tool(
       "add_group_note", "Adds a note to a group.", ["group": group, "text": string("The note.")],
       required: ["text"]),
+    Tool(
+      "add_group_artifact",
+      "Attaches a claude.ai artifact to a group as a link, so it lists among the group's artifacts. It takes only a https://claude.ai/artifact/ or https://claude.ai/code/artifact/ link, and the link's title is its URL.",
+      ["group": group, "url": string("The claude.ai artifact link.")], required: ["url"]),
+    Tool(
+      "remove_group_artifact",
+      "Removes a link that `add_group_artifact` attached to a group. It refuses a link that the user added.",
+      ["group": group, "link": string("The link's id: the `link` of an artifact in `list_groups`.")],
+      required: ["link"]),
     Tool(
       "suggest_groups",
       "Lists at most \(GroupSuggestions.defaultLimit) groups suggested from dependencies, branch prefixes, and PR title scopes. With `accept`, it accepts that suggestion instead.",
@@ -186,8 +211,26 @@ extension MCPToolServer {
       [
         "session": session,
         "every": interval,
-        "prompt": string("The prompt to send on each run."),
-      ], required: ["every", "prompt"]),
+        "prompt": string(
+          "The prompt to send on each run. Required without `topup`. With `topup` and no prompt, Switchboard writes one."
+        ),
+        "topup": [
+          "type": "object",
+          "description": .string(
+            "Makes the schedule a work queue top-up. On each run Switchboard counts the active work sessions of the group in the repository. A session needs attention when it is Ready to merge and no wait will merge it, when it is Done or merged and no wait will remove it, or when Switchboard can't read its repository or host. When the group has its target and no session needs attention, Switchboard records the check and sends nothing. When the group is short and no session needs attention, a one-shot judge picks the most important open issues and follow-ups by the rubric, and Switchboard starts each issue with the template as its prompt and each follow-up with its own prompt, arms the removal of its worktree once it is done, and records one report. Otherwise, or when the top-up fails, it sends the prompt with the queue status, the rubric, and the template to the session. Only a Manager conversation, the Operator, or the user can add one, and a group chat can't."
+          ),
+          "properties": [
+            "group": group,
+            "repo": string("The repository as owner/name."),
+            "target": integer("How many active work sessions the group should have, 1 to 20."),
+            "template": string(
+              "The prompt of each session started from an issue, with the placeholders {url}, {title}, {number}, {repo}, and {body}."
+            ),
+            "rubric": string("How to rank the open issues and follow-ups, most important first."),
+          ],
+          "required": ["group", "repo", "target", "template", "rubric"],
+        ],
+      ], required: ["every"]),
     Tool(
       "list_schedules",
       "Lists the schedules with their session, prompt, interval, next run, and last result, the next due first. Pass a session to list only its schedules. A next run in the past means the run waits for the session to be free.",
@@ -220,11 +263,13 @@ extension MCPToolServer {
       ], required: ["reason"]),
     Tool(
       "report",
-      "Records a report from the operator, which `sb operator reports` lists. It works only in the operator. With `needsYou`, the report stays in the user's Inbox until the user answers the operator or acknowledges it. sbd records reports too, for a wait's report action and for each merge or removal that a wait's action made.",
+      "Records a report from the operator, which `sb operator reports` lists. It works only in the operator. With `needsYou`, the report is a question for the user. It shows as an Inbox item on the session that `session` names. Without `session`, it shows on the conversation that handed the operator the work. It stays open until the user answers it or acknowledges it there. Every report shows in the Loops tab's Background Activity list. sbd records reports too, for a wait's report action and for each merge or removal that a wait's action made.",
       [
         "text": string("What happened, or the question for the user, in one line."),
         "needsYou": boolean("Puts the report in the Inbox, for a decision that only the user can make."),
-        "session": string("The session that the report is about: an id, a unique id prefix, or a unique name."),
+        "session": string(
+          "The session that the report is about: an id, a unique id prefix, or a unique name. Pass it whenever the question is about one session, so the user answers on that session's Inbox item."
+        ),
       ], required: ["text"]),
     Tool(
       "approve",

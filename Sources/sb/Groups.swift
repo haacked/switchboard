@@ -145,7 +145,7 @@ private func printGroupHeader(_ g: GroupSummary) {
 }
 
 /// Such as `account: personal (/Users/me/.claude-personal)`.
-private func accountLine(_ folder: String) -> String { "account: \(ClaudeAccount(folder: folder).name) (\(folder))" }
+private func accountLine(_ folder: String) -> String { "account: \(Account.name(ofFolder: folder)) (\(folder))" }
 
 private func printGroups(_ list: GroupList) {
   if list.groups.isEmpty && list.ungrouped.isEmpty {
@@ -180,7 +180,10 @@ private func authorName(_ author: Author) -> String { author == .claude ? "Claud
 
 private func printArtifactsPlansAndSessions(_ g: GroupSummary) {
   for a in g.artifacts ?? [] {
-    print("  artifact: \(a.title)  \(a.url)  by \(a.sessionName)\(a.removed == nil ? "" : " (removed)")".printable)
+    let source = [a.sessionName.map { "by \($0)" }, a.link.map { "link \($0)" }].compactMap { $0 }
+    print(
+      "  artifact: \(a.title)  \(a.url)  \(source.joined(separator: ", "))\(a.removed == nil ? "" : " (removed)")"
+        .printable)
   }
   for p in g.plans ?? [] { printPlan(p, indent: "  ") }
   print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))

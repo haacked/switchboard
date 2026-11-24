@@ -111,6 +111,7 @@ extension Service {
   func forgetSession(_ id: String, resolving: Set<String>) throws {
     guard let session = entries[id]?.session else { throw APIError("no session \(id)") }
     try refuseOperatorRemoval(id)
+    try refuseConversationRemoval(id)
     if let refusal = trashRefusal(id) { throw refusal }
     // Only a merged PR leaves marks. Other removals skip the summary.
     let removed = entries[id]?.facts.pr?.state == .merged ? summary(id) : nil
@@ -120,9 +121,11 @@ extension Service {
     removedNames[id] = session.name
     if let removed { markAddressedIssues(removed) }
     entries[id] = nil
+    forgetChild(id)
     slashListings[id] = nil
     hostEvents[id] = nil
     pruneDeclinedSuggestions()
+    syncOperatorItems()
   }
 
   /// Resolves an open to-do as the user, and records it in `resolved_todos`.

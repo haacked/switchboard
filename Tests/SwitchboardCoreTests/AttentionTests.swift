@@ -39,6 +39,70 @@ func tool(_ name: String, _ input: [String: JSON], id: String? = nil, agent: Str
     #expect(v == Verdict(state: .needsYou, reason: "give it a first prompt"))
   }
 
+  @Test(arguments: ["started", "resumed"]) func aLaunchPromptThatClaudeHasNotTakenReadsWorking(_ kind: String) {
+    let f = facts([event(kind, 1, ["prompt": "fix it"])])
+    let v = Attention.evaluate(session(), f, now: 2)
+    #expect(v == Verdict(state: .working, reason: "starting with its first prompt"))
+    let started = facts([event(kind, 1, ["prompt": "fix it"]), event("SessionStart", 5)])
+    #expect(Attention.evaluate(session(), started, now: 6).state == .working)
+  }
+
+  @Test func aLaunchWithoutAPromptStillNeedsAFirstPrompt() {
+    for prompt in [nil, ""] as [String?] {
+      let f = facts([event("started", 1, prompt.map { ["prompt": .string($0)] } ?? [:]), event("SessionStart", 2)])
+      #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .needsYou, reason: "give it a first prompt"))
+    }
+  }
+
+  @Test(arguments: ["exited", "stopped", "SessionEnd"]) func aClaudeThatEndsBeforeTakingTheLaunchPromptNeedsYou(
+    _ ending: String
+  ) {
+    let f = facts([event("started", 1, ["prompt": "fix it"]), event(ending, 4)])
+    #expect(Attention.evaluate(session(), f, now: 5) == Verdict(state: .needsYou, reason: "give it a first prompt"))
+  }
+
+  @Test func aRelaunchWithAPromptAfterAnExitReadsWorkingAgain() {
+    let f = facts([
+      event("started", 1, ["prompt": "a"]), event("exited", 4), event("resumed", 10, ["prompt": "b"]),
+    ])
+    #expect(Attention.evaluate(session(), f, now: 11).state == .working)
+  }
+
+  @Test func aLaunchPromptThatNeverArrivesStopsHidingTheSession() {
+    let f = facts([event("started", 1, ["prompt": "fix it"])])
+    let late = 1 + SessionFacts.launchPromptWindowMs
+    #expect(Attention.evaluate(session(), f, now: late - 1).state == .working)
+    #expect(Attention.evaluate(session(), f, now: late) == Verdict(state: .needsYou, reason: "give it a first prompt"))
+  }
+
+  @Test func theLaunchPromptIsTakenWhenClaudeSubmitsIt() {
+    let f = facts([
+      event("started", 1, ["prompt": "fix it"]), event("SessionStart", 2),
+      event("UserPromptSubmit", 3, ["prompt": "fix it"]),
+      event("Stop", 4, ["last_assistant_message": "Done."]),
+    ])
+    #expect(!f.launchPromptPending(now: 5))
+    #expect(Attention.evaluate(session(), f, now: 5).state != .working)
+  }
+
+  @Test func aFirstMessagePastedIntoABareSessionReadsWorking() {
+    let f = facts([event("started", 1), event("SessionStart", 2), event("pasting", 3, ["text": "fix it"])])
+    #expect(
+      Attention.evaluate(session(), f, now: 4) == Verdict(state: .working, reason: "starting with its first prompt"))
+  }
+
+  @Test(arguments: ["started", "resumed"]) func aBuiltInCommandAsTheLaunchPromptLeavesNothingPending(_ kind: String) {
+    let f = facts([event(kind, 1, ["prompt": "/compact"]), event("SessionStart", 2)])
+    #expect(!f.launchPromptPending(now: 3))
+    #expect(Attention.evaluate(session(), f, now: 3) == Verdict(state: .needsYou, reason: "give it a first prompt"))
+  }
+
+  @Test func aTrustDialogExitComesBeforeAPendingLaunchPrompt() {
+    var f = facts([event("started", 1, ["prompt": "fix it"])])
+    f.exitedAtTrust = true
+    #expect(Attention.evaluate(session(), f, now: 2).state == .needsYou)
+  }
+
   @Test func runningTurnIsWorkingWithItsTool() {
     let f = facts([
       event("SessionStart", 0), event("UserPromptSubmit", 1000, ["prompt": "go"]),
@@ -1238,21 +1302,26 @@ enum PausedShape: String, CaseIterable, Sendable, CustomTestStringConvertible {
   }
 }
 
-/// The operator's report verdict. It nests under `TriageOperatorTests`, so
-/// that suite's filter runs it.
+/// The operator's ask verdict for reports that sbd could not route to another session. It nests under
+/// `TriageOperatorTests`, so that suite's filter runs it.
 extension TriageOperatorTests {
   @Suite struct ReportVerdicts {
+    /// The operator's verdict with no Manager conversation, so its open reports and waits stay on it.
     func verdict(_ events: [Event], waits: [Wait] = []) -> Verdict {
-      Attention.evaluate(operatorSession(waits: waits), facts(events), now: 1000)
+      let s = operatorSession(waits: waits)
+      return Attention.evaluate(s, opRouted(s, facts(events)), now: 1000)
     }
 
     @Test func anOpenReportPutsTheOperatorInNeedsYouWithItsText() {
       let v = verdict(opIdle + [opReport(10, "PR #12 is green. Merge it?")])
 
-      #expect(v == Verdict(state: .needsYou, reason: "PR #12 is green. Merge it?"))
+      #expect(v == Verdict(state: .needsYou, reason: "Operator: PR #12 is green. Merge it?"))
     }
 
-    @Test(arguments: [(2, "b (and 1 more)"), (3, "c (and 2 more)"), (4, "d (and 3 more)")] as [(Int, String)])
+    @Test(
+      arguments: [
+        (2, "Operator: b (and 1 more)"), (3, "Operator: c (and 2 more)"), (4, "Operator: d (and 3 more)"),
+      ] as [(Int, String)])
     func severalOpenReportsGiveTheLatestTextAndTheCountOfTheRest(_ count: Int, _ reason: String) {
       let texts = ["a", "b", "c", "d"].prefix(count)
       let reports = texts.enumerated().map { opReport(Int64(10 + $0.offset), $0.element) }
@@ -1265,18 +1334,18 @@ extension TriageOperatorTests {
     @Test func aClosedReportLeavesTheCount() {
       let v = verdict(opIdle + [opReport(10, "a"), opAck(11), opReport(12, "b")])
 
-      #expect(v == Verdict(state: .needsYou, reason: "b"))
+      #expect(v == Verdict(state: .needsYou, reason: "Operator: b"))
     }
 
     @Test func aReportWithoutNeedsYouGivesNoReportVerdict() {
       let v = verdict(opIdle + [opReport(10, "Removed the kid's worktree.", needsYou: false)])
 
-      #expect(v.reason != "Removed the kid's worktree.")
+      #expect(!v.reason.contains("Removed the kid's worktree."))
     }
 
-    /// What the operator holds besides its report, which the report verdict comes before.
+    /// What the operator holds besides its report, which the ask verdict comes before.
     enum Beside: CaseIterable, Sendable {
-      case openWait, overdueWait, notifyOutcome, questionReply, offerReply, informationalReply, noPrompt
+      case openWait, overdueWait, notifyOutcome, questionReply, offerReply, informationalReply, noPrompt, runningTurn
 
       func events() throws -> [Event] {
         switch self {
@@ -1285,6 +1354,7 @@ extension TriageOperatorTests {
         case .questionReply: [opPrompt(1, "go"), stop(2, 2, proseQuestion)]
         case .offerReply: [opPrompt(1, "go"), stop(2, 2, "I removed the worktree. Want me to top up the queue?")]
         case .noPrompt: []
+        case .runningTurn: [opPrompt(1, "go")]
         }
       }
 
@@ -1297,43 +1367,163 @@ extension TriageOperatorTests {
       }
     }
 
-    @Test(arguments: Beside.allCases) func theReportVerdictComesBeforeTheWaitAndReplyVerdicts(_ beside: Beside) throws {
+    @Test(arguments: Beside.allCases)
+    func theAskVerdictComesBeforeTheWorkingWaitAndReplyVerdicts(_ beside: Beside) throws {
       let without = verdict(try beside.events(), waits: beside.waits)
-      try #require(without.reason != "Merge it?")
+      try #require(without.reason != "Operator: Merge it?")
 
       let v = verdict(try beside.events() + [opReport(10, "Merge it?")], waits: beside.waits)
 
-      #expect(v == Verdict(state: .needsYou, reason: "Merge it?"))
+      #expect(v == Verdict(state: .needsYou, reason: "Operator: Merge it?"))
     }
 
     @Test func aReportMadeAfterTheUsersMessageStillWins() {
       let v = verdict(opIdle + [opUserSent(9, "go on")] + opTurn(10, "go on") + [opReport(20, "Merge it?")])
 
-      #expect(v == Verdict(state: .needsYou, reason: "Merge it?"))
+      #expect(v == Verdict(state: .needsYou, reason: "Operator: Merge it?"))
     }
 
-    @Test func aReportClosedByTheUsersMessageGivesTheReplyVerdictAgain() {
+    @Test func aReportClosedByTheUsersMessageLeavesTheOperatorIdle() {
       let v = verdict(opIdle + [opReport(10, "Merge it?"), opUserSent(11, "yes")] + opTurn(12, "yes"))
 
-      #expect(v == Attention.replyVerdict("Done: yes"))
+      #expect(v == Verdict(state: .waiting, reason: "idle"))
     }
 
-    @Test func aReportClosedByAckGivesTheWaitVerdictAgain() {
+    @Test func aReportClosedByAckGivesTheHeldWaitVerdictAgain() {
       let v = verdict(opIdle + [opReport(10, "Merge it?"), opAck(11)], waits: [overdueWait])
 
-      #expect(v.state == .needsYou)
-      #expect(v.reason == overdueWait.overdueLine)
+      #expect(
+        v == Verdict(state: .needsYou, reason: "Background follow-through still waits: \(overdueWait.overdueLine)"))
+      #expect(v.fromOperator)
     }
 
-    /// Only the operator has a report verdict. Another kind gives the same verdict with or without the reports.
+    /// Report events route nothing on their own. Another kind gives the same verdict with or without them.
     @Test(arguments: [SessionKind.work, .manager, .chat]) func anotherKindIgnoresReports(_ kind: SessionKind) {
       let events = opIdle + [opReport(10, "Merge it?")]
 
       let v = Attention.evaluate(kindSession(kind), facts(events), now: 1000)
 
       #expect(v == Attention.evaluate(kindSession(kind), facts(opIdle), now: 1000))
-      #expect(v.reason != "Merge it?")
+      #expect(!v.reason.contains("Merge it?"))
     }
+  }
+}
+
+/// `SessionFacts.contextTokens`, the input context of a Manager conversation's latest turn. sbd records a `context`
+/// event after each turn, and a `/clear` or a compaction starts a context that the old value doesn't describe.
+@Suite struct ConversationContextFoldTests {
+  @Test func noContextEventLeavesTheTokensUnset() {
+    #expect(facts([event("SessionStart", 0), event("Stop", 1)]).contextTokens == nil)
+  }
+
+  @Test func aContextEventSetsTheTokens() {
+    let f = facts([event("Stop", 1), event("context", 2, ["tokens": 250_000])])
+
+    #expect(f.contextTokens == 250_000)
+  }
+
+  @Test func aLaterContextEventReplacesTheTokens() {
+    let f = facts([event("context", 2, ["tokens": 250_000]), event("context", 4, ["tokens": 90_000])])
+
+    #expect(f.contextTokens == 90_000)
+  }
+
+  /// sbd records null when a read finds no value while one is stored, as after a compaction without a turn since.
+  @Test func aContextEventWithNullTokensClearsThem() {
+    let f = facts([event("context", 2, ["tokens": 250_000]), event("context", 4, ["tokens": .null])])
+
+    #expect(f.contextTokens == nil)
+  }
+
+  @Test func aContextEventLeavesTheLastActivity() {
+    let f = facts([event("Stop", 1), event("context", 500, ["tokens": 250_000])])
+
+    #expect(f.lastActivity == 1)
+  }
+
+  @Test(arguments: ["clear", "compact"])
+  func aSessionStartOfANewContextClearsTheTokens(_ source: String) {
+    let f = facts([event("context", 2, ["tokens": 250_000]), event("SessionStart", 3, ["source": .string(source)])])
+
+    #expect(f.contextTokens == nil)
+  }
+
+  @Test func aSessionStartThatResumesKeepsTheTokens() {
+    let f = facts([event("context", 2, ["tokens": 250_000]), event("SessionStart", 3, ["source": "resume"])])
+
+    #expect(f.contextTokens == 250_000)
+  }
+
+  @Test func aContextEventAfterAClearSetsTheTokensAgain() {
+    let f = facts([
+      event("context", 2, ["tokens": 250_000]), event("SessionStart", 3, ["source": "clear"]),
+      event("context", 5, ["tokens": 12_000]),
+    ])
+
+    #expect(f.contextTokens == 12_000)
+  }
+}
+
+/// The sessions that a Manager conversation spawned, folded from the conversation's own events: `child` when it
+/// created one, `linked` when `sb parent` linked one in, and `unlinked` when `sb parent --clear` took one out. The
+/// set keeps a child after its removal. `end-hint-dismissed` records the key of the hint that the user dismissed.
+@Suite struct ConversationSpawnFoldTests {
+  @Test func noEventsLeaveNothingSpawnedAndNothingDismissed() {
+    let f = facts([event("SessionStart", 0), event("Stop", 1)])
+
+    #expect(f.spawned.isEmpty)
+    #expect(f.endHintDismissed == nil)
+  }
+
+  @Test func aChildEventAddsTheChild() {
+    #expect(facts([event("child", 2, ["child": "k1"])]).spawned == ["k1"])
+  }
+
+  @Test func aLinkedEventWithAChildAddsTheChild() {
+    #expect(facts([event("linked", 2, ["child": "k1", "by": "you"])]).spawned == ["k1"])
+  }
+
+  /// sbd records `linked` on the child too, with `parent` and no `child`. The child spawned nothing.
+  @Test func aLinkedEventThatNamesOnlyAParentAddsNothing() {
+    #expect(facts([event("linked", 2, ["parent": "m1", "by": "you"])]).spawned.isEmpty)
+  }
+
+  @Test func anUnlinkedEventRemovesTheChild() {
+    let f = facts([
+      event("child", 2, ["child": "k1"]), event("child", 3, ["child": "k2"]),
+      event("unlinked", 4, ["child": "k1", "by": "you"]),
+    ])
+
+    #expect(f.spawned == ["k2"])
+  }
+
+  @Test func anUnlinkedEventThatNamesOnlyAParentRemovesNothing() {
+    let f = facts([event("child", 2, ["child": "k1"]), event("unlinked", 4, ["parent": "m1", "by": "you"])])
+
+    #expect(f.spawned == ["k1"])
+  }
+
+  @Test func theDismissedEventRecordsTheKey() {
+    #expect(facts([event("end-hint-dismissed", 2, ["key": "done:1"])]).endHintDismissed == "done:1")
+  }
+
+  @Test func aLaterDismissalReplacesTheKey() {
+    let f = facts([
+      event("end-hint-dismissed", 2, ["key": "context:2"]), event("end-hint-dismissed", 4, ["key": "context:3"]),
+    ])
+
+    #expect(f.endHintDismissed == "context:3")
+  }
+
+  /// None of these kinds moves `lastActivity`, so none holds off the idle stop or brings back an archived
+  /// conversation.
+  @Test(arguments: [
+    event("child", 500, ["child": "k1"]), event("linked", 500, ["child": "k1", "by": "you"]),
+    event("unlinked", 500, ["child": "k1", "by": "you"]), event("end-hint-dismissed", 500, ["key": "done:1"]),
+    event("context", 500, ["tokens": 250_000]),
+  ])
+  func aConversationEventLeavesTheLastActivity(_ e: Event) {
+    #expect(facts([event("Stop", 1), e]).lastActivity == 1)
   }
 }
 
@@ -1382,5 +1572,74 @@ extension TriageOperatorTests {
 
     #expect(!f.turnRunning)
     #expect(f.lastReply == "Hi.")
+  }
+}
+
+/// `SessionFacts.promptOnItsWaySince`, which a restarted sbd reads to count a prompt that claude has not submitted
+/// as a message on its way.
+@Suite struct PromptOnItsWayFoldTests {
+  static let text = "the deploy finished"
+
+  static func pasting(_ t: Int64, _ text: String = text) -> Event { event("pasting", t, ["text": .string(text)]) }
+  static func delivered(_ t: Int64, _ text: String = text) -> Event { event("delivered", t, ["text": .string(text)]) }
+  static func submit(_ t: Int64) -> Event { event("UserPromptSubmit", t, ["prompt": .string(text)]) }
+  static let ready = [event("resumed", 0, ["prompt": .null]), event("SessionStart", 100)]
+
+  @Test func aLaunchWithAPromptSetsTheLaunchsTime() {
+    #expect(facts([event("resumed", 50, ["prompt": .string(Self.text)])]).promptOnItsWaySince == 50)
+  }
+
+  @Test func aLaunchWithoutAPromptSetsNothing() {
+    #expect(facts(Self.ready).promptOnItsWaySince == nil)
+  }
+
+  @Test func theLaunchsSessionStartMovesTheTime() {
+    let f = facts([event("resumed", 50, ["prompt": .string(Self.text)]), event("SessionStart", 80)])
+
+    #expect(f.promptOnItsWaySince == 80)
+  }
+
+  /// `pasting` reaches the log before the paste starts, so its time is in the past at any later restart.
+  @Test func aPasteSetsThePastingTimeAndDeliveredKeepsIt() {
+    #expect(facts(Self.ready + [Self.pasting(200)]).promptOnItsWaySince == 200)
+    #expect(facts(Self.ready + [Self.pasting(200), Self.delivered(210)]).promptOnItsWaySince == 200)
+  }
+
+  @Test func theSubmitClearsAPaste() {
+    let f = facts(Self.ready + [Self.pasting(200), Self.delivered(210), Self.submit(300)])
+
+    #expect(f.promptOnItsWaySince == nil)
+  }
+
+  /// The hook can reach sbd before the paste's `delivered` does.
+  @Test func aSubmitBeforeDeliveredLeavesNothingOnItsWay() {
+    let f = facts(Self.ready + [Self.pasting(200), Self.submit(205), Self.delivered(210)])
+
+    #expect(f.promptOnItsWaySince == nil)
+  }
+
+  @Test(arguments: ["/compact", "/clear", "/model opus"])
+  func aBuiltInCommandsPasteSetsNothing(_ command: String) {
+    let f = facts(Self.ready + [Self.pasting(200, command), Self.delivered(210, command)])
+
+    #expect(f.promptOnItsWaySince == nil)
+  }
+
+  /// A skill sends a prompt, so its UserPromptSubmit confirms it as for any other message.
+  @Test func aSkillsPasteSetsTheTime() {
+    #expect(facts(Self.ready + [Self.pasting(200, "/code-review")]).promptOnItsWaySince == 200)
+  }
+
+  /// `requeued` puts the message back in the queue, which counts it from then on.
+  @Test func aRequeueClearsAPaste() {
+    let f = facts(Self.ready + [Self.pasting(200), event("requeued", 210, ["text": .string(Self.text)])])
+
+    #expect(f.promptOnItsWaySince == nil)
+  }
+
+  @Test func aLaterLaunchWithoutAPromptClearsAPaste() {
+    let f = facts(Self.ready + [Self.pasting(200), event("exited", 250), event("resumed", 300, ["prompt": .null])])
+
+    #expect(f.promptOnItsWaySince == nil)
   }
 }

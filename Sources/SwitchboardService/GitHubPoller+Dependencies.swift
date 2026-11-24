@@ -10,7 +10,10 @@ extension GitHubPoller {
   /// PR's repo for the session's host.
   private func currentPR(_ s: Watched) -> PullRequest? {
     (tracked[s.id]?.prId.flatMap { prs[$0]?.pr } ?? s.facts.pr).flatMap {
-      mayRead($0.repo, for: s.site.hostName) ? $0 : nil
+      // A session that another live session's PR was refused for gets no dependencies from that PR.
+      let refused =
+        s.facts.pr?.id != $0.id && service.prOwner(of: $0.id, besides: s.id, onHost: s.site.hostName) != nil
+      return mayRead($0.repo, for: s.site.hostName) && !refused ? $0 : nil
     }
   }
 

@@ -5,17 +5,14 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// The chat pane of a Manager conversation or the operator checks a draft that starts with a command before it
-/// sends it. It fetches `slash-commands` again, and a row labeled `work` sets an offer in place of the send: Spawn a
-/// session with this, Run here anyway, or Cancel. Any other draft, and any draft to another kind of session, sends.
+/// The Message Claude field of a Manager conversation or the operator checks a draft that starts with a command
+/// before it sends it. It fetches `slash-commands` again, and a row labeled `work` sets an offer in place of the
+/// send: Spawn a session with this, Run here anyway, or Cancel. Any other draft, and any draft to another kind of
+/// session, sends.
 @MainActor
 @Suite struct BoardModelManagerSkillsTests {
   static let conversation = needsItem("m", manager: true)
-  static let operatorSession: SessionSummary = {
-    var s = needsItem("op")
-    s.kind = .operator
-    return s
-  }()
+  static let operatorSession = operatorItem()
   static let work = needsItem("w")
   static let chat = chatItem("c", group: "g1")
   static let sessions = [conversation, operatorSession, work, chat]
@@ -31,8 +28,10 @@ import Testing
 
   /// A model that lists `sessions` and whose `send` records every request. sbd answers `slash-commands` with
   /// `slash`, or refuses it when `slash` is nil, and answers the rest with null. With `hold`, each `slash-commands`
-  /// answer waits for a signal of `hold`.
-  func slashModel(slash: [SlashCommand]?, hold: DispatchSemaphore? = nil) throws -> (BoardModel, SentRequests) {
+  /// answer waits for a signal of `hold`. With `refuseSend`, sbd refuses every `send`.
+  func slashModel(slash: [SlashCommand]?, hold: DispatchSemaphore? = nil, refuseSend: Bool = false) throws
+    -> (BoardModel, SentRequests)
+  {
     let model = appliedModel(Self.sessions)
     let sent = SentRequests()
     let answer: JSON? = try slash.map { .object(["commands": try JSON(encoding: $0), "listing": true]) }
@@ -43,6 +42,7 @@ import Testing
         guard let answer else { throw Boom() }
         return answer
       }
+      if op == "send", refuseSend { throw Refusal(description: "the session is gone") }
       return .null
     }
     return (model, sent)
@@ -98,7 +98,6 @@ import Testing
     await pause()
 
     #expect(sends(sent).isEmpty)
-    #expect((model.pendingChat[session] ?? []).isEmpty)
   }
 
   @Test func aWorkLabelKeepsTheDraft() async throws {
@@ -377,6 +376,165 @@ import Testing
     await sent.wait(for: "send")
 
     #expect(sent.value.first?.args["runHere"] == true)
+  }
+
+  // MARK: The caller's completion
+
+  /// Waits until sbd has answered the session's `send` and the model has run what follows the answer.
+  func untilAnswered(_ model: BoardModel, _ sent: SentRequests, _ session: String) async {
+    await sent.wait(for: "send")
+    await settle { !model.sending.contains(session) }
+    await pause()
+  }
+
+  @Test(arguments: ["m", "op"])
+  func aWorkLabelSetsTheOfferAndNeverRunsThen(_ session: String) async throws {
+    let (model, _) = try slashModel(slash: Self.rows(go: .work))
+    let ran = Counter()
+
+    model.submitChecked(session: session, draft: draft("/go x"), then: { ran.increment() })
+    await settle { model.workSkillOffers[session] != nil }
+    await pause()
+
+    #expect(model.workSkillOffers[session] != nil)
+    #expect(ran.value == 0)
+  }
+
+  @Test func aDraftChangedDuringTheReadRunsNoThen() async throws {
+    let hold = DispatchSemaphore(value: 0)
+    defer { hold.signal() }
+    let (model, sent) = try slashModel(slash: Self.rows(go: .safe), hold: hold)
+    let field = draft("/go x")
+    let ran = Counter()
+    model.submitChecked(session: "m", draft: field, then: { ran.increment() })
+    await sent.wait(for: "slash-commands")
+
+    field.text = "/go y"
+    hold.signal()
+    await settle { !model.sending.contains("m") }
+    await pause()
+
+    #expect(sends(sent).isEmpty)
+    #expect(ran.value == 0)
+  }
+
+  @Test func aSecondSubmitDroppedDuringTheReadRunsNoThen() async throws {
+    let hold = DispatchSemaphore(value: 0)
+    defer { hold.signal() }
+    let (model, sent) = try slashModel(slash: Self.rows(go: .safe), hold: hold)
+    let field = draft("/go x")
+    let first = Counter()
+    let second = Counter()
+    model.submitChecked(session: "m", draft: field, then: { first.increment() })
+    await sent.wait(for: "slash-commands")
+
+    model.submitChecked(session: "m", draft: field, then: { second.increment() })
+    hold.signal()
+    await untilAnswered(model, sent, "m")
+
+    #expect(first.value == 1)
+    #expect(second.value == 0)
+  }
+
+  // MARK: Every path that sends runs the completion once (parity)
+
+  /// Each way a draft reaches `draft.submit`: through the gate's read, past the gate before the read, past a failed
+  /// read, to a session without a gate, and the field's plain submit.
+  enum SendPath: CaseIterable {
+    case managerSafeCommand, managerUnlabeledCommand, managerPlainText, operatorPlainText, failedReadWithNoRows
+    case chatPlainText, chatWorkCommand, workSessionWorkCommand, plainSubmit
+
+    var session: String {
+      switch self {
+      case .managerSafeCommand, .managerUnlabeledCommand, .managerPlainText, .failedReadWithNoRows: "m"
+      case .operatorPlainText: "op"
+      case .chatPlainText, .chatWorkCommand: "c"
+      case .workSessionWorkCommand, .plainSubmit: "w"
+      }
+    }
+
+    var text: String {
+      switch self {
+      case .managerPlainText, .operatorPlainText, .chatPlainText, .plainSubmit: "hello"
+      default: "/go x"
+      }
+    }
+  }
+
+  /// The rows that sbd's `slash-commands` answer holds for the path, or nil when sbd refuses the read.
+  func slash(for path: SendPath) -> [SlashCommand]? {
+    switch path {
+    case .managerSafeCommand: Self.rows(go: .safe)
+    case .managerUnlabeledCommand: Self.rows(go: nil)
+    case .failedReadWithNoRows: nil
+    default: Self.rows(go: .work)
+    }
+  }
+
+  /// Sends `path`'s text the way `path` reaches `draft.submit`.
+  func submit(_ path: SendPath, to model: BoardModel, then: @escaping () -> Void) {
+    if path == .plainSubmit {
+      draft(path.text).submit(path.session, to: model, then: then)
+    } else {
+      model.submitChecked(session: path.session, draft: draft(path.text), then: then)
+    }
+  }
+
+  @Test(arguments: SendPath.allCases)
+  func aRefusedSendRunsNoThen(_ path: SendPath) async throws {
+    let (model, sent) = try slashModel(slash: slash(for: path), refuseSend: true)
+    let ran = Counter()
+
+    submit(path, to: model, then: { ran.increment() })
+    await untilAnswered(model, sent, path.session)
+
+    #expect(texts(sent) == [path.text])
+    #expect(ran.value == 0)
+  }
+
+  @Test(arguments: SendPath.allCases)
+  func everyPathThatSendsRunsThenExactlyOnce(_ path: SendPath) async throws {
+    let (model, sent) = try slashModel(slash: slash(for: path))
+    let ran = Counter()
+
+    submit(path, to: model, then: { ran.increment() })
+    await untilAnswered(model, sent, path.session)
+
+    #expect(texts(sent) == [path.text])
+    #expect(ran.value == 1)
+  }
+
+  // MARK: Run here anyway hides the field
+
+  /// A model whose Manager conversation `m` shows its Message Claude field and offers a choice for `/go x`.
+  func offered(refuseSend: Bool = false) async throws -> (BoardModel, SentRequests, MessageField.Draft) {
+    let (model, sent) = try slashModel(slash: Self.rows(go: .work), refuseSend: refuseSend)
+    model.revealMessageField("m", focus: false)
+    let field = model.messageDraft(for: Self.conversation)
+    field.text = "/go x"
+    await submitUntilOffer(model, "m", field)
+    try #require(model.revealedMessageField == "m")
+    return (model, sent, field)
+  }
+
+  @Test func runHereAnywayHidesTheFieldOnceSbdAcceptsIt() async throws {
+    let (model, sent, field) = try await offered()
+
+    model.runHereAnyway("m", draft: field)
+    await untilAnswered(model, sent, "m")
+
+    #expect(texts(sent) == ["/go x"])
+    #expect(model.revealedMessageField == nil)
+  }
+
+  @Test func runHereAnywayKeepsTheFieldRevealedWhenSbdRefusesIt() async throws {
+    let (model, sent, field) = try await offered(refuseSend: true)
+
+    model.runHereAnyway("m", draft: field)
+    await untilAnswered(model, sent, "m")
+
+    #expect(texts(sent) == ["/go x"])
+    #expect(model.revealedMessageField == "m")
   }
 
   // MARK: Spawn a session with this

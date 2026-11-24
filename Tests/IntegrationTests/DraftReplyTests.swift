@@ -280,8 +280,7 @@ extension Instance {
     let s = try sessionWithCard(github, sbd, card: replyCard("\(pullURL)#discussion_r1001"))
     try sbd.waitFor("gh to read the comment") { !sbd.ghCalls("api \(Self.commentPath)").isEmpty }
 
-    // sbd ticks once a second.
-    Thread.sleep(forTimeInterval: 3)
+    Thread.sleep(forTimeInterval: 5 * Instance.tickSeconds)
     try sbd.openGhGate(gate)
 
     try sbd.waitForPost(s.id, "ready")
@@ -295,8 +294,7 @@ extension Instance {
     let s = try sessionWithCard(github, sbd, card: replyCard("\(pullURL)#discussion_r1001"))
     try sbd.waitForPost(s.id, "unresolved")
 
-    // sbd ticks once a second.
-    Thread.sleep(forTimeInterval: 3)
+    Thread.sleep(forTimeInterval: 5 * Instance.tickSeconds)
 
     #expect(sbd.ghCalls("api \(Self.commentPath)").count == 1, "\(sbd.ghCalls())")
   }

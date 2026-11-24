@@ -55,12 +55,9 @@ private func startedFollowup(_ id: String) -> SessionSummary {
 
   // MARK: Open in transcript
 
-  @Test func aChatOpensItsChatView() {
-    #expect(chatItem("c", group: "g1").transcriptTarget == .chat)
-  }
-
-  @Test func aManagerConversationOpensItsChatView() {
-    #expect(needsItem("m", manager: true).transcriptTarget == .chat)
+  @Test(arguments: ["c", "m", "op"])
+  func aConversationOpensItsOwnSessionView(_ id: String) throws {
+    #expect(try everyKindSession(id).transcriptTarget == .session)
   }
 
   @Test func aWorkSessionThatRunsClaudeOpensItsTerminal() {
@@ -384,28 +381,18 @@ private func startedFollowup(_ id: String) -> SessionSummary {
 
   // MARK: Open in transcript
 
-  @Test func openingAChatsTranscriptSelectsItsChatView() throws {
-    let chat = chatItem("c", group: "g1")
-    let model = appliedModel([chat, needsItem("a")])
+  /// The Terminal toggle belongs to the Inbox, so opening a conversation leaves it as it was.
+  @Test(arguments: ["c", "m", "op"], [false, true])
+  func openingAConversationsTranscriptSelectsIt(_ id: String, _ toggle: Bool) throws {
+    let conversation = try everyKindSession(id)
+    let model = appliedModel([conversation, needsItem("a")])
     model.show(.inbox)
-    model.showingTerminal = true
+    model.showingTerminal = toggle
 
-    model.openTranscript(chat)
+    model.openTranscript(conversation)
 
-    #expect(model.selection == "c")
-    #expect(!model.showingTerminal)
-  }
-
-  @Test func openingAManagersTranscriptSelectsItsChatView() throws {
-    let manager = needsItem("m", manager: true)
-    let model = appliedModel([manager, needsItem("a")])
-    model.show(.inbox)
-    model.showingTerminal = true
-
-    model.openTranscript(manager)
-
-    #expect(model.selection == "m")
-    #expect(!model.showingTerminal)
+    #expect(model.selection == id)
+    #expect(model.showingTerminal == toggle)
   }
 
   @Test func openingAWorkSessionsTranscriptShowsItsTerminalInTheInbox() throws {

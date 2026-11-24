@@ -91,13 +91,25 @@ final class TerminalHost {
       ["set-environment", "-g"] + (baseEnv[key].map { [key, $0] } ?? ["-u", key])
     }
     _ = try? run(Array(commands.joined(separator: [";"])))
+    enableHyperlinks()
   }
+
+  /// tmux reads tmux.conf only when its server starts, so a server that predates the hyperlinks feature never
+  /// reads it. This adds the feature to such a running server once. A client that attaches afterwards gets it.
+  private func enableHyperlinks() {
+    guard let features = try? run(["show-options", "-s", "terminal-features"]),
+      !features.contains(Self.hyperlinksFeature)
+    else { return }
+    _ = try? run(["set-option", "-s", "-a", "terminal-features", ",\(Self.hyperlinksFeature)"])
+  }
+
+  static let hyperlinksFeature = "xterm-256color:hyperlinks"
 
   /// The server's options. The panes have no status line, because the app
   /// draws its own window chrome. There is no prefix key, so Ctrl-B reaches
   /// Claude Code, and no key splits a pane or opens copy mode. focus-events
   /// and extended-keys pass focus reports and extended keys through to Claude
-  /// Code, as Ghostty does. A pane whose program exits keeps its last screen
+  /// Code, as Ghostty does. The hyperlinks feature passes a program's OSC 8 links to the app, which opens them. A pane whose program exits keeps its last screen
   /// until sbd starts it again.
   static let configText = """
     set -g status off
@@ -112,6 +124,7 @@ final class TerminalHost {
     set -s extended-keys on
     set -g default-terminal "xterm-256color"
     set -g set-clipboard on
+    set -as terminal-features ",\(hyperlinksFeature)"
 
     """
 

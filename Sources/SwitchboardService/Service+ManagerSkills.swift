@@ -120,7 +120,7 @@ extension Service {
     let outcome = headlessCall(
       .skillLabel, session: nil, arguments: SkillClassifier.arguments(model: settings.model),
       input: SkillClassifier.input(name: entry.name, text: text),
-      env: headlessEnv(session: nil, account: ClaudeAccount(folder: account)), folder: home.path,
+      env: queue.sync { headlessEnv(session: nil, account: ClaudeAccount(folder: account)) }, folder: home.path,
       timeout: settings.timeoutSeconds, parse: SkillClassifier.parse)
     switch outcome.result {
     case .success(let answer):

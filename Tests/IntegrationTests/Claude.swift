@@ -38,14 +38,15 @@ final class ClaudeInstance {
     }
     self.claude = claude
     // The panes run the login shell, as they do for real sessions, so claude
-    // runs its Bash tool in that shell.
+    // runs its Bash tool in that shell. A real claude redraws its prompt after
+    // SessionStart, so sbd keeps the production wait before a paste.
     sbd = try Instance(
       idleStopSeconds: idleStopSeconds, shell: ProcessInfo.processInfo.environment["SHELL"] ?? "/bin/zsh",
       inheriting: .runner,
       config: [
         "claude": .string(claude), "model": "haiku",
         "claudeArgs": ["--strict-mcp-config", "--permission-mode", "manual"],
-      ])
+      ].merging(Instance.productionPasteSettle) { $1 })
     guard let real = realpath(sbd.work, nil) else { throw TestError(description: "can't resolve \(sbd.work)") }
     cwd = String(cString: real)
     free(real)

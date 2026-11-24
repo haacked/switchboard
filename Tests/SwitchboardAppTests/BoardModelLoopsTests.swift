@@ -448,3 +448,103 @@ private func rowIds(_ model: BoardModel, now: Int64 = scheduleNow) -> [String] {
     #expect(MainView.allCases.last == .loops)
   }
 }
+
+// MARK: - The Operator's loop and Background Activity (#410)
+
+/// A report on the Operator, as `recordReport` records it.
+private func operatorReportEvent(_ id: Int64, _ text: String, about: String? = nil) -> Event {
+  var data: [String: JSON] = ["text": .string(text), "needsYou": false]
+  if let about { data["about"] = .string(about) }
+  return Event(id: id, session: "op", t: id * 1000, kind: "report", data: .object(data))
+}
+
+@MainActor
+extension BoardModelLoopsTests {
+  /// rm76hh is a loop on the Operator. It lists and edits although the Operator has no sidebar row.
+  @Test func theOperatorsLoopStillListsWithoutASidebarRow() {
+    let model = loopModel([loopSession("a", [activeLoop("r1")]), operatorSession([activeLoop("rm76hh")])])
+
+    #expect(rowIds(model).contains("rm76hh"))
+  }
+
+  @Test func theOperatorsLoopStillOpensInTheEditor() {
+    let model = loopModel([loopSession("a", [activeLoop("r1")]), operatorSession([activeLoop("rm76hh")])])
+
+    #expect(model.editedSchedule(.edit("rm76hh"))?.id == "rm76hh")
+  }
+
+  @Test func theLoopEditorStillOffersTheOperatorFirst() {
+    let model = loopModel([loopSession("a", [activeLoop("r1")]), operatorSession([activeLoop("rm76hh")])])
+
+    let choices = LoopEditor.sessionChoices(model.sessions, operatorID: model.operatorSession?.id)
+
+    #expect(choices.first?.session == "op")
+  }
+
+  // MARK: Background Activity
+
+  @Test func loadingTheActivityReadsTheOperatorsEvents() async {
+    let (model, sent) = recordingModel()
+    model.apply(.success([loopSession("a", nil), operatorSession([])]), followups: nil)
+
+    model.loadBackgroundActivity()
+    await sent.wait(for: "events")
+
+    let args = sent.value.first { $0.op == "events" }?.args
+    #expect(args?["session"] == "op")
+  }
+
+  @Test func loadingTheActivityAsksForTheActivityKinds() async {
+    let (model, sent) = recordingModel()
+    model.apply(.success([operatorSession([])]), followups: nil)
+
+    model.loadBackgroundActivity()
+    await sent.wait(for: "events")
+
+    let args = sent.value.first { $0.op == "events" }?.args
+    #expect(args?["kinds"] == .array(BackgroundActivity.kinds.map(JSON.string)))
+  }
+
+  @Test func loadingTheActivityAsksForTheActivityLimit() async {
+    let (model, sent) = recordingModel()
+    model.apply(.success([operatorSession([])]), followups: nil)
+
+    model.loadBackgroundActivity()
+    await sent.wait(for: "events")
+
+    let args = sent.value.first { $0.op == "events" }?.args
+    #expect(args?["limit"] == .number(Double(BackgroundActivity.limit)))
+  }
+
+  @Test func theActivityHoldsTheEntriesOfTheEventsAnswer() async throws {
+    let model = loopModel([loopSession("a", nil), operatorSession([])])
+    let events = [operatorReportEvent(1, "Merged #7", about: "a"), operatorReportEvent(2, "Removed fix-cache")]
+    let answer = try JSON(encoding: events)
+    model.send = { op, _ in op == "events" ? answer : .null }
+
+    model.loadBackgroundActivity()
+    await settle { !model.backgroundActivity.isEmpty }
+
+    #expect(model.backgroundActivity == BackgroundActivity.entries(events))
+  }
+
+  @Test func withoutAnOperatorTheActivityIsEmpty() async {
+    let model = loopModel([loopSession("a", nil)])
+    model.backgroundActivity = BackgroundActivity.entries([operatorReportEvent(1, "Merged #7")])
+
+    model.loadBackgroundActivity()
+    await settle { model.backgroundActivity.isEmpty }
+
+    #expect(model.backgroundActivity.isEmpty)
+  }
+
+  @Test func withoutAnOperatorTheActivityReadsNoEvents() async {
+    let (model, sent) = recordingModel()
+    model.apply(.success([loopSession("a", nil)]), followups: nil)
+
+    model.loadBackgroundActivity()
+    try? await Task.sleep(nanoseconds: 200_000_000)
+
+    #expect(!sent.ops.contains("events"))
+  }
+}

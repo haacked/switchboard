@@ -165,6 +165,29 @@ enum SessionShape: CaseIterable, CustomTestStringConvertible {
         ScheduleCaption(scheduleFixture("r1", last: run), session: freeSession, now: scheduleNow).result
           == "last: failed 2m ago: the folder /work/gone is missing")
     }
+
+    /// A gated check appends no run, so a top-up's row shows its last check beside its last run.
+    @Test func aTopupShowsItsLastCheckAfterItsLastRun() {
+      let run = Schedule.Run(t: scheduleNow - 3 * 24 * 60 * minuteMs, outcome: .pasted, skipped: 0)
+      var schedule = scheduleFixture("r1", last: run)
+      var gate = Schedule.Gate(
+        group: "g1", repo: "acme/widgets", target: 5, template: "Fix {url}", rubric: "Bugs first")
+      gate.last = Schedule.Gate.Check(
+        t: scheduleNow - 2 * minuteMs, result: .gated, active: 5, target: 5, started: [], skipped: [])
+      schedule.gate = gate
+
+      #expect(
+        ScheduleCaption(schedule, session: freeSession, now: scheduleNow).result
+          == "last: pasted 3d ago · top-up 5/5 · checked 2m ago: gated")
+    }
+
+    @Test func aTopupThatHasNotCheckedShowsOnlyItsLastRun() {
+      var schedule = scheduleFixture("r1")
+      schedule.gate = Schedule.Gate(
+        group: "g1", repo: "acme/widgets", target: 5, template: "Fix {url}", rubric: "Bugs first")
+
+      #expect(ScheduleCaption(schedule, session: freeSession, now: scheduleNow).result == "never ran")
+    }
   }
 
   @Suite struct Prompt {

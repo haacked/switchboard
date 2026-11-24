@@ -11,7 +11,8 @@ let usage = """
                                   remote, and in the groups G1 and G2, or in no
                                   group. --brief prints one line per session:
                                   its id, name, state, reason, PR, open waits,
-                                  and url
+                                  and url. The text and --brief lists leave out
+                                  the operator. --json keeps it
     ls --removed                  list the sessions that sbd removed, newest
                                   first, with the name each had
     new <folder> [--branch B | --worktree] [--base REF] [--name N] [--prompt P]
@@ -49,7 +50,13 @@ let usage = """
                                   runs it on this Mac. Without --host, it runs
                                   on its parent's host. A remote host takes
                                   no --followup or --account
-    account                       list the Claude accounts and the active one
+    account                       list the Claude and Codex accounts, each with
+                                  its agent, and the active one, which is a
+                                  Claude account. Sessions run only on Claude
+                                  accounts for now
+    account add <name> --agent claude|codex
+                                  make ~/.claude-<name> or ~/.codex-<name> and
+                                  print the command that signs it in
     account use <name|folder> [--move | --new-only]
                                   run new sessions under this account. --move
                                   moves the sessions whose claude is stopped
@@ -76,15 +83,27 @@ let usage = """
     manager <conv> --read         mark the conversation's replies read
     manager pin|unpin <conv>      pin the conversation to the top of the
                                   app's Conversations list, or unpin it
+    manager end <conv> [--drop <id>]… [--new [--name N]]
+                                  end the conversation: stop its claude and remove
+                                  it. Its transcript stays on disk. Its own waits
+                                  and schedules block the end until --drop names
+                                  each one. Waits it handed to the operator stay.
+                                  --new starts a conversation with its account,
+                                  MCP servers, and pin
+    manager hint <conv> [--dismiss]
+                                  the suggestion to end the conversation: every
+                                  session it started is done, or its context
+                                  passed conversationHintTokens. --dismiss hides
+                                  it until it changes
     manager mcp <conv> [add <server>… | rm <server>… | --all | --none]
                                   show or change the MCP servers that the
                                   conversation loads besides switchboard. A new
                                   conversation loads none. --all loads the full
                                   setup, which a claude.ai connector needs. A change
                                   restarts its claude, after the turn when one runs
-    manager model [<name>]        show or set the model of each Manager conversation,
-                                  sonnet by default. It applies from the next time a
-                                  conversation's claude starts, and not to the operator
+    manager model [<name>]        show or set the model of each Manager conversation
+                                  and group chat, sonnet by default. It applies
+                                  from the next time their claude starts
     manager skills [<conv>]       list the skills that the Manager conversations
                                   and the operator can load, or only those of
                                   the conversation's account, each labeled work
@@ -101,20 +120,35 @@ let usage = """
     operator [<text>]             open the operator, the one background Manager
                                   session that follows through on the waits that
                                   conversations hand it, creating it the first
-                                  time. With text, send it a message
+                                  time. With text, send it a message. The app
+                                  doesn't show a sidebar row for it. Its work
+                                  shows in the Loops tab's Background Activity
+                                  list, whose Transcript button opens its
+                                  transcript
     operator --log                the last messages of the operator's current
                                   conversation. sbd starts a fresh one after
                                   operator.maxTurns turns (20) or
                                   operator.resetEverySeconds (1 day)
     operator report [--needs-you] [--session S] <text>
                                   record a report. Only the operator runs it.
-                                  --needs-you puts it in the Inbox until you
-                                  answer the operator or acknowledge it. S is
-                                  the session that it is about
+                                  S is the session that it is about.
+                                  --needs-you makes it a question on S's Inbox
+                                  item, or without S, on the conversation that
+                                  handed over the work. It stays open until
+                                  you answer or acknowledge it
     operator approve <wait>       approve the merge that a "judgment needed"
                                   message asks about, after reading the
                                   session's last reply in it. Only the operator
                                   runs it, in its own pane
+    operator model [<name>]       show or set the model of the operator and of its
+                                  judges, sonnet by default. The operator switches
+                                  when its claude next starts, and a judge call
+                                  from the next call
+    operator judge --kind reply-gate|ci-failure|pick-issues --input <file> [--model M]
+                                  run one judgment through the operator's judge
+                                  path, for comparing models. The file is JSON
+                                  with the arguments of the kind's prompt: see
+                                  bin/operator-eval. It acts on nothing
     operator reports [--all]      list the operator's reports, oldest first, and
                                   whether each is open. --all lifts the limit of
                                   \(Event.defaultLimit)
@@ -204,6 +238,22 @@ let usage = """
                                   at least 1m, such as 30m. sbd keeps it across
                                   restarts. A session holds 10 at most. Inside
                                   a session, name it too: $SB_SESSION_ID
+    schedule <session> --every <interval> --topup --group G --repo R
+      --target N --template-file F --rubric-file F2 [<prompt>]
+                                  a work queue top-up: on each run sbd counts
+                                  the active work sessions of group G in repo
+                                  R (owner/name). Unless a session needs a
+                                  merge or cleanup that no wait covers, or sbd
+                                  can't read one, it sends nothing: with the
+                                  target N (1 to 20) met it records the check,
+                                  and when short it starts the open issues and
+                                  follow-ups that a judge picks by the rubric
+                                  F2, each issue with the template F as its
+                                  prompt. Otherwise, or when the top-up fails,
+                                  it sends the prompt with the status, the
+                                  rubric, and the template. Without a prompt
+                                  sbd writes one. Only a Manager conversation,
+                                  the Operator, or you can add or edit one
     schedule ls [<session>]       list the schedules, the next due first
     schedule rm <id>              remove a schedule
     schedule pause|resume <id>    pause a schedule, or resume it one interval
@@ -222,6 +272,13 @@ let usage = """
     note <session> --rm <id>      remove a note. It refuses an open to-do
     note --resolved [--limit N]   list the resolved to-dos, newest first
                                   (default 50). The record outlives the session
+    link add <session> <url> [--title T]
+                                  add an http or https link; the title defaults
+                                  to the URL. Inside Claude, only on its own
+                                  session ($SB_SESSION_ID)
+    link rm <session> <link-id>   remove a link you or Claude added, or hide one
+                                  that Switchboard found. Inside Claude, only a
+                                  link that Claude added
     rename <session> <name>
     issue <session> <ref>|--clear set the GitHub issue that the session's tile
                                   shows: 123, #123, owner/name#123, or an issue
@@ -274,7 +331,8 @@ let usage = """
     ack <session> [--undo]        acknowledge the session's Inbox item: it moves to Waiting until its
                                   reason or its PR's head commit changes or a new turn starts. Nothing
                                   else about the session changes. --undo puts it back in the Inbox.
-                                  Refuses the session that runs it
+                                  On a background follow-through question it closes the question
+                                  instead, and --undo refuses. Refuses the session that runs it
     snooze <session> [--until WHEN | --for DURATION]
                                   take the session's Inbox item out of the Inbox until WHEN (as
                                   wait --until reads it) or for DURATION, 1 hour by default. A new
@@ -334,6 +392,11 @@ let usage = """
     decide <session> --resend     send the submitted answers again, only when sbd
                                   restarted while sending them and can't tell whether
                                   the session got them
+    decide <session> --ask <n> <question> [--no-wait] [--timeout S]
+                                  ask the session about decision n and print its reply,
+                                  waiting up to S seconds (600 by default). The session
+                                  answers in a turn that keeps its Inbox item. --no-wait
+                                  prints the question's id. Refuses inside Claude Code
     reply <session>               the session's last reply, as Markdown
     context <session> [--steps N] Claude's last steps up to the session's Inbox item, with
                                   N steps before it (5 by default)
@@ -384,9 +447,14 @@ let usage = """
                                   most \(SessionGroup.descriptionLimit) characters
     group link add <group> <url> [--title T]
                                   add an http or https link, such as an RFC;
-                                  the title defaults to the URL. Only you add
-                                  links: inside Claude it is refused
+                                  the title defaults to the URL. A claude.ai
+                                  artifact link also lists under the group's
+                                  artifacts. Inside Claude, only a claude.ai
+                                  artifact link can be added, without --title:
+                                  its title is its URL
     group link rm <group> <link-id>
+                                  remove a link. Inside Claude, only a link
+                                  that Claude added can be removed
     group account <group> [<account> | --clear]
                                   show, set, or clear the Claude account that the
                                   group's sessions run under. A stopped session
@@ -495,6 +563,8 @@ let usage = """
                                   sheet offers, most recently used first
     repo add <path>               add the repository that holds the folder. A
                                   worktree adds its main checkout
+    auto-mode [on|off]            show or set whether new sessions start in
+                                  auto mode. Sessions that exist keep theirs
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -566,7 +636,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message",
+      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -687,7 +757,7 @@ func printSession(_ s: SessionSummary) {
     print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
   }
   print("  folder:  \(s.cwd)")
-  if let account = s.account { print("  account: \(ClaudeAccount(folder: account).name)") }
+  if let account = s.account { print("  account: \(Account.name(ofFolder: account))") }
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let note = s.branchSwitchNote { print("  warning: \(note)".printable) }
@@ -718,6 +788,7 @@ func printSession(_ s: SessionSummary) {
   }
   for p in s.plans ?? [] { printPlan(p, indent: "  ") }
   for a in (s.artifacts ?? []).newestFirst { print("  artifact: \(a.title)  \(a.url)  (\(a.caption()))".printable) }
+  for l in (s.links ?? []).reversed() { print(linkLine(l)) }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printPause(s)
@@ -999,11 +1070,15 @@ case "ls", "list":
       let ids = Set(shown.map(\.id))
       let list = JSON.array((result.array ?? []).filter { $0["id"]?.string.map(ids.contains) ?? false })
       printJSON(brief ? briefJSON(list) : list)
-    } else if brief {
-      if shown.isEmpty { print(noSessions) }
-      for s in shown { print(s.briefLine) }
     } else {
-      printSessionList(shown, filter: filter)
+      // The operator has no row in the app, so the text lists leave it out. The JSON keeps it for scripts.
+      let listed = shown.filter { $0.kind != .operator }
+      if brief {
+        if listed.isEmpty { print(noSessions) }
+        for s in listed { print(s.briefLine) }
+      } else {
+        printSessionList(listed, filter: filter)
+      }
     }
   }
 case "new":
@@ -1063,6 +1138,8 @@ case "wait":
   waitCommand(a)
 case "note":
   noteCommand(a)
+case "link":
+  linkCommand(a)
 case "schedule", "schedules":
   scheduleCommand(a)
 case "shell":
@@ -1184,6 +1261,8 @@ case "repo", "repos":
   repo(a)
 case "autocontinue":
   autoContinue(a)
+case "auto-mode":
+  autoMode(a)
 case "activity":
   activity(a)
 case "live":

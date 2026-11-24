@@ -25,9 +25,15 @@ extension Service {
   /// Records the card that the session wrote for its current turn. A new
   /// prompt drops it. When the card asks the user something, `childItems`
   /// lists the session's children that ask the user in their own Inbox item,
-  /// so the CLI can say not to ask their questions again.
+  /// so the CLI can say not to ask their questions again. A clarifying turn's card would replace the item that
+  /// the user asked from, so sbd refuses it.
   private func setSummary(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
+    if let ask = entries[id]!.facts.clarifying, ask.started {
+      throw APIError(
+        "This turn answers a question about decision \(ask.number). Switchboard did not save a summary card. Reply in text, and Switchboard shows your reply under that decision."
+      )
+    }
     guard let raw = args["card"] else { throw APIError("summary set needs the card as JSON") }
     let cleaned = try TriageCard.clean(raw, now: nowMs())
     let event = record(id, Triage.sessionEvent, try JSON(encoding: cleaned.card))
@@ -96,6 +102,7 @@ extension Service {
     case .reply:
       let text = args["text"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
       guard !text.isEmpty else { throw APIError("\(option.label) needs the text to send") }
+      if item.source == .report { return try operatorReply(id, item, text, insideClaude: insideClaude) }
       return send(text)
     case .merge:
       return Request(op: "merge", args: ["session": session])
@@ -130,6 +137,23 @@ extension Service {
       }
       return Request(op: "answer", args: .object(answer))
     }
+  }
+
+  /// The request that sends the reply on `id`'s ask item to the operator. It names the session, unless `id` is the
+  /// operator, and carries the ids of the asks on `id` up to the one that the item's ref names. The `sent` event
+  /// closes exactly those reports.
+  private func operatorReply(_ id: String, _ item: TriageItem, _ text: String, insideClaude: JSON) throws -> Request {
+    guard let op = operatorID() else { throw APIError("there is no operator to answer") }
+    guard let latest = Triage.reportID(ref: item.ref) else {
+      throw APIError("\(entries[id]!.session.name) has no question from the operator to answer")
+    }
+    let ids = entries[id]!.facts.operatorItems.asks.map(\.id).filter { $0 <= latest }
+    return Request(
+      op: "send",
+      args: [
+        "session": .string(op), "text": .string(id == op ? text : "About \(entries[id]!.session.name): \(text)"),
+        "reports": .array(ids.map { .number(Double($0)) }), "ref": .string(item.ref), "insideClaude": insideClaude,
+      ])
   }
 
   /// The session's last assistant reply from its transcript, which is read
@@ -187,6 +211,34 @@ extension Service {
 
   // MARK: Summaries
 
+  /// The account of a one-shot call that sbd makes for the session `id`: `triage.account` when it is set, or else
+  /// `headlessAccount(of:)`.
+  func triageAccount(for id: String) -> (key: String, account: ClaudeAccount?) {
+    if let account = triageClaudeAccount { return (account.folder, account) }
+    return headlessAccount(of: id)
+  }
+
+  /// The account of a one-shot call that runs as the session `id`. `key` is the account that the call's quota
+  /// counts against. `account` is the override that `headlessEnv` applies. It is nil when the call takes the
+  /// session's pane environment. A session whose account is a Codex folder takes `headlessStandIn`, because
+  /// claude can't run under a Codex folder.
+  func headlessAccount(of id: String) -> (key: String, account: ClaudeAccount?) {
+    let own = claudeAccount(of: id)
+    switch own {
+    case .local, .host: return (own.key, nil)
+    case .codex: return (headlessStandIn.folder, headlessStandIn)
+    }
+  }
+
+  /// The Claude account that a one-shot turn runs under in place of a Codex folder: `triage.account`, else the
+  /// active account.
+  var headlessStandIn: ClaudeAccount { triageClaudeAccount ?? activeAccount }
+
+  /// `triage.account`, or nil when it is unset or names a Codex folder.
+  var triageClaudeAccount: ClaudeAccount? {
+    config.triage.account.flatMap { claudeAccount(folder: $0) }
+  }
+
   /// Starts each model call that `verdict` asks for: the turn's summary and the PR's merge brief.
   func startSummaries(_ id: String, _ verdict: Verdict) {
     summarizeTurn(id, verdict)
@@ -205,9 +257,8 @@ extension Service {
     // A skip records an event, which calls this again. Setting `summaryAttempt` first makes that call return at the
     // guard above.
     entries[id]?.summaryAttempt = stop
-    let triageAccount = config.triage.account.map(ClaudeAccount.init(folder:))
-    let account = triageAccount?.folder ?? claudeAccount(of: id).key
-    if let skip = summarySkip(e.facts, account: account) {
+    let triage = triageAccount(for: id)
+    if let skip = summarySkip(e.facts, account: triage.key) {
       record(id, "triage", ["stop": .number(Double(stop)), "skipped": .string(skip)])
       return
     }
@@ -217,7 +268,7 @@ extension Service {
     guard Triage.summarizes(session.kind) else { return }
     let reply = e.facts.lastReply ?? ""
     let input = TriageSummarizer.input(session: session, reply: reply)
-    let env = headlessEnv(session: id, account: triageAccount)
+    let env = headlessEnv(session: id, account: triage.account)
     triageJobs.addOperation { [self] in
       let call = headlessCall(
         .triage, session: id, arguments: TriageSummarizer.arguments(model: config.triage.model), input: input, env: env,
@@ -240,9 +291,8 @@ extension Service {
     else { return }
     let attempt = "#\(pr.number)@\(pr.headSha)"
     guard e.mergeBriefAttempt != attempt || e.mergeBriefSkipped else { return }
-    let triageAccount = config.triage.account.map(ClaudeAccount.init(folder:))
-    let account = triageAccount?.folder ?? claudeAccount(of: id).key
-    let skip = budgetSkip(e.facts, account: account)
+    let triage = triageAccount(for: id)
+    let skip = budgetSkip(e.facts, account: triage.key)
     // A head records one skip, and then waits for the budget.
     if e.mergeBriefAttempt == attempt, skip != nil { return }
     // A skip records an event, which calls this again.
@@ -254,7 +304,7 @@ extension Service {
       return
     }
     let input = MergeBrief.input(pr, description: details.description)
-    let env = headlessEnv(session: id, account: triageAccount)
+    let env = headlessEnv(session: id, account: triage.account)
     let (number, title) = (pr.number, pr.title)
     triageJobs.addOperation { [self] in
       let call = headlessCall(

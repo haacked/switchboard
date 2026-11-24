@@ -264,7 +264,7 @@ extension Service {
     let outcome: PostOutcome
     do {
       outcome = DraftReplies.outcome(
-        try runGhResult(attempt.target.postArgs(body: text), timeout: Service.reviewTimeoutSeconds))
+        try runGhResult(attempt.target.postArgs(body: text), timeout: config.reviewTimeoutSeconds))
     } catch {
       // gh didn't start, so nothing reached GitHub.
       outcome = .failed("\(error)")
@@ -396,7 +396,7 @@ extension Service {
     let t = attempt.target.target
     let list = t.commentsPath
     let output = try runGh(
-      ["api", "--paginate", "--jq", ".[] | @json", "\(list)?per_page=100"], timeout: Service.reviewTimeoutSeconds)
+      ["api", "--paginate", "--jq", ".[] | @json", "\(list)?per_page=100"], timeout: config.reviewTimeoutSeconds)
     let comments = try output.split(whereSeparator: \.isNewline).map { line in
       guard let comment = JSON.parse(String(line)), comment.object != nil else {
         throw APIError("gh api \(list) printed a line that is not a comment")

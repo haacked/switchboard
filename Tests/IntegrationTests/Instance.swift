@@ -40,8 +40,19 @@ final class Instance {
     override ?? URL(fileURLWithPath: testBundle).deletingLastPathComponent().path
   }
   static let stub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/claude-stub").path
+  static let codexStub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/codex-stub").path
   static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
   static let reap = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/reap").path
+
+  /// Lets the pane shells of `slowShell` start. Until then they wait, so the claude in a pane has not started.
+  func startSlowShells() throws {
+    FileManager.default.createFile(atPath: "\(home.path)/shell-go", contents: nil)
+  }
+
+  /// Makes the pane shells of `slowShell` that start from now on wait for `startSlowShells`.
+  func holdSlowShells() throws {
+    try? FileManager.default.removeItem(atPath: "\(home.path)/shell-go")
+  }
 
   /// Runs once per test process, before the first home.
   private static let watcher: Void = { try? watch(getpid()) }()
@@ -81,12 +92,16 @@ final class Instance {
   /// panes run /bin/sh by default, because a login shell with the user's
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
   /// Each account is a Claude config folder that this creates in the home.
+  /// Each Codex account is an empty folder that this creates in the home.
   /// The config lists only those, so a test never reads the user's accounts.
+  /// The config names the codex stub as `codex`, so a test never runs the
+  /// user's codex.
   /// The GitHub poller and the usage reader run only when a test asks, and the
   /// Depot poller is off.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
-    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:], startingSbd: Bool = true
+    codexAccounts: [String] = [], inheriting: Inherited = .scratch, config extra: [String: JSON] = [:],
+    startingSbd: Bool = true
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
@@ -107,10 +122,16 @@ final class Instance {
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
       FileManager.default.createFile(atPath: "\(folder)/.claude.json", contents: Data("{}".utf8))
     }
+    let codexFolders = codexAccounts.map { "\(path)/\($0)" }
+    for folder in codexFolders {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    }
     let config: [String: JSON] = [
-      "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)), "tickSeconds": 0.2,
+      "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)),
+      "tickSeconds": .number(Instance.tickSeconds),
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
       "claudeConfigDirs": .array(folders.map(JSON.string)), "github": ["pollSeconds": 0],
+      "codexHomes": .array(codexFolders.map(JSON.string)), "codex": .string(Instance.codexStub),
       // No test reaches the real Depot API. DepotTests point sbd at a FakeDepot.
       "depot": ["enabled": false],
       "usage": ["pollSeconds": 0, "keychain": false],
@@ -120,11 +141,16 @@ final class Instance {
       "triage": ["systemPrompt": ""],
       // Nor do they expect --permission-mode auto. AutoModeTests turn it on.
       "autoMode": false,
+      // An unnamed session keeps its fallback name and makes no naming call. SessionNameTests turn it on.
+      "sessionNames": ["enabled": false],
       // Tests that start many sessions don't expect sbd to stop the idle ones.
       "liveCap": 50,
       // The removal job starts a queued session at once, so a test that waits for a removal does not wait out the
       // undo window. A test that checks the undo window sets it.
       "removalDelaySeconds": 0,
+      // The stub draws its prompt box once, right after SessionStart, and never redraws it. So a message that waits
+      // for claude's SessionStart does not wait out 1.5 s.
+      "pasteSettleSeconds": .number(Instance.pasteSettleSeconds),
     ]
     try JSON.object(config.merging(extra) { $1 }).text.write(toFile: home.config, atomically: true, encoding: .utf8)
     FileManager.default.createFile(atPath: home.log, contents: nil)
@@ -164,6 +190,8 @@ final class Instance {
     // sbd inherits an account, as it does from a user who exports one. A test
     // can then tell the account that sbd sets from the one it inherited.
     env["CLAUDE_CONFIG_DIR"] = inheritedAccount
+    // A runner's own CODEX_HOME must never reach sbd or a stub.
+    env["CODEX_HOME"] = nil
     // A fixed agent lets a test tell sbd's own SSH agent from a terminal's.
     env["SSH_AUTH_SOCK"] = sbdAgent
     // A runner that exports its own window would otherwise reach every stub claude.
@@ -200,8 +228,11 @@ final class Instance {
 
   /// A gate file in the home. While `hold-paste` exists, sbd holds each paste
   /// on the paste queue after it accepted the message and before it records
-  /// `pasting`. While `hold-delivered` exists, sbd holds each paste after
-  /// `host.paste` returned, Enter included, and before it records `delivered`.
+  /// `pasting`. sbd holds each paste that starts while `hold-delivered`
+  /// exists after `host.paste` returned, Enter included, and before it records
+  /// `delivered`. A paste that started before the gate passes it. The gate
+  /// therefore can't stop an earlier paste and block the later pastes behind
+  /// it on the paste queue.
   /// Neither gate blocks the state queue.
   func gate(_ name: String) -> String { "\(home.path)/\(name)" }
 
@@ -256,6 +287,7 @@ final class Instance {
     env["SB_HOME"] = home.path
     env["CLAUDECODE"] = nil
     env["SB_SESSION_ID"] = nil
+    env["CODEX_HOME"] = nil
     env.merge(extra) { $1 }
     return env
   }
@@ -330,6 +362,14 @@ final class Instance {
     let s = try new(prompt: "hello", name: name)
     try waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
     return s
+  }
+
+  /// Waits for the reply to the prompt that the session launched with.
+  /// A session launched with a prompt shows Needs you before claude takes the prompt.
+  /// The state alone can therefore match before the reply.
+  @discardableResult
+  func waitForReply(_ s: SessionSummary) throws -> SessionSummary {
+    try waitFor(s.id, "\(s.name)'s reply") { $0.lastReply != nil && $0.state == .needsYou }
   }
 
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
@@ -467,15 +507,41 @@ final class Instance {
     return last!
   }
 
+  /// How long after SessionStart the sbd of a test waits before it pastes a message.
+  static let pasteSettleSeconds = 0.2
+
+  /// sbd's production wait between SessionStart and a paste.
+  static let productionPasteSettleMs = Int64(Config().pasteSettleSeconds * 1000)
+
+  /// The config.json key that restores sbd's production wait between SessionStart and a paste.
+  static let productionPasteSettle: [String: JSON] = ["pasteSettleSeconds": .number(Config().pasteSettleSeconds)]
+
+  /// How often the sbd of a test ticks.
+  static let tickSeconds = 0.2
+
+  /// The config.json key that makes a stop wait 2 s, in place of 5 s, for claude to exit and then for the session's
+  /// processes. A test that waits out the stop for processes other than claude sets it.
+  static let shortStopWait: [String: JSON] = ["stopWaitSeconds": 2]
+
+  /// The config.json key that makes a stop wait 4 s for claude to exit. A test whose stub claude lingers 6 s to
+  /// outlast the first wait, and to exit within a retry's wait, sets it. `timeoutScale` does not stretch the wait
+  /// on CI, so each side keeps a margin of about 2 s.
+  static let lingerStopWait: [String: JSON] = ["stopWaitSeconds": 4]
+
   /// A CI runner has 3 CPUs, and it starts sbd, tmux, and a stub claude several times slower than a laptop does.
   /// A wait that succeeds returns at once, so only a failing wait takes longer.
   static let timeoutScale: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 1 : 3
 
+  /// How long `waitFor` polls every 10 ms before it polls every 100 ms. Most waits end within it, such as the start
+  /// of sbd. A CI runner is short on CPU, so it polls every 100 ms from the start.
+  static let fastPollSeconds: Double = ProcessInfo.processInfo.environment["CI"] == nil ? 0.5 : 0
+
   func waitFor(_ what: String, timeout: Double = 15, _ condition: () throws -> Bool) throws {
-    let deadline = Date().addingTimeInterval(timeout * Instance.timeoutScale)
+    let start = Date()
+    let deadline = start.addingTimeInterval(timeout * Instance.timeoutScale)
     while Date() < deadline {
       if try condition() { return }
-      usleep(100_000)
+      usleep(Date().timeIntervalSince(start) < Instance.fastPollSeconds ? 10_000 : 100_000)
     }
     let log = (try? String(contentsOfFile: home.log, encoding: .utf8)) ?? ""
     throw TestError(description: "timed out waiting for \(what). sbd log:\n\(log)")
@@ -843,6 +909,11 @@ extension Instance {
   /// The config.json key that makes a request that needs a host wait 2 s for the host's link, in place of 15 s.
   /// A test that drops the link and expects a request to fail sets it.
   static let shortHostWait: [String: JSON] = ["hostWaitSeconds": 2]
+
+  /// The config.json key that makes a request that needs a host wait 5 s for the host's link, in place of 15 s.
+  /// A test that needs an ssh attempt to fail inside the wait sets it. `timeoutScale` does not stretch the wait on
+  /// CI, where 2 s can end before the first attempt does.
+  static let attemptHostWait: [String: JSON] = ["hostWaitSeconds": 5]
 
   /// Connects the host's link and waits for it. A sbd with `shortHostWait` connects first, so its first request
   /// that needs the host does not have to connect within the short wait.

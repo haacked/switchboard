@@ -6,7 +6,7 @@ import Testing
 /// them and as a merge carries them over.
 @Suite struct GroupLinkTests {
   func group(
-    _ id: String, _ name: String, description: String? = nil, by author: Author? = nil, links: [GroupLink]? = nil
+    _ id: String, _ name: String, description: String? = nil, by author: Author? = nil, links: [ExternalLink]? = nil
   ) -> SessionGroup {
     var g = SessionGroup(id: id, name: name, description: description, created: 0)
     g.descriptionBy = author
@@ -14,8 +14,10 @@ import Testing
     return g
   }
 
-  func link(_ id: String, _ url: String, title: String? = nil, by author: Author = .you, t: Int64 = 1) -> GroupLink {
-    GroupLink(id: id, title: title ?? url, url: url, by: author, t: t)
+  func link(_ id: String, _ url: String, title: String? = nil, by author: LinkAuthor = .you, t: Int64 = 1)
+    -> ExternalLink
+  {
+    ExternalLink(id: id, title: title ?? url, url: url, by: author, t: t)
   }
 
   // MARK: Links in a merge
@@ -221,26 +223,292 @@ import Testing
   }
 
   @Test(arguments: [nil, "", "  \n "]) func withoutATitleTheTitleIsTheURL(_ title: String?) throws {
-    let url = Self.url(ofLength: GroupLink.titleLimit)
+    let url = Self.url(ofLength: ExternalLink.titleLimit)
 
-    #expect(try GroupLink.cleanTitle(title, url: url) == url)
+    #expect(try ExternalLink.cleanTitle(title, url: url) == url)
   }
 
   /// A session reads the title, so a long URL doesn't make the title pass its limit.
-  @Test(arguments: [GroupLink.titleLimit + 1, GroupLink.urlLimit])
+  @Test(arguments: [ExternalLink.titleLimit + 1, ExternalLink.urlLimit])
   func aURLOverTheTitleLimitIsCutForTheTitle(_ length: Int) throws {
     let url = Self.url(ofLength: length)
 
-    let title = try GroupLink.cleanTitle(nil, url: url)
+    let title = try ExternalLink.cleanTitle(nil, url: url)
 
-    #expect(title.count == GroupLink.titleLimit)
+    #expect(title.count == ExternalLink.titleLimit)
     #expect(title.hasSuffix("…"))
     #expect(url.hasPrefix(title.dropLast()))
   }
 
   @Test func aGivenTitleOverTheLimitIsRefused() {
-    let title = String(repeating: "a", count: GroupLink.titleLimit + 1)
+    let title = String(repeating: "a", count: ExternalLink.titleLimit + 1)
 
-    #expect(throws: (any Error).self) { try GroupLink.cleanTitle(title, url: "https://a.example") }
+    #expect(throws: (any Error).self) { try ExternalLink.cleanTitle(title, url: "https://a.example") }
+  }
+
+  // MARK: Links to claude.ai artifacts
+
+  @Test(arguments: [
+    ("\(artifactShortURL)#section-2", artifactShortURL),
+    ("\(artifactShortURL)?tab=preview", artifactShortURL),
+    ("\(artifactShortURL)/", artifactShortURL),
+    ("https://claude.ai//artifact/\(artifactShortId)", artifactShortURL),
+    ("https://CLAUDE.AI/artifact/\(artifactShortId)", artifactShortURL),
+    ("  \(artifactShortURL)#top \n", artifactShortURL),
+    ("\(artifactCodeURL)/?x=1#y", artifactCodeURL),
+  ])
+  func cleanURLNormalizesAClaudeArtifactLink(_ url: String, _ expected: String) throws {
+    #expect(try ExternalLink.cleanURL(url) == expected)
+  }
+
+  @Test(arguments: [
+    "https://example.com/a#b", "https://example.com/a/", "http://claude.ai/artifact/\(artifactShortId)",
+    "https://claude.ai/chat/\(artifactShortId)", "https://claude.ai.evil.com/artifact/\(artifactShortId)",
+  ])
+  func cleanURLLeavesALinkThatIsNotAClaudeArtifactAsGiven(_ url: String) throws {
+    #expect(try ExternalLink.cleanURL(url) == url)
+  }
+
+  // MARK: User and password parts
+
+  /// URLs whose host as shown differs from the host they open, or that carry credentials.
+  static let userinfoURLs = [
+    "https://example.slack.com@evil.example/archives/C0EXAMPLE01/p1794965000000100",
+    "https://user:pass@example.com/", "https://user@example.com", "http://user@example.com/rfcs",
+    "https://:pass@example.com/", "https://user:@example.com/", "https://USER@Example.com:8443/rfcs",
+    "https://user%40corp@example.com/", "https://claude.ai@evil.com/artifact/\(artifactShortId)",
+  ]
+
+  @Test(arguments: userinfoURLs) func cleanURLRefusesAUserOrPasswordPart(_ url: String) {
+    let message = refusal { try ExternalLink.cleanURL(url) } ?? "no error"
+
+    #expect(message.contains("can't hold a user name or password"), "\(url): \(message)")
+  }
+
+  /// Foundation may refuse a backslash before the userinfo check runs, so this test takes any refusal.
+  @Test func cleanURLRefusesABackslashBeforeAnAt() {
+    #expect(throws: (any Error).self) { try ExternalLink.cleanURL(#"https://claude.ai\@evil.com/artifact/x"#) }
+  }
+
+  /// An `@` outside the authority is no user part.
+  @Test(arguments: [
+    "https://example.com/users/@ana", "https://example.com/rfcs?by=ana@example.com",
+    "https://example.com/rfcs#ana@example.com", "https://example.com:8443/rfcs",
+  ])
+  func cleanURLKeepsAnAtOutsideTheHost(_ url: String) throws {
+    #expect(try ExternalLink.cleanURL(url) == url)
+  }
+
+  @Test func cleanURLAcceptsALookAlikeSlackHostAndItsLinkIsWeb() throws {
+    let url = "https://example.slack.com.evil.example/archives/C0EXAMPLE01/p1794965000000100"
+
+    let cleaned = try ExternalLink.cleanURL(url)
+
+    #expect(cleaned == url)
+    #expect(ExternalLink(id: "l1", title: url, url: cleaned, by: .you, t: 1).kind == .web)
+  }
+
+  /// Links already stored keep their form, so `addLink` compares artifact links by their normalized form.
+  @Test(arguments: [
+    (artifactShortURL, "\(artifactShortURL)#frag"),
+    ("\(artifactShortURL)/", artifactShortURL),
+    (artifactShortURL, "https://Claude.ai/artifact/\(artifactShortId)"),
+    ("\(artifactShortURL)?tab=preview", "\(artifactShortURL)#top"),
+    (artifactCodeURL, "\(artifactCodeURL)/"),
+  ])
+  func addLinkRefusesASecondFormOfTheSameArtifact(_ stored: String, _ added: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+
+    let result = g.addLink(link("l2", added))
+
+    #expect(!result)
+    #expect(g.links?.map(\.id) == ["l1"])
+  }
+
+  /// sbd cannot tell that a short link and a code link name one page. Links that are not artifacts, an `http`
+  /// claude.ai link among them, compare exactly.
+  @Test(arguments: [
+    (artifactShortURL, artifactCodeURL),
+    ("https://example.com/a#b", "https://example.com/a"),
+    ("http://claude.ai/artifact/\(artifactShortId)", artifactShortURL),
+  ])
+  func addLinkAddsALinkThatNamesAnotherURL(_ stored: String, _ added: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+
+    let result = g.addLink(link("l2", added))
+
+    #expect(result)
+    #expect(g.links?.map(\.url) == [stored, added])
+  }
+
+  /// `absorbing` adds each link through `addLink`, so both refuse the same links.
+  @Test(arguments: [
+    (artifactShortURL, "\(artifactShortURL)#frag"),
+    ("\(artifactShortURL)/", artifactShortURL),
+    (artifactShortURL, artifactCodeURL),
+    ("https://example.com/a#b", "https://example.com/a"),
+    ("https://example.com/a", "https://example.com/a"),
+    ("http://claude.ai/artifact/\(artifactShortId)", artifactShortURL),
+  ])
+  func absorbingRefusesTheLinksThatAddLinkRefuses(_ stored: String, _ incoming: String) {
+    var g = group("g1", "Flags", links: [link("l1", stored)])
+    let added = g.addLink(link("l2", incoming))
+
+    let merged = group("g1", "Flags", links: [link("l1", stored)]).absorbing(
+      group("g2", "Docs", links: [link("l2", incoming)]), now: 30)
+
+    #expect(merged.links?.count == (added ? 2 : 1))
+  }
+
+  /// A merge keeps your titled link over Claude's link to the same artifact, in either direction.
+  @Test(arguments: [false, true])
+  func absorbingKeepsYourLinkOverClaudesLinkToTheSameArtifact(_ yoursInKept: Bool) {
+    let yours = link("l1", artifactShortURL + "#top", title: "Tracker")
+    let claudes = link("l2", artifactShortURL, by: .claude)
+
+    let merged = group("g1", "Flags", links: [yoursInKept ? yours : claudes]).absorbing(
+      group("g2", "Docs", links: [yoursInKept ? claudes : yours]), now: 30)
+
+    #expect(merged.links?.map(\.title) == ["Tracker"])
+    #expect(merged.links?.map(\.by) == [.you])
+  }
+
+  // MARK: Kind, channel, and thread
+
+  static let rfc = "https://example.com/rfcs/flag-evaluations"
+  static let storedKeys: Set<String> = ["id", "title", "url", "by", "t"]
+
+  /// The link's JSON as `JSONCoding` writes it, for groups on disk and on the wire alike.
+  func encoded(_ link: ExternalLink) throws -> [String: JSON] {
+    try #require(JSON.parse(try JSONCoding.encode(link))?.object)
+  }
+
+  /// A group that main stored has links with the five stored keys and `by` of `you` or `claude`.
+  @Test func aGroupStoredByMainDecodesItsLinksUnchanged() throws {
+    let stored =
+      #"{"id":"g1","name":"Flags","notes":[],"created":0,"links":["#
+      + #"{"id":"l1","title":"Flags RFC","url":"https://example.com/rfcs/flag-evaluations","by":"you","t":7},"#
+      + #"{"id":"l2","title":"https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv","#
+      + #""url":"https://claude.ai/artifact/AbCdEfGhIjKlMnOpQrStUv","by":"claude","t":9}]}"#
+
+    let g = try JSONCoding.decode(SessionGroup.self, from: stored)
+
+    #expect(
+      g.links == [
+        ExternalLink(id: "l1", title: "Flags RFC", url: Self.rfc, by: .you, t: 7),
+        ExternalLink(id: "l2", title: artifactShortURL, url: artifactShortURL, by: .claude, t: 9),
+      ])
+    #expect(g.links?.first?.by == .you)
+  }
+
+  @Test func aStoredFoundLinkDecodesAsFound() throws {
+    let stored =
+      #"{"id":"fab2cd","title":"Linear ENG-123","url":"https://linear.app/example/issue/ENG-123","by":"found","t":3}"#
+
+    let link = try JSONCoding.decode(ExternalLink.self, from: stored)
+
+    #expect(link.by == .found)
+  }
+
+  /// Decoding ignores a stored `kind`, `channel`, and `thread`. The URL alone gives them.
+  @Test func aStoredKindChannelAndThreadAreIgnoredOnDecode() throws {
+    let stored =
+      #"{"id":"l1","title":"RFC","url":"https://example.com/rfcs/flag-evaluations","by":"you","t":7,"#
+      + #""kind":"slack","channel":"C0EXAMPLE01","thread":"1794965000.000100"}"#
+
+    let link = try JSONCoding.decode(ExternalLink.self, from: stored)
+
+    #expect(link == ExternalLink(id: "l1", title: "RFC", url: Self.rfc, by: .you, t: 7))
+    #expect(link.kind == .web)
+    #expect(link.linkTarget?.channel == nil)
+    #expect(link.linkTarget?.thread == nil)
+  }
+
+  @Test func aSlackLinksChannelAndThreadComeFromItsURL() {
+    let link = ExternalLink(id: "l1", title: "Thread", url: LinkFixtures.slackReply, by: .you, t: 1)
+
+    #expect(link.kind == .slack)
+    #expect(link.linkTarget?.channel == LinkFixtures.channel)
+    #expect(link.linkTarget?.thread == LinkFixtures.rootTs)
+  }
+
+  @Test func anEncodedSlackLinkHasExactlyTheStoredKeysAndKindChannelThread() throws {
+    let link = ExternalLink(id: "l1", title: "Thread", url: LinkFixtures.slackReply, by: .you, t: 1)
+
+    let json = try encoded(link)
+
+    #expect(Set(json.keys) == Self.storedKeys.union(["kind", "channel", "thread"]))
+    #expect(json["kind"]?.string == "slack")
+    #expect(json["channel"]?.string == LinkFixtures.channel)
+    #expect(json["thread"]?.string == LinkFixtures.rootTs)
+  }
+
+  @Test func anEncodedRFCLinkIsWebWithoutChannelOrThread() throws {
+    let link = ExternalLink(id: "l1", title: "RFC", url: Self.rfc, by: .you, t: 7)
+
+    let json = try encoded(link)
+
+    #expect(Set(json.keys) == Self.storedKeys.union(["kind"]))
+    #expect(json["kind"]?.string == "web")
+  }
+
+  /// The kind list has no `artifact`, so a claude.ai artifact link is `web`.
+  @Test(arguments: [artifactShortURL, artifactCodeURL]) func anArtifactLinkIsWeb(_ url: String) throws {
+    let link = ExternalLink(id: "l1", title: url, url: url, by: .claude, t: 7)
+
+    let json = try encoded(link)
+
+    #expect(link.kind == .web)
+    #expect(json["kind"]?.string == "web")
+    #expect(Set(json.keys) == Self.storedKeys.union(["kind"]))
+  }
+
+  @Test(arguments: [
+    (LinkFixtures.linear, "linear"), (LinkFixtures.notion, "notion"), (LinkFixtures.google, "google"),
+    (LinkFixtures.grafana, "grafana"), (LinkFixtures.githubPR, "web"),
+  ])
+  func anEncodedLinkOfAnotherKindHasItsKindAndNoChannelOrThread(_ url: String, _ kind: String) throws {
+    let json = try encoded(ExternalLink(id: "l1", title: "Page", url: url, by: .you, t: 7))
+
+    #expect(json["kind"]?.string == kind)
+    #expect(Set(json.keys) == Self.storedKeys.union(["kind"]))
+  }
+
+  @Test(arguments: [
+    ExternalLink(id: "l1", title: "Thread", url: LinkFixtures.slackReply, by: .you, t: 1),
+    ExternalLink(id: "l2", title: "RFC", url: "https://example.com/rfcs/flag-evaluations", by: .you, t: 7),
+    ExternalLink(id: "l3", title: artifactShortURL, url: artifactShortURL, by: .claude, t: 9),
+    ExternalLink(id: "fab2cd", title: "Linear ENG-123", url: LinkFixtures.linear, by: .found, t: 11),
+  ])
+  func aLinkSurvivesEncoding(_ link: ExternalLink) throws {
+    let decoded = try JSONCoding.decode(ExternalLink.self, from: try JSONCoding.encode(link))
+
+    #expect(decoded == link)
+  }
+
+  /// A group that sbd saves after this change writes `kind` into its stored JSON, and decodes back equal.
+  @Test func aGroupWithASlackLinkWritesItsKindAndDecodesEqual() throws {
+    let g = group(
+      "g1", "Flags", links: [ExternalLink(id: "l1", title: "Thread", url: LinkFixtures.slackRoot, by: .you, t: 1)])
+
+    let text = try JSONCoding.encode(g)
+
+    let link = try #require(JSON.parse(text)?["links"]?.array?.first)
+    #expect(link["kind"]?.string == "slack")
+    #expect(link["thread"]?.string == LinkFixtures.rootTs)
+    #expect(try JSONCoding.decode(SessionGroup.self, from: text) == g)
+  }
+
+  @Test func aGroupSummaryWritesTheKindOfEachLink() throws {
+    let g = group(
+      "g1", "Flags",
+      links: [
+        ExternalLink(id: "l1", title: "Thread", url: LinkFixtures.slackRoot, by: .you, t: 1),
+        ExternalLink(id: "l2", title: "RFC", url: Self.rfc, by: .you, t: 2),
+      ])
+
+    let json = try #require(JSON.parse(try JSONCoding.encode(GroupSummary(g, sessions: []))))
+
+    #expect(json["links"]?.array?.compactMap { $0["kind"]?.string } == ["slack", "web"])
   }
 }

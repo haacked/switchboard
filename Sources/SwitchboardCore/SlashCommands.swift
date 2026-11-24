@@ -46,6 +46,14 @@ public struct SlashCommand: Codable, Equatable, Sendable {
     ("status", "Show the version, model, account, and connectivity"),
     ("usage", "Show the plan's usage limits and the session's cost"),
   ].map { SlashCommand(name: $0.0, description: $0.1, source: .builtIn) }
+
+  /// Whether `prompt` runs one of Claude Code's built-in commands, such as `/compact`, with or without arguments.
+  /// Claude Code sends no UserPromptSubmit for one. A skill or a custom command does not count, because it sends a
+  /// prompt.
+  public static func isBuiltIn(prompt: String) -> Bool {
+    guard let name = SkillCommand.name(inPrompt: prompt) else { return false }
+    return builtIns.contains { $0.name == name }
+  }
 }
 
 /// Reads the `skill_listing` attachments that claude writes to its

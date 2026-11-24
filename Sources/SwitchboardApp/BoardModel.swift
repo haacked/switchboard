@@ -29,7 +29,7 @@ enum MainView: CaseIterable {
     }
   }
 
-  /// The key that, with ⌘, shows the view from the Session menu.
+  /// The key that, with ⌘, shows the view from the View menu.
   var shortcutKey: Character {
     switch self {
     case .inbox: "1"
@@ -113,6 +113,8 @@ final class BoardModel: ObservableObject {
   /// The repositories that the New Session sheet offers, most recently used first. It is nil until sbd answers.
   @Published var knownRepos: [KnownRepo]?
   @Published var showingSearch = false
+  /// The text in the sidebar's search field. The sidebar lists only the work sessions that it matches.
+  @Published var sidebarQuery = ""
   /// The Done session whose delete the confirmation dialog in ContentView asks about, as the
   /// board showed it when the user asked. The dialog's message and request both read this value.
   @Published var confirmingDelete: SessionSummary?
@@ -146,8 +148,8 @@ final class BoardModel: ObservableObject {
   /// A loop editor's save is on its way to sbd, so a second Save would add a second loop.
   @Published var savingLoop = false
   var presentingSheet: Bool {
-    newSession != nil || showingImport || showingSearch || showingDoneRemoval || showingIssueSetup || quickAsk != nil
-      || pickingSnoozeTime != nil || loopEditor != nil
+    newSession != nil || showingImport || showingSearch || showingDoneRemoval || quickAsk != nil
+      || pickingSnoozeTime != nil || pickingPauseTime != nil || editingNotes != nil || loopEditor != nil
   }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
@@ -177,7 +179,7 @@ final class BoardModel: ObservableObject {
   @Published var revealedMessageField: String?
   /// The session whose Message Claude field takes keyboard focus when it shows. The field clears it.
   @Published var messageFieldFocus: String?
-  /// The Board's open cards as it last drew them. BoardView keeps it current. The Session menu's ⌘T state and
+  /// The Board's open cards as it last drew them. BoardView keeps it current. The Go menu's ⌘T state and
   /// the Board's ring read it, so a change redraws them.
   @Published var boardGrid = BoardGrid(lanes: [])
   /// The right pane of the Inbox shows the session's terminals instead of its summary.
@@ -196,10 +198,8 @@ final class BoardModel: ObservableObject {
   @Published var recentEvents: [String: [Event]] = [:]
   /// The transcript steps that lead up to each session's Inbox item, by session id.
   @Published var itemContexts: [String: ItemContext] = [:]
-  /// Each chat's last messages, by session id, read while its pane shows.
+  /// Each Manager conversation's last messages, by session id, read while its status strip shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
-  /// The messages sent to each chat that its log does not hold yet, by session id. The chat shows them below its log.
-  @Published var pendingChat: [String: [PendingChatMessage]] = [:]
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
   /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
@@ -224,6 +224,10 @@ final class BoardModel: ObservableObject {
   @Published var snoozing: Set<String> = []
   /// The session whose snooze end the Pick a Time… sheet asks for.
   @Published var pickingSnoozeTime: String?
+  /// The session whose pause end the Pick a Time… sheet of the Pause menu asks for.
+  @Published var pickingPauseTime: String?
+  /// The session whose notes the Notes… sheet of a session row's context menu shows.
+  @Published var editingNotes: String?
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -248,10 +252,13 @@ final class BoardModel: ObservableObject {
   /// replies, so a second click can't ask the group's chat to read the artifact again.
   @Published var usingAsPlan: Set<String> = []
   /// The decision requests that wait for sbd: `<session>/<number>` for an
-  /// answer, and `<session>/submit` and `<session>/discard`.
+  /// answer, `<session>/ask` for a question, and `<session>/submit` and `<session>/discard`.
   @Published var deciding: Set<String> = []
   /// sbd's refusal of the last decision request, by session. The card shows it.
   @Published var decisionErrors: [String: String] = [:]
+  /// The step that each session's step view shows, by session id, with the ref of the list that the step belongs
+  /// to. Nil shows the first unanswered decision.
+  @Published private(set) var decisionSteps: [String: DecisionStepEntry] = [:]
   /// sbd's refusal of the last Clear wait, by session. The wait panel shows it.
   @Published var waitErrors: [String: String] = [:]
   /// The waits, as `<session>/<wait>`, whose Clear wait sbd has not answered. Their buttons stay disabled, so a
@@ -324,7 +331,21 @@ final class BoardModel: ObservableObject {
   /// The group that the user picked for an issue's Start, by issue id. nil inside picks No Group. An issue with no
   /// entry starts in `KnownRepos.preferredGroup`.
   @Published var issueGroupPicks: [String: String?] = [:]
-  @Published var showingIssueSetup = false
+  /// The offered repositories that the user unchecked. The Issues view's empty state and Settings ▸ Issues share it.
+  @Published var uncheckedIssueRepos: Set<String> = []
+  /// The tab that the Settings window shows.
+  @Published var settingsTab: SettingsTab = .general
+  /// Whether the Settings window is on screen. The GUI checks read it.
+  var settingsShown = false
+  /// This Mac's live cap, as sbd last answered it, or nil before the Settings window reads it.
+  @Published var liveCap: Int?
+  /// Whether new sessions start in auto mode, as sbd last answered it, or nil before the Settings window reads it.
+  @Published var defaultAutoMode: Bool?
+  /// sbd's refusal of the last change in Settings ▸ General. The tab shows it instead of the main window's banner.
+  @Published var settingsError: String?
+  /// The Settings ▸ General writes that sbd hasn't answered yet, by op. A reply applies only when no newer write of
+  /// its op is pending, so an older answer doesn't undo a newer click.
+  var pendingSettingWrites: [String: Int] = [:]
   /// The loop that the user last moved to in the Loops view, by schedule id.
   @Published var loopFocus: String?
   /// Counts moves in the Loops view. Each one scrolls to the current loop.
@@ -335,6 +356,8 @@ final class BoardModel: ObservableObject {
   }
   /// The session whose loops the Loops view lists, by id. Nil lists every shown session's loops.
   @Published var loopSessionFilter: String?
+  /// The Operator's work, newest first, as the Loops view's Background Activity lists it.
+  @Published var backgroundActivity: [BackgroundActivity.Entry] = []
   /// Plan proposals whose Apply or Reject is on its way to sbd. Applying
   /// writes to GitHub, so their buttons stay off until sbd replies.
   @Published var answeringProposals: Set<String> = []
@@ -383,7 +406,7 @@ final class BoardModel: ObservableObject {
   /// Item-context and reply reads, which can take seconds for a long or remote transcript. They run apart from the
   /// poll. The queue is serial, so two reads for one session answer in the order the user asked for them.
   private let contextWork = DispatchQueue(label: "switchboard.context")
-  private let worker = DispatchQueue(label: "switchboard.actions")
+  let worker = DispatchQueue(label: "switchboard.actions")
   /// Undo's `rm-cancel` must reach sbd before the removals' `notBefore`, so it does not wait behind a slow action
   /// on `worker`, such as the header's `rm --worktree`.
   let undos = DispatchQueue(label: "switchboard.undo")
@@ -590,7 +613,7 @@ final class BoardModel: ObservableObject {
   }
 
   /// The Manager and a group chat count only while a prompt blocks them. The
-  /// toolbar star fills and turns the Needs you color while the Manager needs you.
+  /// toolbar's Manager icon fills and turns the Needs you color while the Manager needs you.
   var needsUser: [SessionSummary] { sessions.filter(Triage.needsYou) }
 
   /// The Manager conversations, newest activity first, as `sb manager ls` lists them.
@@ -598,12 +621,18 @@ final class BoardModel: ObservableObject {
     sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
   }
 
-  /// The Manager conversation that the toolbar star names while one waits on the user.
+  /// The Manager conversation that the toolbar's Manager icon names while one waits on the user.
   var waitingManager: SessionSummary? { managers.first { ChatMark($0).needsMeReason != nil } }
 
-  /// The operator, or nil before sbd first creates it. With more than one, it is the oldest, as in sbd.
-  var operatorSession: SessionSummary? {
-    sessions.filter { $0.kind == .operator }.min { ($0.created ?? 0, $0.id) < ($1.created ?? 0, $1.id) }
+  /// The operator. It reads every listed session, because the filter can hide the operator.
+  var operatorSession: SessionSummary? { Self.operatorSession(in: allSessions) }
+
+  /// The operator among `sessions`, or nil before sbd first creates it. With more than one, it is the oldest, as in
+  /// sbd.
+  static func operatorSession(in sessions: [SessionSummary]) -> SessionSummary? {
+    sessions.filter { !$0.isBeingRemoved && $0.kind == .operator }.min {
+      ($0.created ?? 0, $0.id) < ($1.created ?? 0, $1.id)
+    }
   }
 
   /// A state's sessions in the sidebar, each one followed by its children.
@@ -635,13 +664,31 @@ final class BoardModel: ObservableObject {
   /// The sidebar's groups, in state order, without empty ones. The Manager has
   /// its own row above the groups, so a session it started is top level, like
   /// one with no parent. A session whose parent is another session nests under
-  /// that parent while both are in the same group.
-  var sidebarGroups: [SidebarGroup] {
-    let listed = workBoard
-    return AttentionState.allCases.compactMap { state in
+  /// that parent while both are in the same group. It lists only the work sessions that `sidebarQuery` matches.
+  var sidebarGroups: [SidebarGroup] { Self.sidebarGroups(sidebarSessions) }
+
+  /// `listed` grouped by state, as the sidebar groups its rows.
+  static func sidebarGroups(_ listed: [SessionSummary]) -> [SidebarGroup] {
+    AttentionState.allCases.compactMap { state in
       let group = listed.filter { $0.state == state }
       return group.isEmpty ? nil : SidebarGroup(state: state, rows: SessionTree.rows(group))
     }
+  }
+
+  /// The work sessions that `sidebarQuery` matches, in `workBoard` order. A blank query matches every one.
+  private var sidebarSessions: [SessionSummary] {
+    let listed = workBoard
+    guard !sidebarQuery.allSatisfy(\.isWhitespace) else { return listed }
+    let matched = Set(SessionSearch.rank(listed, query: sidebarQuery).map(\.id))
+    return listed.filter { matched.contains($0.id) }
+  }
+
+  /// True when the sidebar's search field hides every work session that the filters show.
+  var sidebarQueryHidesAll: Bool { !workBoard.isEmpty && sidebarSessions.isEmpty }
+
+  /// True when the filters show `session` but the sidebar's search field hides its row.
+  func sidebarQueryHides(_ session: SessionSummary) -> Bool {
+    workBoard.contains { $0.id == session.id } && !sidebarSessions.contains { $0.id == session.id }
   }
 
   var triage: [SessionSummary] { Triage.order(sessions) }
@@ -665,10 +712,10 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
-  /// True while the sidebar has no rows and sbd answers. It is false when the filters hide every work session,
-  /// because the sidebar then shows `FilterHidesAll` instead.
+  /// True while the sidebar has no rows and sbd answers. It is false when the filters or the search field hide
+  /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
-    sidebarGroups.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
+    workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
   }
 
   /// The main view while no session is selected, else nil.
@@ -779,8 +826,12 @@ final class BoardModel: ObservableObject {
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
       messageDrafts.prune(
-        keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.otherAnswerKeys(list))
-          .union(MessageDrafts.replyKeys(list)))
+        keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.decisionKeys(list))
+          .union(MessageDrafts.replyKeys(list)).union(MessageDrafts.operatorAnswerKeys(list)))
+      let ids = Set(list.map(\.id))
+      if decisionSteps.keys.contains(where: { !ids.contains($0) }) {
+        decisionSteps = decisionSteps.filter { ids.contains($0.key) }
+      }
       if !sameShown(allSessions, list) { allSessions = list }
       // After the new list, so that the filter change reads each session's group from the same poll as the groups.
       if let groups { applyGroups(groups) }
@@ -883,6 +934,10 @@ final class BoardModel: ObservableObject {
   /// The account that new sessions without a parent use.
   var activeAccount: AccountInfo? { accounts.first(where: \.active) }
 
+  /// The accounts that sessions can run on. The New Session sheet, the group account menu, and the move menus
+  /// offer them. sbd lists Codex accounts but runs no session on one yet.
+  var sessionAccounts: [AccountInfo] { accounts.filter(\.agent.runsSessions) }
+
   /// The active account's folder. It is the default folder until the accounts load.
   var activeAccountFolder: String { activeAccount?.folder ?? ClaudeAccount.defaultFolder }
 
@@ -904,7 +959,7 @@ final class BoardModel: ObservableObject {
   /// gets no offer, because a moved session's next resume would ask for /login.
   var moveTarget: AccountInfo? {
     guard let active = activeAccount, usage.first(where: { $0.folder == active.folder })?.signedOut != true,
-      accounts.contains(where: { !$0.active && $0.sessions > 0 })
+      sessionAccounts.contains(where: { !$0.active && $0.sessions > 0 })
     else { return nil }
     return active
   }
@@ -1191,9 +1246,7 @@ final class BoardModel: ObservableObject {
   /// `sent` runs only when sbd accepted the message. A second send to the
   /// same session does nothing until sbd answers the first. Each image is a
   /// file name and the image's bytes. `ref` names the Inbox item that the
-  /// message answers. A message to a chat shows in the chat at once as a
-  /// pending message, which carries sbd's refusal in place of `actionError`.
-  /// `runHere` lets a work skill's command past a Manager's gate once.
+  /// message answers. `runHere` lets a work skill's command past a Manager's gate once.
   func send(
     _ id: String, _ text: String, images: [(name: String, data: Data)] = [], ref: String? = nil,
     runHere: Bool = false, sent: (() -> Void)? = nil
@@ -1203,37 +1256,13 @@ final class BoardModel: ObservableObject {
     if let ref { args["ref"] = .string(ref) }
     if runHere { args["runHere"] = true }
     if !images.isEmpty { args["images"] = .array(images.map { Attachments.json(name: $0.name, data: $0.data) }) }
-    let pending =
-      summary(id)?.kind.showsAsChat == true ? PendingChatMessage(text: text, after: chatLogs[id]?.last) : nil
-    if let pending {
-      pendingChat[id, default: []].removeAll(where: \.failed)
-      pendingChat[id, default: []].append(pending)
-    }
-    perform(
-      "send", args,
-      then: { result in
-        if let pending {
-          // `perform` clears `actionError` only for a request without a `failed` handler.
-          self.actionError = nil
-          self.setPending(pending.id, in: id, .accepted(result["delivery"]?.string.flatMap(Delivery.init(rawValue:))))
-        }
-        sent?()
-      },
-      failed: pending.map { pending in { self.setPending(pending.id, in: id, .failed("\($0)")) } },
-      finally: { self.sending.remove(id) })
-  }
-
-  private func setPending(_ message: UUID, in session: String, _ status: PendingChatMessage.Status) {
-    guard let i = pendingChat[session]?.firstIndex(where: { $0.id == message }) else { return }
-    pendingChat[session]?[i].status = status
-  }
-
-  func dismissPending(_ message: UUID, in session: String) {
-    pendingChat[session]?.removeAll { $0.id == message }
+    perform("send", args, then: { _ in sent?() }, finally: { self.sending.remove(id) })
   }
 
   /// Opens the window when the user has closed it. The always-present menu bar item sets this.
   var showWindow: (() -> Void)?
+  /// Opens the Settings window and brings it forward. The always-present menu bar item sets this.
+  var showSettings: (() -> Void)?
 
   /// Selects the listed session as a sidebar click does and brings its window forward. A closed window opens
   /// first. A session that the app does not list is left alone.
@@ -1497,6 +1526,20 @@ final class BoardModel: ObservableObject {
     perform("choose", args, finally: { self.choosing.remove(key) })
   }
 
+  /// The step set for the list with `ref`. A list with another ref has no step, so a new list starts on its first
+  /// unanswered decision.
+  func decisionStep(session: String, ref: String) -> DecisionStep? {
+    decisionSteps[session].flatMap { $0.ref == ref ? $0.step : nil }
+  }
+
+  /// Sets the step for the list with `ref`. A write for a list that the session no longer shows is dropped, because
+  /// `DecisionStepView` sets the step after sbd accepts an answer, and the list can change in the meantime.
+  func setDecisionStep(_ step: DecisionStep?, session: String, ref: String) {
+    guard allSessions.first(where: { $0.id == session })?.stepList?.ref == ref else { return }
+    let entry = step.map { DecisionStepEntry(ref: ref, step: $0) }
+    if decisionSteps[session] != entry { decisionSteps[session] = entry }
+  }
+
   /// Answers one decision of the list whose ref the user saw. `answered`
   /// runs once sbd accepts the answer.
   func answerDecision(
@@ -1525,6 +1568,15 @@ final class BoardModel: ObservableObject {
 
   func discardDecisions(_ session: String) {
     decide(session, "decision-discard", ["session": .string(session)], key: "\(session)/discard")
+  }
+
+  /// Asks the session about one decision of the list whose ref the user saw. `asked` runs once sbd accepts the
+  /// question. sbd takes one question per session at a time, so a second ask waits for the first whatever its decision.
+  func askDecision(_ session: String, ref: String, number: Int, text: String, asked: (() -> Void)? = nil) {
+    let args: [String: JSON] = [
+      "session": .string(session), "ref": .string(ref), "number": .number(Double(number)), "text": .string(text),
+    ]
+    decide(session, "decision-ask", args, key: "\(session)/ask", then: asked)
   }
 
   /// A second request with the same key does nothing until sbd answers the first.
@@ -1589,13 +1641,8 @@ final class BoardModel: ObservableObject {
       let messages = try? JSONCoding.convert(
         send("chat-log", ["session": .string(session)]), to: [ChatMessage].self)
       Task { @MainActor in
-        // A failed first read shows an empty log, so the pane stops showing that it is loading.
-        if let messages = messages ?? (self.chatLogs[session] == nil ? [] : nil), self.chatLogs[session] != messages {
+        if let messages, self.chatLogs[session] != messages {
           self.chatLogs[session] = messages
-        }
-        if let messages, let pending = self.pendingChat[session] {
-          let left = PendingChatMessage.notInLog(pending, log: messages)
-          if left != pending { self.pendingChat[session] = left }
         }
       }
     }
@@ -1716,9 +1763,21 @@ final class BoardModel: ObservableObject {
     messageDrafts.draft(for: MessageDrafts.key(for: session))
   }
 
+  /// The draft of the Inbox field on `session`. On an Operator question it is the answer's own draft, which the
+  /// session view and the chat pane never show. The answer is dropped, not sent to claude, once the question closes.
+  func inboxDraft(for session: SessionSummary) -> MessageField.Draft {
+    guard MessageField.Draft.answersOperator(ref: session.triage?.ref) else { return messageDraft(for: session) }
+    return messageDrafts.draft(for: MessageDrafts.operatorAnswerKey(session: session.id))
+  }
+
   /// What the user typed as the Other answer to one decision and has not sent.
   func otherAnswerDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
     messageDrafts.draft(for: MessageDrafts.otherAnswerKey(session: session, ref: ref, decision: decision))
+  }
+
+  /// What the user typed as a question about one decision and has not asked.
+  func askDraft(session: String, ref: String, decision: Int) -> MessageField.Draft {
+    messageDrafts.draft(for: MessageDrafts.askKey(session: session, ref: ref, decision: decision))
   }
 
   /// The user's edit of a draft reply. An empty field starts again with `initial`, the session's text.
@@ -1801,6 +1860,20 @@ final class BoardModel: ObservableObject {
   func resolveNote(_ id: String, note: String) {
     perform("resolve-note", ["session": .string(id), "note": .string(note), "by": .string(Author.you.rawValue)])
   }
+
+  /// Sends `link-rm` for a session's link and `group-link-rm` for a group's. sbd deletes a link that someone added
+  /// and hides a link that it found. When it deletes a session's added link, it also hides a found link to the same
+  /// page.
+  func removeLink(_ row: LinkRows.Row) {
+    let by = JSON.string(Author.you.rawValue)
+    switch row.owner {
+    case .session(let id): perform("link-rm", ["session": .string(id), "link": .string(row.link.id), "by": by])
+    case .group(let id): perform("group-link-rm", ["group": .string(id), "link": .string(row.link.id), "by": by])
+    }
+  }
+
+  /// Every listed session by id, whatever the sidebar's filters hide.
+  var sessionsByID: [String: SessionSummary] { Dictionary(allSessions.map { ($0.id, $0) }) { first, _ in first } }
 
   /// What the Done column's delete icon removes, for the confirmation.
   struct DeletePlan {
@@ -2012,5 +2085,5 @@ struct AccountSwitch: Identifiable {
   /// False when the change only moves sessions to the active account.
   var switches: Bool
   var id: String { folder }
-  var name: String { ClaudeAccount(folder: folder).name }
+  var name: String { Account.name(ofFolder: folder) }
 }

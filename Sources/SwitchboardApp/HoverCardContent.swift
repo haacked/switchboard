@@ -12,7 +12,7 @@ struct HoverCardContent: Equatable {
 
   var title: String
   /// Muted lines under the title: the repo and branch, the issues, the group, account, and last activity, then the
-  /// artifacts that no delete removed.
+  /// artifacts that no delete removed, then the number of links.
   var details: [String]
   var pr: PRChip?
   /// What the session is doing or waits on, in one line of plain text.
@@ -30,10 +30,12 @@ struct HoverCardContent: Equatable {
     let repo = s.pr?.repo ?? s.repoFolder.map { ($0 as NSString).lastPathComponent }
     let branch = s.branch == s.name ? nil : s.branch
     let issues = s.issues ?? []
-    let account = s.account.map(ClaudeAccount.init(folder:))
     let meta = [
       s.groupName,
-      account.flatMap { $0 == ClaudeAccount(folder: activeAccount) ? nil : "\($0.name) account" },
+      s.account.flatMap {
+        ClaudeAccount.normalize($0) == ClaudeAccount.normalize(activeAccount)
+          ? nil : "\(Account.name(ofFolder: $0)) account"
+      },
       s.waitsToStart || s.lastActivity <= 0 ? nil : "active \(ago(s.lastActivity, now: now)) ago",
     ]
     details = [
@@ -41,6 +43,7 @@ struct HoverCardContent: Equatable {
       issues.count > 1 ? "Issues " + issues.map { $0.label(from: s.pr?.repo) }.joined(separator: ", ") : nil,
       Self.joined(meta),
       Self.artifacts(s.artifacts ?? []),
+      Self.links(s.links ?? []),
     ].compactMap { $0 }
     pr = s.pr.map { PRChip(text: $0.line, status: $0.status) }
     summary = Self.summary(s, names: names)
@@ -65,6 +68,10 @@ struct HoverCardContent: Equatable {
     let live = artifacts.newestFirst.filter { $0.removed == nil }
     guard let newest = live.first.map({ oneLine($0.title, max: 60) }) else { return nil }
     return live.count == 1 ? "Artifact: \(newest)" : "\(live.count) artifacts, newest \(newest)"
+  }
+
+  private static func links(_ links: [ExternalLink]) -> String? {
+    links.isEmpty ? nil : links.count == 1 ? "1 link" : "\(links.count) links"
   }
 
   private static func joined(_ parts: [String?]) -> String? {

@@ -66,17 +66,19 @@ jobs:
 
   # The suite takes longer than one 3-CPU runner can finish within the time
   # limit, so the matrix splits it across runners. Each part builds the tests
-  # and runs its share of them (bin/lib/shard-plan).
+  # and runs its share of them (bin/lib/shard-plan). The last part runs the
+  # unit test targets and MeasureTests. The parts before it run the
+  # integration suites.
   swift-test:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: macos-26
-    # The build alone takes up to 17 minutes on a loaded runner, and part 1's tests take up to 30.
+    # The build alone takes up to 17 minutes on a loaded runner.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2]
+        part: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
       - run: swift --version

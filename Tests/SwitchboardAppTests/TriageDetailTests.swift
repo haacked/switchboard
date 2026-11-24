@@ -1,8 +1,8 @@
 import Foundation
-import SwitchboardCore
 import Testing
 
 @testable import SwitchboardApp
+@testable import SwitchboardCore
 
 @Suite struct TriageDetailPane {
   func session(waitsToStart: Bool) -> SessionSummary {
@@ -58,9 +58,26 @@ import Testing
 
   @Test func linksADocketRowToItsPullRequest() throws {
     let link = try #require(TriageDetail.prLink(for: docketRow(url: "https://github.com/o/r/pull/1")))
-    #expect(link.label == "o/r#1")
+    #expect(link.label == "#1")
+    #expect(link.help == "o/r#1")
     #expect(link.url == URL(string: "https://github.com/o/r/pull/1"))
     #expect(link.owners == nil)
+  }
+
+  @Test func helpsADocketRowWithItsReviewTitle() throws {
+    var s = docketRow(url: "https://github.com/o/r/pull/1")
+    var review = DocketReview(pullRequest: "o/r#1", url: "https://github.com/o/r/pull/1", state: "reviewing")
+    review.title = "Fix it"
+    s.docket?.review = review
+    let link = try #require(TriageDetail.prLink(for: s))
+    #expect(link.help == "o/r#1: Fix it")
+  }
+
+  @Test func keepsTheWholeDocketRefWhenItHasNoNumber() throws {
+    var s = docketRow(url: "https://github.com/o/r/pull/1")
+    s.docket?.pullRequest = "not a ref"
+    let link = try #require(TriageDetail.prLink(for: s))
+    #expect(link.label == "not a ref")
   }
 
   @Test func refusesADocketUrlThatIsNotHttps() {
@@ -71,7 +88,8 @@ import Testing
     var s = session(waitsToStart: false)
     s.pr = prWithOwners()
     let link = try #require(TriageDetail.prLink(for: s))
-    #expect(link.label == s.pr?.line)
+    #expect(link.label == "#5")
+    #expect(link.help == s.pr?.line)
     #expect(link.url == URL(string: "https://github.com/o/r/pull/5"))
     #expect(link.owners == s.pr?.codeOwners)
   }
@@ -100,6 +118,19 @@ import Testing
     let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x", head: "haacked/x")))
 
     #expect(link.head == nil)
+  }
+
+  /// A narrow header drops the branch, so the link's help names it.
+  @Test func helpNamesTheBranchWhenItIsTheFoldersBranch() throws {
+    let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x", head: "haacked/x")))
+
+    #expect(link.help.hasSuffix(". The PR's branch is haacked/x."))
+  }
+
+  @Test func helpNamesBothBranchesWhenTheyDiffer() throws {
+    let link = try #require(TriageDetail.prLink(for: session(branch: "haacked/x-v2", head: "haacked/x")))
+
+    #expect(link.help.hasSuffix(". The PR's branch is haacked/x. This folder is on haacked/x-v2."))
   }
 
   @Test func linkHasNoHeadWhenThePRDoesNotNameOne() throws {

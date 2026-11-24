@@ -68,6 +68,24 @@ import Testing
     #expect((try? host.checkedPanes())?["a"]?.pid == pid)
   }
 
+  /// A tmux server that started before the hyperlinks feature existed never rereads tmux.conf, so starting sbd
+  /// again adds the feature to it, once.
+  @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
+  func startingAgainAddsHyperlinksToARunningServerOnce() throws {
+    let tmux = try #require(findExecutable("tmux"))
+    var template = Array("/tmp/sbh.XXXXXX".utf8CString)
+    let dir = String(cString: try #require(mkdtemp(&template)))
+    let first = try TerminalHost(home: Home(path: dir), config: Config())
+    defer { stop(first) }
+    let old = try runCommand(tmux, ["-S", first.socket, "-f", "/dev/null", "new-session", "-d", "sleep 60"])
+    #expect(old.status == 0, "\(old.stderr)")
+    #expect(try !first.run(["show-options", "-s", "terminal-features"]).contains("hyperlinks"))
+    _ = try TerminalHost(home: Home(path: dir), config: Config())
+    let again = try TerminalHost(home: Home(path: dir), config: Config())
+    let features = try again.run(["show-options", "-s", "terminal-features"])
+    #expect(features.components(separatedBy: "hyperlinks").count == 2)
+  }
+
   @Test(.enabled(if: findExecutable("tmux") != nil), .timeLimit(.minutes(1)))
   func createStartsADeadPaneAgain() throws {
     let host = try host()
@@ -138,5 +156,22 @@ private final class RecordingMachine: Machine, @unchecked Sendable {
 
     let error = #expect(throws: APIError.self) { try host.run(["failing"]) }
     #expect(error?.description == "tmux failing: no such command")
+  }
+
+  /// tmux drops a program's OSC 8 links unless the outer terminal has the hyperlinks feature, and a dropped link
+  /// can't be clicked in the app. The config is real tmux input here, so a tmux that rejects the line fails the test.
+  @Test(.enabled(if: findExecutable("tmux") != nil))
+  func theConfigPassesOSC8LinksThrough() throws {
+    let tmux = try #require(findExecutable("tmux"))
+    let dir = "/tmp/sb-\(getpid())-links"
+    try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try TerminalHost.configText.write(toFile: "\(dir)/c", atomically: true, encoding: .utf8)
+    let socket = "\(dir)/s"
+    defer { _ = try? runCommand(tmux, ["-S", socket, "kill-server"]) }
+    let started = try runCommand(tmux, ["-S", socket, "-f", "\(dir)/c", "new-session", "-d", "sleep 30"])
+    #expect(started.status == 0, "\(started.stderr)")
+    let features = try runCommand(tmux, ["-S", socket, "show-options", "-s", "terminal-features"])
+    #expect(features.stdout.contains("xterm-256color:hyperlinks"))
   }
 }

@@ -485,12 +485,12 @@ private let otherAccountForms = ["~/.claude-personal", "~/.claudex", "~/.claude/
     for folder in folders + ["\(home)/other"] {
       FileManager.default.createFile(atPath: "\(folder)/.claude.json", contents: Data("{}".utf8))
     }
-    let known = folders.map(ClaudeAccount.init(folder:))
+    let known = folders.map { Account.claude(ClaudeAccount(folder: $0)) }
 
-    #expect(try ClaudeAccount.resolve("work", among: known) == known[1])
-    #expect(try ClaudeAccount.resolve("\(home)/other/", among: known).folder == "\(home)/other")
-    #expect(throws: APIError.self) { try ClaudeAccount.resolve("nobody", among: known) }
-    #expect(throws: APIError.self) { try ClaudeAccount.resolve("\(home)/empty", among: known) }
+    #expect(try Account.resolve("work", among: known) == known[1])
+    #expect(try Account.resolve("\(home)/other/", among: known).folder == "\(home)/other")
+    #expect(throws: APIError.self) { try Account.resolve("nobody", among: known) }
+    #expect(throws: APIError.self) { try Account.resolve("\(home)/empty", among: known) }
   }
 
   @Test func discoverFindsTheDefaultAccountAndEachDashedFolderThatHoldsAConfig() throws {

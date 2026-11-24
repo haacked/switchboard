@@ -14,7 +14,7 @@ import Testing
 
   func group(
     name: String = Self.name, description: String? = nil, by author: Author? = nil, notes: [Note] = [],
-    links: [GroupLink]? = nil
+    links: [ExternalLink]? = nil
   ) -> SessionGroup {
     var group = SessionGroup(id: Self.id, name: name, notes: notes, created: 0, links: links)
     group.description = description
@@ -26,8 +26,8 @@ import Testing
     Note(id: "n\(text.count)", text: text, by: author, t: 1)
   }
 
-  func link(_ url: String, title: String) -> GroupLink {
-    GroupLink(id: "l\(url.count)", title: title, url: url, by: .you, t: 1)
+  func link(_ url: String, title: String, by author: LinkAuthor = .you) -> ExternalLink {
+    ExternalLink(id: "l\(url.count)", title: title, url: url, by: author, t: 1)
   }
 
   func block(_ g: SessionGroup, artifacts: Int = 0) -> String {
@@ -88,6 +88,28 @@ import Testing
     let doc = lines(text).first { $0.contains("Cache design") }
     #expect(rfc?.contains(Self.rfc) == true, "\(text)")
     #expect(doc?.contains(Self.doc) == true, "\(text)")
+  }
+
+  /// Claude can add a claude.ai artifact link, which counts among the artifacts and never reads as the user's.
+  @Test(arguments: [LinkAuthor.claude, .found])
+  func aLinkThatTheUserDidNotAddIsLeftOut(author: LinkAuthor) {
+    let artifact = "https://claude.ai/artifact/abc123"
+    let s = summary(links: [link(Self.rfc, title: "Flag evaluations RFC"), link(artifact, title: artifact, by: author)])
+
+    let text = block(s)
+
+    #expect(text.contains(Self.rfc), "\(text)")
+    #expect(!text.contains(artifact), "\(text)")
+  }
+
+  @Test(arguments: [LinkAuthor.claude, .found])
+  func aLinkThatTheUserDidNotAddLeavesTheFingerprintAlone(author: LinkAuthor) {
+    var group = SessionGroup(id: Self.id, name: Self.name, created: 0)
+    let before = GroupContext.fingerprint(group)
+
+    group.links = [link("https://claude.ai/artifact/abc123", title: "x", by: author)]
+
+    #expect(GroupContext.fingerprint(group) == before)
   }
 
   @Test func theLinksKeepTheirOrder() throws {

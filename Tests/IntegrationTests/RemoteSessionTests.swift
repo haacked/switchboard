@@ -72,6 +72,19 @@ private struct Lifecycle {
     #expect(try sbd.summaryJSON(try sbd.id(of: summary))["host"] == "mini")
   }
 
+  /// The record lives on this Mac, so this Mac's sbd names an unnamed host session the way it names a local one.
+  @Test func anUnnamedSessionOnAHostWithAPromptGetsTheModelsName() throws {
+    let sbd = try Instance.remote(config: ["sessionNames": ["enabled": true]])
+
+    let (id, _, _, summary) = try start(sbd, prompt: "Fix the login redirect")
+
+    #expect(summary["name"]?.string != "stub-session-name")
+    let named = try sbd.waitFor(id, "the model's name") { $0.name == "stub-session-name" }
+    #expect(named.host == "mini")
+    let event = try #require(try sbd.events(id).first { $0.kind == "session-name" })
+    #expect(event.data["name"] == "stub-session-name")
+  }
+
   @Test func aNewSessionOnAHostRunsItsPanesInTheBoxesTmuxServer() throws {
     let sbd = try Instance.remote()
     try sbd.makeBoxFolder()
@@ -371,7 +384,7 @@ private struct Lifecycle {
   }
 
   @Test func aSessionCantStartOnAHostWhileTheHostRefusesTheLink() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.attemptHostWait)
     try sbd.makeBoxFolder()
     let refusal = "ssh: connect to host mini.local port 22: Operation timed out"
     try sbd.setSSHStub("refuse", refusal + "\n")
@@ -475,7 +488,7 @@ private struct Lifecycle {
     #expect(done.live)
     #expect(
       sbd.stubArgs().first?.hasPrefix(
-        "--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
+        "--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id)) --model opus")
         == true)
     #expect(try sbd.boxTmuxSessions() == ["\(remote.id)-claude", "\(remote.id)-shell"])
     #expect(sbd.boxStubArgs().count == 1)
@@ -537,11 +550,14 @@ private struct Lifecycle {
     try sbd.waitFor(remote.id, "the remote claude to run again") { $0.claudePid != nil }
     try sbd.waitFor(local.id, "the local claude to run again") { $0.claudePid != nil }
 
-    #expect(sbd.stubArgs().last == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
+    #expect(
+      sbd.stubArgs().last
+        == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id)) --model opus")
     let resumed = (sbd.boxStubArgs().last ?? "").split(separator: " ").map(String.init)
-    try #require(resumed.count == 4, "\(resumed)")
+    try #require(resumed.count == 6, "\(resumed)")
     #expect(Array(resumed.prefix(3)) == ["--resume", remote.claudeSessionId, "--settings"])
     #expect(real(resumed[3]) == real(sbd.boxSettings))
+    #expect(Array(resumed.suffix(2)) == ["--model", "opus"])
     let remoteLauncher = try String(contentsOfFile: "\(sbd.boxSB)/sessions/\(remote.id)/claude.sh", encoding: .utf8)
     let localLauncher = try String(contentsOfFile: "\(sbd.home.sessionFolder(local.id))/claude.sh", encoding: .utf8)
     #expect(

@@ -27,7 +27,9 @@ import Testing
 
   /// The tools that act on one schedule by its id.
   enum ScheduleTool: String, CaseIterable {
-    case remove = "remove_schedule", edit = "edit_schedule", run = "run_schedule"
+    case remove = "remove_schedule"
+    case edit = "edit_schedule"
+    case run = "run_schedule"
 
     func call(_ mcp: MCPClient, _ row: ScheduleRow) throws -> ToolResult {
       var args: [String: JSON] = ["schedule": .string(row.schedule.id)]
@@ -48,14 +50,42 @@ import Testing
 
   // MARK: The tool definitions
 
-  @Test func addScheduleTakesASessionAndRequiresAnIntervalAndAPrompt() throws {
+  /// A top-up's prompt is optional, so the schema may or may not require `prompt`. sbd still refuses a plain
+  /// schedule without one (`addScheduleWithoutAnIntervalOrAPromptReturnsAnError`).
+  @Test func addScheduleTakesASessionAndAnOptionalTopupAndRequiresAnInterval() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let add = try tool(mcp, "add_schedule")
 
-    #expect(properties(add) == ["session", "every", "prompt"])
-    #expect(required(add) == ["every", "prompt"])
+    #expect(properties(add) == ["session", "every", "prompt", "topup"])
+    #expect(required(add).contains("every"))
+    #expect(required(add).isSubset(of: ["every", "prompt"]))
+  }
+
+  @Test func addSchedulesTopupTakesTheGatesMembers() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let topup = try #require(try tool(mcp, "add_schedule")["inputSchema"]?["properties"]?["topup"])
+
+    #expect(topup["type"]?.string == "object", Comment(rawValue: topup.text))
+    #expect(
+      Set((topup["properties"]?.object ?? [:]).keys) == ["group", "repo", "target", "template", "rubric"],
+      Comment(rawValue: topup.text))
+  }
+
+  @Test func addSchedulesDescriptionSaysWhatTheTopupDoes() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let add = try tool(mcp, "add_schedule")
+
+    let topup = add["inputSchema"]?["properties"]?["topup"]?["description"]?.string ?? ""
+    let text = ((add["description"]?.string ?? "") + "\n" + topup).lowercased()
+    #expect(!topup.isEmpty, Comment(rawValue: add.text))
+    #expect(text.contains("target"), Comment(rawValue: text))
+    #expect(text.contains("group"), Comment(rawValue: text))
   }
 
   @Test func listSchedulesTakesAnOptionalSession() throws {
@@ -628,6 +658,97 @@ import Testing
     #expect(result.isError)
     #expect(result.text.contains("not in group"), "\(result.text)")
     #expect(try stored(sbd, s.member.id) == nil)
+  }
+
+  // MARK: A top-up
+
+  static let topupRepo = "acme/widgets"
+  static let topupRubric = "Bugs before features."
+  static let topupTemplate = "Fix {url}: {title}"
+
+  /// The `topup` argument of `add_schedule`, in the group named `group`.
+  func topup(_ group: String, target: Int = 2) -> JSON {
+    [
+      "group": .string(group), "repo": .string(Self.topupRepo), "target": .number(Double(target)),
+      "template": .string(Self.topupTemplate), "rubric": .string(Self.topupRubric),
+    ]
+  }
+
+  /// The test runner starts this server outside every pane, with no SB_SESSION_ID, so it counts as the user.
+  @Test func anUnscopedAddScheduleTakesATopup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let op = try OperatorTests().openOperator(sbd)
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call(
+      "add_schedule",
+      ["session": .string(op.id), "every": "1h", "prompt": "tick the queue", "topup": topup(s.group.name, target: 3)])
+
+    #expect(!result.isError, Comment(rawValue: result.text))
+    let row = try result.decode(ScheduleRow.self)
+    let gate = try #require(row.schedule.gate, Comment(rawValue: result.text))
+    #expect(gate.group == s.group.id)
+    #expect(gate.repo == Self.topupRepo)
+    #expect(gate.target == 3)
+    #expect(gate.template == Self.topupTemplate)
+    #expect(gate.rubric == Self.topupRubric)
+    #expect(row.schedule.prompt == "tick the queue")
+    #expect(row.schedule.by == .claude)
+    #expect(try stored(sbd, op.id) == [row.schedule])
+  }
+
+  @Test func anUnscopedAddScheduleWithATopupAndNoPromptStoresTheDefaultPrompt() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let op = try OperatorTests().openOperator(sbd)
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call(
+      "add_schedule", ["session": .string(op.id), "every": "1h", "topup": topup(s.group.id, target: 2)])
+
+    #expect(!result.isError, Comment(rawValue: result.text))
+    let row = try result.decode(ScheduleRow.self)
+    #expect(
+      row.schedule.prompt
+        == Schedule.Gate.defaultPrompt(groupName: s.group.name, repo: Self.topupRepo, target: 2))
+  }
+
+  @Test(
+    arguments: [
+      (["repo": "widgets"], "owner/name"), (["target": 0], "1 to 20"), (["target": 21], "1 to 20"),
+      (["template": " \n "], "template"), (["rubric": ""], "rubric"), (["group": "Nowhere"], "Nowhere"),
+    ] as [([String: JSON], String)])
+  func anAddScheduleWithABadTopupReturnsAnError(_ change: [String: JSON], _ mentions: String) throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let op = try OperatorTests().openOperator(sbd)
+    let mcp = try MCPClient(sbd)
+    let bad = JSON.object((topup(s.group.id).object ?? [:]).merging(change) { $1 })
+
+    let result = try mcp.call(
+      "add_schedule", ["session": .string(op.id), "every": "1h", "prompt": "tick", "topup": bad])
+
+    #expect(result.isError, Comment(rawValue: result.text))
+    #expect(result.text.contains(mentions), Comment(rawValue: result.text))
+    #expect(try stored(sbd, op.id) == nil)
+  }
+
+  /// A group chat's server is scoped. sbd arms actions for a gated schedule, so the scoped server may not add one on
+  /// the chat itself or on a member, though it may add a plain schedule on either.
+  @Test(arguments: [true, false]) func aScopedAddScheduleRefusesATopup(_ onTheChat: Bool) throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let c = try chat(sbd)
+    let mcp = try chatServer(sbd, s, c)
+    let target = onTheChat ? c.id : s.member.id
+    var args: [String: JSON] = ["every": "1h", "prompt": "tick the queue", "topup": topup(s.group.id)]
+    if !onTheChat { args["session"] = .string(target) }
+
+    let result = try mcp.call("add_schedule", args)
+
+    #expect(result.isError, Comment(rawValue: result.text))
+    #expect(try stored(sbd, target) == nil)
   }
 
   @Test func aScopedEditScheduleEditsAMembersSchedule() throws {

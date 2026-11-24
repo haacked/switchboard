@@ -13,25 +13,41 @@
 #   gh pr view <N> --repo <owner/name> ...   pr/<owner>/<name>/<N>
 #   gh api [flags] <path>                     api/<path>, without a leading
 #                                             slash or a query string
+#   gh issue list --repo <owner/name> ...     issue-list/<owner>/<name>
+#   gh pr list --repo <owner/name> ...        pr-list/<owner>/<name>
 # The stub prints <key>.json when it exists. When <key>.error exists instead, it
 # prints that file to stderr and exits 1. With neither, it prints a 404 to
 # stderr and exits 1, so a read that the test did not set up is unknown. It
 # prints the whole file: it ignores --jq, --json, and --paginate, so the caller
 # parses the JSON itself. A FIFO at <key>.gate holds the call until a test
 # writes a line to it.
+#
+# The CI reader's calls answer from the same folder:
+#   gh run list --repo <owner/name> --commit <sha> ...
+#                                   run/<owner>/<name>/commit/<sha>
+#   gh run view <id> --repo <owner/name> --log-failed
+#                                   run/<owner>/<name>/<id>/log-failed, which
+#                                   it prints from <key>.txt in place of
+#                                   <key>.json, because gh prints the log as
+#                                   text
+#   gh run rerun <id> --repo <owner/name> ...
+#                                   run/<owner>/<name>/<id>/rerun
+# A rerun prints <key>.error to stderr and exits 1 when that file exists, and
+# exits 0 otherwise. A FIFO at <key>.gate holds the rerun as it holds a read.
 printf '%s\n' "$*" >>"$SB_HOME/gh-calls.log"
 
 live="$SB_HOME/gh-live"
 
+# Prints the answer for the key $1 from <key>.<$2>, or <key>.json without $2.
 serve() {
-  local file="$live/$1"
+  local file="$live/$1" extension=${2-json}
   if [ -p "$file.gate" ]; then read -r _ <"$file.gate"; fi
   if [ -f "$file.error" ]; then
     cat "$file.error" >&2
     exit 1
   fi
-  if [ -f "$file.json" ]; then
-    cat "$file.json"
+  if [ -f "$file.$extension" ]; then
+    cat "$file.$extension"
     exit 0
   fi
   echo "gh: Not Found (HTTP 404): $1" >&2
@@ -80,6 +96,52 @@ pr_view_key() {
   echo "pr/$repo/$number"
 }
 
+# The key of `gh issue list --repo <owner/name>` or `gh pr list --repo <owner/name>`.
+list_key() {
+  local kind=$1 repo=''
+  shift 2
+  while [ $# -gt 0 ]; do
+    case $1 in
+    --repo | -R)
+      repo=$2
+      shift 2
+      ;;
+    *) shift ;;
+    esac
+  done
+  echo "$kind-list/$repo"
+}
+
+# Reads `gh run <list|view|rerun> ...` into run_repo, run_commit, run_id, and
+# run_flags, the flags that take no value, each with a space before it.
+run_args() {
+  shift 2
+  run_repo='' run_commit='' run_id='' run_flags=''
+  while [ $# -gt 0 ]; do
+    case $1 in
+    --repo | -R)
+      run_repo=$2
+      shift 2
+      ;;
+    --commit | -c)
+      run_commit=$2
+      shift 2
+      ;;
+    --json | --jq | -q | --template | -t | --limit | -L | --workflow | -w | --branch | -b | --status | -s | --event | -e | --user | -u | --job | -j | --attempt | -a)
+      shift 2
+      ;;
+    -*)
+      run_flags="$run_flags $1"
+      shift
+      ;;
+    *)
+      [ -z "$run_id" ] && run_id=$1
+      shift
+      ;;
+    esac
+  done
+}
+
 case "$1 $2" in
 "auth token")
   echo "token-1"
@@ -100,6 +162,29 @@ case "$1 $2" in
   ;;
 "pr view")
   serve "$(pr_view_key "$@")"
+  ;;
+"issue list" | "pr list")
+  serve "$(list_key "$@")"
+  ;;
+"run list")
+  run_args "$@"
+  serve "run/$run_repo/commit/$run_commit"
+  ;;
+"run view")
+  run_args "$@"
+  if [[ " $run_flags " == *" --log-failed "* ]]; then
+    serve "run/$run_repo/$run_id/log-failed" txt
+  fi
+  serve "run/$run_repo/$run_id"
+  ;;
+"run rerun")
+  run_args "$@"
+  rerun="$live/run/$run_repo/$run_id/rerun"
+  if [ -p "$rerun.gate" ]; then read -r _ <"$rerun.gate"; fi
+  if [ -f "$rerun.error" ]; then
+    cat "$rerun.error" >&2
+    exit 1
+  fi
   ;;
 "api graphql")
   echo '{"data":{"node":{"author":{"login":"haacked"},"suggestedReviewers":[{"isAuthor":true,"isCommenter":false,"reviewer":{"login":"ann"}},{"isAuthor":true,"isCommenter":true,"reviewer":{"login":"haacked"}}]}}}'

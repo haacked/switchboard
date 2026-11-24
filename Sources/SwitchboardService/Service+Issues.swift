@@ -192,8 +192,18 @@ extension Service {
     let preset =
       try args["preset"]?.string.map { try IssuePreset.named($0, in: presets) }
       ?? IssuePreset.choose(presets, last: nil, default: defaultPreset) ?? presets[0]
+    return try startIssueSession(
+      issue, prompt: preset.prompt(for: issue), group: args["group"]?.string, path: args["path"]?.string,
+      manualMode: !trusted)
+  }
+
+  /// Makes a session on `issue`: a worktree on `<branchPrefix><number>-<slug>` in `path`, or in the repository's
+  /// checkout when `path` is nil, with the session's issue set to the issue. It runs off the state queue.
+  func startIssueSession(
+    _ issue: InboxIssue, prompt: String, group: String?, path: String?, manualMode: Bool
+  ) throws -> SessionSummary {
     let repo: String
-    if let path = args["path"]?.string {
+    if let path {
       repo = (path.expandingTilde as NSString).standardizingPath
       guard hasRemote(repo, for: issue.repo, at: mac) else {
         throw APIError("\(repo) has no remote on github.com for \(issue.repo)")
@@ -208,8 +218,7 @@ extension Service {
     return try newSession(
       NewSession(
         path: repo, branch: branch, name: issueSessionName(issue),
-        worktree: true, prompt: preset.prompt(for: issue), group: args["group"]?.string,
-        manualMode: trusted ? nil : true, issue: issue.issueRef))
+        worktree: true, prompt: prompt, group: group, manualMode: manualMode ? true : nil, issue: issue.issueRef))
   }
 
   /// A slug of the title, or `issue-<N>` for a title with no ASCII letters or digits.

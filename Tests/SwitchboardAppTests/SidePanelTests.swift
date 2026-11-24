@@ -299,3 +299,40 @@ func waitingSession(_ waits: [Wait], notes: [Note] = [], markedDone: Bool = fals
     #expect(artifact.caption(now: Self.now) == "removed 5m ago")
   }
 }
+
+extension SidePanelTests {
+  @Suite struct Links {
+    static func session(_ links: [ExternalLink]?) -> SessionSummary {
+      var s = notedSession([], id: "s1")
+      s.links = links
+      return s
+    }
+
+    static func link(_ id: String, t: Int64) -> ExternalLink {
+      ExternalLink(id: id, title: "Link \(id)", url: "https://example.com/\(id)", by: .you, t: t)
+    }
+
+    @Test(arguments: [nil, []] as [[ExternalLink]?])
+    func countsNoLinkWhenThereIsNoLink(_ links: [ExternalLink]?) {
+      #expect(SidePanel(Self.session(links)).links.count == 0)
+    }
+
+    @Test(arguments: [1, 2])
+    func countsTheLinksInTheTitle(_ count: Int) {
+      let links = (0..<count).map { Self.link("l\($0)", t: Int64($0)) }
+
+      #expect(SidePanel(Self.session(links)).links.count == count)
+    }
+
+    @Test func theEmptyTextSaysThereAreNoLinks() {
+      #expect(SidePanel.noLinks == "No links.")
+    }
+
+    /// sbd lists a session's links oldest first. The panel shows the newest first, with ids that hold the session.
+    @Test func listsTheSessionsLinkRowsNewestFirst() {
+      let links = [Self.link("l1", t: 1), Self.link("l2", t: 3), Self.link("l3", t: 2)]
+
+      #expect(SidePanel(Self.session(links)).links.map(\.id) == ["s1/l2", "s1/l3", "s1/l1"])
+    }
+  }
+}

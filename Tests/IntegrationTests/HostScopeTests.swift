@@ -212,7 +212,7 @@ private let otherDestination = "haacked@other.local"
     "stopped", "exited", "running", "idle", "job", "pr", "branch", "worktree", "cleanup", "triage", "merge", "docket",
     "dependencies", "created", "imported", "started", "resumed", "followup", "followup-started", "wait", "wait-cleared",
     "note", "done", "undone", "ack", "snooze", "unsnooze", "highlighted", "unhighlighted", "account-moved", "digest",
-    "link_down", "link_up",
+    "link_down", "link_up", "link-added", "link-removed", "link-hidden", "link-unhidden",
     "reconciled", "unknown",
   ]
 
@@ -381,7 +381,8 @@ private let otherDestination = "haacked@other.local"
     "group-note", "group-describe", "group-link-add", "group-link-rm", "group-account", "group-suggest", "manager",
     "manager-ls", "manager-mcp",
     "manager-model", "manager-skills", "chat",
-    "chat-log", "slash-commands", "removed-ls", "manager-pin", "item-context", "manager-mcp-request", "operator",
+    "chat-log", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "item-context",
+    "manager-mcp-request", "operator",
     "operator-report", "operator-reports", "quick-ask", "ref-details", "pause", "snooze", "unsnooze", "highlight",
     "parent", "schedule", "wait-approve",
     "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "rm-plan", "rm-queue",
@@ -391,8 +392,10 @@ private let otherDestination = "haacked@other.local"
     "account-move",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
+    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+    "decision-ask",
     "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
     "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
     "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
@@ -450,6 +453,11 @@ private let otherDestination = "haacked@other.local"
     add("rename", ["session": l, "name": text], scope)
     add("rename", ["session": o, "name": text], scope)
     add("note", ["session": l, "text": text], scope)
+    let url = JSON.string("https://example.com/\(marker)")
+    add("link-add", ["session": l, "url": url, "by": "claude", "caller": l], scope)
+    add("link-add", ["session": s, "url": url, "by": "claude", "caller": l], scope)
+    add("link-add", ["session": s, "url": url, "by": "claude", "caller": o], scope)
+    add("link-rm", ["session": l, "link": "lnope2"], scope)
     add("wait", ["session": s, "on": text], "on")
     add("wait", ["session": s, "kind": "session", "target": l, "state": "idle"], scope)
     add(
@@ -483,6 +491,7 @@ private let otherDestination = "haacked@other.local"
     add("mcp")
     add("snapshots")
     add("autocontinue", ["on": true])
+    add("auto-mode", ["autoMode": true])
     add("poll")
     add("importable")
     add("import", ["refs": [text]])
@@ -590,6 +599,36 @@ private let otherDestination = "haacked@other.local"
     #expect(waited?["ok"] == true, "\(waited?.text ?? "no answer")")
     #expect(try sbd.get(mini.id).waits.contains { $0.note == marker })
     #expect(!sbd.stubInput().contains { $0.contains(marker) }, "the send reached a local pane")
+  }
+
+  /// A host's Claude passes the own-session check only for a session on that host, because the scope table
+  /// resolves `caller` among the host's sessions.
+  @Test func aHostsClaudeAddsALinkOnlyToItsOwnSession() throws {
+    let sbd = try Instance.remote(config: Instance.shortHostWait)
+    let mini = try sbd.startOnHost()
+    let local = try sbd.new(name: "local-probe")
+    let (m, l) = (JSON.string(mini.id), JSON.string(local.id))
+    let own = "https://example.com/rfcs/own-\(UUID().uuidString)"
+    let request = { (session: JSON, url: String, caller: JSON) throws -> JSON? in
+      try sbd.sendLine(
+        Instance.requestLine("link-add", ["session": session, "url": .string(url), "by": "claude", "caller": caller]),
+        to: sbd.boxSocket)
+    }
+
+    let added = try request(m, own, m)
+    let localCaller = try request(m, "https://example.com/rfcs/local-caller", l)
+    let localTarget = try request(l, "https://example.com/rfcs/local-target", l)
+
+    #expect(added?["ok"] == true, "\(added?.text ?? "no answer")")
+    #expect(added?["result"]?["links"]?.array?.compactMap { $0["url"]?.string } == [own])
+    for (label, answer) in [("a local caller", localCaller), ("a local session", localTarget)] {
+      #expect(refused(answer), "\(label): \(answer?.text ?? "no answer")")
+      #expect(answer?["error"]?.string?.contains("not on mini") == true, "\(label): \(answer?.text ?? "no answer")")
+    }
+    let links = try #require(try sbd.sessionLinks(mini.id))
+    #expect(links.compactMap { $0["url"]?.string } == [own])
+    #expect(links.first?["by"]?.string == "claude")
+    #expect(try sbd.sessionLinks(local.id) == nil)
   }
 
   // MARK: Lines that are not requests

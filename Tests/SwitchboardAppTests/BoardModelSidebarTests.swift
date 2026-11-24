@@ -113,6 +113,44 @@ import Testing
     #expect(shown(model) == ["canContinue: c", "readyForReview: r", "waiting: w"])
   }
 
+  // MARK: The Operator (#410)
+
+  /// The Operator, which has no sidebar row. Its work shows in the Loops tab's Background Activity.
+  func theOperator(_ id: String = "op", state: AttentionState = .waiting) -> SessionSummary {
+    var s = summary(id, manager: true, state: state)
+    s.kind = .operator
+    s.name = Manager.operatorName
+    return s
+  }
+
+  @Test(arguments: [AttentionState.working, .waiting, .needsYou])
+  func theOperatorHasNoSidebarRow(_ state: AttentionState) {
+    let model = model([summary("m", manager: true), theOperator(state: state), summary("a")])
+
+    #expect(!model.sidebarOrder.contains("op"))
+  }
+
+  @Test func withOnlyTheOperatorTheSidebarIsEmpty() {
+    #expect(model([theOperator()]).sidebarIsEmpty)
+  }
+
+  @Test func aMultiSelectionLeavesOutTheOperator() {
+    let model = model([summary("m", manager: true), theOperator(), summary("a"), summary("b")])
+
+    model.setMultiSelection(["m", "op", "a", "b"])
+
+    #expect(model.multiSelected.map(\.id) == ["m", "a", "b"])
+  }
+
+  /// A refresh that keeps a multi-selection with no `selection` selects the first kept row in the sidebar.
+  @Test func keepingAMultiSelectionNeverSelectsTheOperator() {
+    let model = model([theOperator(), summary("a"), summary("b")])
+
+    model.keepMultiSelection(["op", "a", "b"], onBoard: false)
+
+    #expect(model.selection == "a")
+  }
+
   @Test func theManagerStaysSelectedAcrossARefresh() {
     let sessions = [summary("m", manager: true, state: .needsYou)]
     let model = model(sessions)

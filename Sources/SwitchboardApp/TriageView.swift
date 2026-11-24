@@ -6,8 +6,6 @@ import SwitchboardCore
 struct TriageDetail: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  /// The step that the card's decision view shows. Nil shows the first unanswered decision.
-  @State private var step: DecisionStep?
 
   enum Pane { case terminal, summary }
 
@@ -18,18 +16,37 @@ struct TriageDetail: View {
       ? .terminal : .summary
   }
 
+  struct BarLink {
+    /// The PR number, such as "#4812".
+    var label: String
+    /// The PR's status, title, and head branch, which the label leaves out.
+    var help: String
+    var status = ""
+    var url: URL
+    var owners: CodeOwnerStatus?
+    /// The PR's branch when the folder is on another branch.
+    var head: String?
+  }
+
   /// The PR that the bar links to, with the code owners of that PR. A docket
   /// row links to the PR that docket reviews and ignores its `pr`. The bar
   /// therefore never shows one PR's link beside another PR's code owners.
-  /// `head` is the PR's branch when the folder is on another branch.
-  static func prLink(for session: SessionSummary) -> (
-    label: String, url: URL, owners: CodeOwnerStatus?, head: String?
-  )? {
-    if let docket = session.docket { return docket.link.map { (docket.pullRequest, $0, nil, nil) } }
-    if let pr = session.pr, let url = pr.link {
-      return (pr.line, url, pr.codeOwners, pr.otherBranch(than: session.branch))
+  static func prLink(for session: SessionSummary) -> BarLink? {
+    if let docket = session.docket {
+      guard let url = docket.link else { return nil }
+      let label = DocketRef(docket.pullRequest).map { "#\($0.number)" } ?? docket.pullRequest
+      let title = docket.review?.title.flatMap { $0.isEmpty ? nil : $0 }
+      return BarLink(
+        label: label, help: [docket.pullRequest, title].compactMap { $0 }.joined(separator: ": "), url: url)
     }
-    return nil
+    guard let pr = session.pr, let url = pr.link else { return nil }
+    let head = pr.otherBranch(than: session.branch)
+    var help = pr.line
+    if !pr.title.isEmpty { help += " · \(pr.repo): \(pr.title)" }
+    if let prBranch = pr.head, !prBranch.isEmpty { help += ". The PR's branch is \(prBranch)." }
+    if head != nil { help += " This folder is on \(session.branch ?? "another branch")." }
+    return BarLink(
+      label: pr.numberLabel, help: help, status: pr.status.rawValue, url: url, owners: pr.codeOwners, head: head)
   }
 
   struct ReplyKey: Hashable {
@@ -56,7 +73,11 @@ struct TriageDetail: View {
               FailedRemovalActions(session: session)
               reply
             } else if let item = session.triage {
-              DecisionCard(session: session, item: item, step: $step)
+              if item.source == .report {
+                Label("From background follow-through", systemImage: "gearshape.2")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              DecisionCard(session: session, item: item, step: step)
             } else {
               working
               reply
@@ -67,7 +88,7 @@ struct TriageDetail: View {
         }
         if let list = session.stepList {
           Divider()
-          DecisionStepBar(session: session, list: list, step: $step)
+          DecisionStepBar(session: session, list: list, step: step)
         }
         Divider()
         if session.waitsToStart {
@@ -75,7 +96,7 @@ struct TriageDetail: View {
           StartButton(session: session).padding(8)
         } else if session.runsClaude {
           MessageField(
-            session: session.id, draft: model.messageDraft(for: session),
+            session: session.id, draft: model.inboxDraft(for: session),
             shortcut: KeyboardShortcut(.return, modifiers: [.command]), ref: session.triage?.ref
           )
           .padding(8)
@@ -83,34 +104,26 @@ struct TriageDetail: View {
       }
     }
     .task(id: Self.replyKey(session)) { model.loadReply(session) }
-    .onChange(of: session.stepList?.ref) { step = nil }
     .referenceRepo(session)
   }
 
+  /// The step that the card's decision view shows, which `BoardModel` keeps so that it survives leaving the item.
+  private var step: Binding<DecisionStep?> {
+    let id = session.id
+    let ref = session.stepList?.ref
+    return Binding(
+      get: { ref.flatMap { model.decisionStep(session: id, ref: $0) } },
+      set: { step in if let ref { model.setDecisionStep(step, session: id, ref: ref) } })
+  }
+
   private var bar: some View {
-    // Every item keeps to one line. When the pane is narrow, the repo and branch truncate first, then the PR link,
-    // then the name. The buttons keep their full width.
-    HStack(spacing: 8) {
-      Text(model.inboxName(session)).fontWeight(.medium).lineLimit(1).layoutPriority(2)
-        .help(model.inboxName(session))
-      if let repo = session.repoFolder {
-        let name = repo.split(separator: "/").last.map(String.init) ?? repo
-        Text(name).foregroundStyle(.secondary).lineLimit(1).help(name)
-      }
-      if let branch = session.branch {
-        Text(branch).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle).help(branch)
-      }
-      if let link = Self.prLink(for: session) {
-        HStack(spacing: 4) {
-          PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link).lineLimit(1)
-            .help(link.label)
-          if let owners = link.owners { CodeOwnerShield(status: owners) }
-          if let head = link.head {
-            Text("uses \(head)").font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-              .help("The PR's branch, \(head). This folder is on \(session.branch ?? "another branch").")
-          }
-        }
-        .layoutPriority(1)
+    let name = model.inboxName(session)
+    let link = Self.prLink(for: session)
+    // When the pane is narrow, the branch drops out whole first, then the repo, then the PR's head branch. Only the
+    // name truncates. The PR number and the buttons keep their full width.
+    return HStack(spacing: 8) {
+      ViewThatFits(in: .horizontal) {
+        ForEach(0..<4) { leading(name: name, link: link, dropping: $0) }
       }
       Spacer(minLength: 0)
       Button("Open") { model.selection = session.id }
@@ -128,6 +141,31 @@ struct TriageDetail: View {
               : "Show the session's Claude terminal and shell in place of its summary")
     }
     .padding(10)
+  }
+
+  /// The bar's leading items. `dropping` leaves out that many of the branch, the repo, and the PR's head branch, in
+  /// that order.
+  private func leading(name: String, link: BarLink?, dropping: Int) -> some View {
+    HStack(spacing: 8) {
+      Text(name).fontWeight(.medium).lineLimit(1).help(name)
+      if dropping < 2, let repo = session.repoFolder {
+        Text(repo.split(separator: "/").last.map(String.init) ?? repo).foregroundStyle(.secondary).lineLimit(1)
+      }
+      if dropping < 1, let branch = session.branch {
+        Text(branch).foregroundStyle(.secondary).lineLimit(1)
+      }
+      if let link {
+        HStack(spacing: 4) {
+          PRLink(text: link.label, url: link.url).font(.caption).foregroundStyle(.link).fixedSize()
+            .help(link.help)
+            .accessibilityValue(link.status)
+          if let owners = link.owners { CodeOwnerShield(status: owners) }
+          if dropping < 3, let head = link.head {
+            Text("uses \(head)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          }
+        }
+      }
+    }
   }
 
   private var working: some View {

@@ -1,6 +1,28 @@
 import SwiftUI
 import SwitchboardCore
 
+/// The preset buttons and Pick a Time… of the Snooze and Pause menus. `choose` gets the end time of a preset.
+struct TimePresetItems: View {
+  let pick: () -> Void
+  let choose: (Date) -> Void
+
+  var body: some View {
+    let presets = SnoozePresets.times(now: nowMs(), zone: .current)
+    ForEach(Array(presets.enumerated()), id: \.offset) { index, shown in
+      Button(shown.title) {
+        // SwiftUI can build a context menu long before the click. A duration counts from the click.
+        // A dated preset keeps the day that its title names, even when midnight passes before the click.
+        let now = nowMs()
+        let fresh = SnoozePresets.times(now: now, zone: .current)[index]
+        let until = fresh.title == shown.title || shown.until <= now ? fresh.until : shown.until
+        choose(Date(timeIntervalSince1970: Double(until) / 1000))
+      }
+    }
+    Divider()
+    Button("Pick a Time…", action: pick)
+  }
+}
+
 /// The Snooze menu, with its presets and Pick a Time…, and Unsnooze while the session is snoozed. The session
 /// menu shows it only for a session that `canSnooze` allows.
 struct SnoozeMenuItems: View {
@@ -10,19 +32,9 @@ struct SnoozeMenuItems: View {
   var body: some View {
     let busy = model.snoozing.contains(session.id)
     Menu("Snooze") {
-      let presets = SnoozePresets.times(now: nowMs(), zone: .current)
-      ForEach(Array(presets.enumerated()), id: \.offset) { index, shown in
-        Button(shown.title) {
-          // SwiftUI can build a context menu long before the click. A duration counts from the click.
-          // A dated preset keeps the day that its title names, even when midnight passes before the click.
-          let now = nowMs()
-          let fresh = SnoozePresets.times(now: now, zone: .current)[index]
-          let until = fresh.title == shown.title || shown.until <= now ? fresh.until : shown.until
-          model.snooze(session.id, until: Date(timeIntervalSince1970: Double(until) / 1000))
-        }
-      }
-      Divider()
-      Button("Pick a Time…") { model.pickingSnoozeTime = session.id }
+      TimePresetItems(
+        pick: { model.pickingSnoozeTime = session.id },
+        choose: { model.snooze(session.id, until: $0) })
     }
     .disabled(busy)
     if session.snoozedUntil != nil {
@@ -31,11 +43,15 @@ struct SnoozeMenuItems: View {
   }
 }
 
-/// The sheet of Pick a Time…, which snoozes the session until a date and time that the user picks.
-struct SnoozePicker: View {
+/// The sheet of Pick a Time…, which snoozes or pauses the session until a date and time that the user picks.
+/// `verb` is "Snooze" or "Pause", and `close` clears the model's record of the open sheet.
+struct UntilPicker: View {
   @EnvironmentObject var model: BoardModel
   let session: String
-  @State private var until = SnoozePicker.nextFullHour(after: Date())
+  let verb: String
+  let apply: (Date) -> Void
+  let close: () -> Void
+  @State private var until = UntilPicker.nextFullHour(after: Date())
 
   static func nextFullHour(after now: Date) -> Date {
     let hour = Calendar.current.dateInterval(of: .hour, for: now)!.start
@@ -46,17 +62,17 @@ struct SnoozePicker: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 16) {
-      Text("Snooze \(name) until").font(.headline)
+      Text("\(verb) \(name) until").font(.headline)
       DatePicker("Until", selection: $until, in: Date()..., displayedComponents: [.date, .hourAndMinute])
         .labelsHidden()
-      // The Snooze button turns off once the picked time passes, even while the sheet sits open.
+      // The confirm button turns off once the picked time passes, even while the sheet sits open.
       TimelineView(.periodic(from: .now, by: 1)) { context in
         HStack {
           Spacer()
-          Button("Cancel", role: .cancel) { model.pickingSnoozeTime = nil }.keyboardShortcut(.cancelAction)
-          Button("Snooze") {
-            model.snooze(session, until: until)
-            model.pickingSnoozeTime = nil
+          Button("Cancel", role: .cancel, action: close).keyboardShortcut(.cancelAction)
+          Button(verb) {
+            apply(until)
+            close()
           }
           .keyboardShortcut(.defaultAction)
           .disabled(until <= context.date)

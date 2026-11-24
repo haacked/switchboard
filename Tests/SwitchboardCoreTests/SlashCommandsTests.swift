@@ -1280,6 +1280,16 @@ private final class FailingMachine: Machine, @unchecked Sendable {
   func builtInsLeaveOutCommandsThatTheListingCarries(_ name: String) {
     #expect(!builtInNames.contains(name))
   }
+
+  /// A built-in command's paste stops counting as a message on its way once it lands. A skill or a custom command
+  /// sends a prompt, so its UserPromptSubmit clears the paste instead.
+  @Test(arguments: [
+    ("/compact", true), ("/compact keep the plan", true), ("/model\nopus", true), ("/code-review", false),
+    ("/compactly", false), ("compact", false), ("the /compact command", false),
+  ])
+  func aPromptIsABuiltInByItsCommandsName(_ text: String, _ expected: Bool) {
+    #expect(SlashCommand.isBuiltIn(prompt: text) == expected)
+  }
 }
 
 @Suite struct SlashCommandRankTests {

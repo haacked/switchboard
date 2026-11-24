@@ -39,14 +39,7 @@ extension Service {
           model: spawn.model, parent: spawn.parent, account: spawn.account, group: spawn.group,
           autoMode: spawn.autoMode, planMode: spawn.planMode, host: host), origin: origin)
       guard let wait = spawn.wait, let parent = child.parent else { return child }
-      try queue.sync {
-        _ = try waitRequest(
-          "wait",
-          [
-            "session": .string(parent), "kind": .string(Wait.Kind.session.rawValue), "target": .string(child.id),
-            "state": .string(wait), "by": .string(Author.claude.rawValue),
-          ], caller: .inProcess)
-      }
+      try queue.sync { try armSessionWait(holder: parent, target: child.id, state: wait) }
       return queue.sync { summary(child.id) }
     }
     // A follow-up keeps only `owner/name`. `followup start` finds the checkout again from it.

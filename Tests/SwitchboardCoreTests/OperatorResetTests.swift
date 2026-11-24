@@ -174,6 +174,25 @@ extension OperatorResetTests {
       #expect(OperatorReset.blocker(waits: [Self.wait(status)], facts: SessionFacts()) == nil)
     }
 
+    /// The judge's `ask` parks the action without a question in this conversation, so the park needs nothing from it.
+    @Test func aWaitTheJudgeParkedDoesNotBlock() {
+      let parked = WaitActionTests.storedWait(
+        action: WaitAction(kind: .merge),
+        status: OperatorJudgeTests.Status.awaiting(subjectSince: 7))
+
+      #expect(OperatorReset.blocker(waits: [parked], facts: SessionFacts()) == nil)
+    }
+
+    /// A question to the holder stores no `subjectSince`, and one from before the judge has no `judged`.
+    @Test(arguments: [(nil, OperatorJudgeTests.Status.pair), (Int64(7), nil)] as [(Int64?, MergeGuard.Approval?)])
+    func aWaitThatAskedTheHolderBlocks(_ subjectSince: Int64?, _ judged: MergeGuard.Approval?) {
+      let asked = WaitActionTests.storedWait(
+        action: WaitAction(kind: .merge),
+        status: OperatorJudgeTests.Status.awaiting(subjectSince: subjectSince, judged: judged))
+
+      #expect(OperatorReset.blocker(waits: [asked], facts: SessionFacts()) != nil)
+    }
+
     @Test func oneWaitAwaitingJudgmentAmongOthersBlocks() {
       let waits = [Self.wait(nil), Self.wait(.held), Self.wait(.awaitingJudgment), Self.wait(.running)]
 
@@ -412,14 +431,14 @@ extension OperatorResetTests {
       let s = try JSONCoding.decode(
         Config.self,
         from: #"""
-          {"operator": {"holdRetrySeconds": 30, "judgeModel": "haiku", "maxTurns": 5, "resetEverySeconds": 60,
+          {"operator": {"holdRetrySeconds": 30, "model": "haiku", "maxTurns": 5, "resetEverySeconds": 60,
            "autoCompactWindow": 120000}}
           """#
       ).operator
 
       #expect(s.holdRetrySeconds == 30)
       #expect(s.holdLimitSeconds == OperatorSettings().holdLimitSeconds)
-      #expect(s.judgeModel == "haiku")
+      #expect(s.model == "haiku")
     }
 
     @Test func theNewSettingsRoundTripThroughConfig() throws {

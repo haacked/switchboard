@@ -1,8 +1,15 @@
+import Foundation
 import SwitchboardCore
 
 extension BoardModel {
   /// Pauses one session with no reason, condition, or message.
   func pause(_ id: String) { perform("pause", ["session": .string(id)]) }
+
+  /// Pauses one session until `until`, when sbd resumes it. sbd reads only whole seconds, so the formatter writes
+  /// no fractions.
+  func pause(_ id: String, until: Date) {
+    perform("pause", ["session": .string(id), "until": .string(ISO8601DateFormatter().string(from: until))])
+  }
 
   func pauseGroup(_ id: String) { sendToGroup("pause", id) }
 

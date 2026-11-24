@@ -195,13 +195,12 @@ private func tombstone(_ id: String) -> RemovedSession {
   // MARK: Sheets
 
   enum Sheet: String, CaseIterable {
-    case newSession, importSessions, issueSetup
+    case newSession, importSessions
 
     @MainActor func open(on model: BoardModel) {
       switch self {
       case .newSession: model.openNewSession()
       case .importSessions: model.showingImport = true
-      case .issueSetup: model.showingIssueSetup = true
       }
     }
 
@@ -209,7 +208,6 @@ private func tombstone(_ id: String) -> RemovedSession {
       switch self {
       case .newSession: model.newSession != nil
       case .importSessions: model.showingImport
-      case .issueSetup: model.showingIssueSetup
       }
     }
   }

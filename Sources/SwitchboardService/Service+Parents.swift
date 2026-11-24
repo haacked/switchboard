@@ -1,20 +1,11 @@
 import Foundation
 import SwitchboardCore
 
-/// What sbd has seen of each child, and what it has not yet told each parent.
+/// What sbd has seen of each child.
 struct ParentNotices {
-  /// What each child showed when its parent last heard about it. A work
-  /// session hears about its children at each tick. A Manager or a chat
+  /// What each child showed when its parent last heard about it. A parent
   /// hears at each digest.
   var marks: [String: ChildMark] = [:]
-  /// The lines for each parent, oldest first.
-  var unsent: [String: [Line]] = [:]
-
-  /// A line of a notice, with the id of the child that it is about.
-  struct Line: Equatable {
-    var child: String
-    var text: String
-  }
 }
 
 extension Service {
@@ -55,8 +46,6 @@ extension Service {
     factsForParent(id).pr.flatMap { PRSummary($0).link?.absoluteString }
   }
 
-  private func hearsNotices(_ parent: String) -> Bool { entries[parent]?.session.kind.hearsChildNotices ?? true }
-
   /// Records what each child shows now and every PR number it has had, so sbd
   /// tells no parent about what happened before it started.
   func seedParentMarks(now: Int64) {
@@ -71,14 +60,11 @@ extension Service {
     parentNotices.marks[id] = seeded
   }
 
-  /// Drops the child's mark and every line about it that a parent has not
-  /// heard yet.
+  /// Drops the mark of a child that left its parent or was removed. A child that still has a parent and no mark
+  /// gets a line for its whole current state at the next digest, so a caller that links it to a new parent
+  /// calls `seedMark` afterward.
   func forgetChild(_ id: String) {
     parentNotices.marks[id] = nil
-    for (parent, lines) in parentNotices.unsent {
-      let kept = lines.filter { $0.child != id }
-      parentNotices.unsent[parent] = kept.isEmpty ? nil : kept
-    }
   }
 
   /// The states of the work sessions that are not the parent's children. A
@@ -94,51 +80,16 @@ extension Service {
     return counts
   }
 
-  /// Collects what changed in each child since the last tick, then sends each
-  /// parent one message with everything it has not heard. A parent whose turn
-  /// runs, or that still has a message on its way, hears it after the turn,
-  /// so a busy parent gets one message for many changes.
-  func notifyParents(now: Int64) {
-    collectChildChanges(now: now)
-    for parent in parentNotices.unsent.keys.sorted() {
-      guard let e = entries[parent], !e.session.done else {
-        parentNotices.unsent[parent] = nil
-        continue
-      }
-      guard let lines = parentNotices.unsent[parent], !lines.isEmpty, canTakeNotice(e, now: now) else { continue }
-      do {
-        _ = try send(parent, ParentNotice.message(lines.map(\.text)), by: .sbd, trigger: .notice)
-        parentNotices.unsent[parent] = nil
-      } catch {
-        logLine("can't tell \(parent) about its children: \(error)")
-      }
-    }
-  }
-
-  private func collectChildChanges(now: Int64) {
-    var children: Set<String> = []
-    for id in entries.keys.sorted() {
-      guard let e = entries[id], let parent = parentOf(e.session) else { continue }
-      children.insert(id)
-      guard hearsNotices(parent) else { continue }
-      let (before, after, reason) = hear(id, now: now)
-      guard after != before else { continue }
-      parentNotices.unsent[parent, default: []] += ParentNotice.lines(
-        name: e.session.name, id: id, before: before, after: after, reason: reason,
-        prURL: prURL(id)
-      ).map { ParentNotices.Line(child: id, text: $0) }
-    }
-    parentNotices.marks = parentNotices.marks.filter { children.contains($0.key) }
-  }
-
-  /// What changed for a Manager or a chat since its last digest: a line for
-  /// each of its children that moved, and `otherCounts`. It is nil for a work
-  /// session, and when none of the parent's children moved. A change in the
-  /// counts alone sends no digest, because each digest stays in the
-  /// conversation's context for every later call. sbd counts the digest as
-  /// heard once it returns it.
+  /// What changed for a parent since its last digest: a line for each of its
+  /// children that moved, and `otherCounts`. sbd sends a parent no message when
+  /// a child changes, so this digest is how every parent hears. It is nil when
+  /// none of the parent's children moved. A change in the counts alone sends no
+  /// digest, because each digest stays in the conversation's context for every
+  /// later call. sbd counts the digest as heard once it returns it. The
+  /// operator gets none, because its turns come from schedules and waits that
+  /// carry their own status.
   func digest(_ parent: String, now: Int64) -> String? {
-    guard !hearsNotices(parent) else { return nil }
+    guard entries[parent]?.session.kind != .operator else { return nil }
     var lines: [String] = []
     for id in entries.keys.sorted() {
       guard let e = entries[id], parentOf(e.session) == parent else { continue }

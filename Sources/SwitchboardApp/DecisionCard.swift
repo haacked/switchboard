@@ -45,8 +45,10 @@ struct DecisionCard: View {
         case .none, .replacesSummary: EmptyView()
         }
       }
-      if !item.details.overdueWaits.isEmpty {
-        WaitPanel(store: model.references, session: session, ids: item.details.overdueWaits)
+      if !item.details.overdueWaits.isEmpty,
+        let holder = Self.waitPanelSession(item, on: session, sessions: model.allSessions)
+      {
+        WaitPanel(store: model.references, session: holder, ids: item.details.overdueWaits)
       }
       if Self.showsReview(item, listOpen: list != nil), let review = item.review {
         MergeReviewPanel(session: session, item: item, review: review, held: held).id(item.ref)
@@ -67,6 +69,16 @@ struct DecisionCard: View {
         actions(reply.presentation)
       }
     }
+  }
+
+  /// The session that holds the item's overdue waits: the Operator for a `held:` item, whose waits sbd routed to
+  /// this session, or else the item's own session. Nil when the holder is not listed. `sessions` holds every listed
+  /// session, because the filter can hide the holder.
+  static func waitPanelSession(_ item: TriageItem, on session: SessionSummary, sessions: [SessionSummary])
+    -> SessionSummary?
+  {
+    guard Triage.isHeldRef(item.ref) else { return session }
+    return BoardModel.operatorSession(in: sessions)
   }
 
   /// What the Summary shows of the session's last reply. `presentation` reads the hook's `lastReply`, as sbd's
@@ -143,9 +155,7 @@ struct DecisionCard: View {
       // A rule title can reach 100 characters, so it wraps.
       InlineText(plain: session.inboxTitle).font(.title3.bold()).textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
-      Text(item.kind.rawValue).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-        .background(Capsule().fill(session.state.color.opacity(0.18)))
-        .foregroundStyle(session.state.color)
+      Text(item.kind.rawValue).pill(session.state.color, size: .regular)
         .fixedSize()
         .accessibilityLabel("Kind: \(item.kind.rawValue)")
       NotesButton(session: session).fixedSize()

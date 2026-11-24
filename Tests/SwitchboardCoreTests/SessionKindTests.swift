@@ -109,8 +109,8 @@ import Testing
 
   @Test(
     arguments: [(SessionKind.work, false), (.manager, true), (.chat, true), (.operator, true)] as [(SessionKind, Bool)])
-  func onlyAWorkSessionDoesNotShowAsAChat(_ kind: SessionKind, _ showsAsChat: Bool) {
-    #expect(kind.showsAsChat == showsAsChat)
+  func onlyAWorkSessionIsNotAConversation(_ kind: SessionKind, _ isConversation: Bool) {
+    #expect(kind.isConversation == isConversation)
   }
 
   @Test func theOperatorsLabelIsTheOperator() {

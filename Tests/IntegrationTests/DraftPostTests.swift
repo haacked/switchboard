@@ -522,14 +522,14 @@ extension Instance {
     #expect(sbd.posts().count == 1, "\(sbd.ghCalls())")
   }
 
-  /// sbd's gh timeout for a post is 60 s. The stub sleeps past it.
+  /// The test sets sbd's gh timeout for a post to 5 s, in place of 60 s. The stub sleeps past it.
   @Test func aPostThatOutlastsTheTimeoutIsUnknown() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withReplyStub(github)
+    let sbd = try Instance.withReplyStub(github, config: ["reviewTimeoutSeconds": 5])
     let s = try readySession(github, sbd)
     try sbd.checksFail()
     try sbd.ghRoute("POST", replyPath, json: createdJSON())
-    try sbd.ghRouteSleeps("POST", replyPath, seconds: 62)
+    try sbd.ghRouteSleeps("POST", replyPath, seconds: 7)
 
     let r = try sbd.postDraft(s.id)
 
@@ -563,7 +563,7 @@ extension Instance {
 
     _ = try sbd.postDraft(s.id)
     try sbd.waitForPost(s.id, "unknown")
-    Thread.sleep(forTimeInterval: 3)
+    Thread.sleep(forTimeInterval: 5 * Instance.tickSeconds)
 
     #expect(try sbd.draftPost(s.id)?["state"]?.string == "unknown")
     #expect(!sbd.askedForTheLogin(), "\(sbd.ghCalls())")
