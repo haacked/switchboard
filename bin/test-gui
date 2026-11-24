@@ -62,7 +62,8 @@
 # The group check shows the Board in group lanes in a window 1024 pt wide and drives a group's lane header through
 # the app's ShellSelfTest commands. It clicks Accept on a description that Claude wrote and checks through sb that
 # the description is the user's. It opens the Links popover, removes the seeded link, adds a link through the
-# popover's fields, and checks both through sb. It opens the Notes link and checks that the popover shows each note.
+# popover's fields, and checks both through sb. It adds a claude.ai artifact link through the same fields and
+# removes it from the Artifacts popover. It opens the Notes link and checks that the popover shows each note.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
 # settings, boardselect, boarddrag, wake, links, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
@@ -1109,7 +1110,7 @@ if wants links; then check_links; fi
 
 check_group() {
   check=group
-  local shots="$home/shots/group" group rfc notes result
+  local shots="$home/shots/group" group rfc notes artifact result
   mkdir "$shots"
   echo "Checking a group's description author, links, and notes on the Board…"
   new_session group-work
@@ -1143,6 +1144,15 @@ check_group() {
   clicked "add-group-link-$group" || fail "the app could not click Add: $result"
   wait_for 10 links_are '["Design doc"]' || fail "Add did not add the link: $(group_json .links)"
   app snapshot "$shots/links.png" >/dev/null
+  # A link to a claude.ai artifact lists under Artifacts, not Links, so Artifacts has to remove it.
+  [ "$(app fill 'Link URL|https://claude.ai/artifact/GroupGui1')" = filled ] || fail "the app could not fill the URL field"
+  clicked "add-group-link-$group" || fail "the app could not click Add for the artifact link: $result"
+  wait_for 10 links_are '["Design doc","https://claude.ai/artifact/GroupGui1"]' ||
+    fail "Add did not add the artifact link: $(group_json .links)"
+  artifact=$(group_json '.links[] | select(.url == "https://claude.ai/artifact/GroupGui1") | .id')
+  wait_for 10 clicked "group-artifacts-$group" || fail "the app could not open the artifacts: $result"
+  wait_for 5 clicked "group-artifact-$artifact-remove" || fail "the artifacts popover did not offer Remove: $result"
+  wait_for 10 links_are '["Design doc"]' || fail "Remove in Artifacts did not remove the link: $(group_json .links)"
   wait_for 10 clicked "group-notes-$group" || fail "the app could not open the notes: $result"
   wait_for 5 notes_shown || fail "the notes popover did not show $notes inside the window: $(app anchors group-note-)"
   app snapshot "$shots/notes.png" >/dev/null

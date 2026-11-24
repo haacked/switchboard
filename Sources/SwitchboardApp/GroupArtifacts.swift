@@ -68,7 +68,8 @@ struct GroupArtifactsLink: View {
   }
 }
 
-/// The rows of a group's artifact popover, each with Use as plan, Plan, or Removed.
+/// The rows of a group's artifact popover, each with Use as plan, Plan, or Removed. A row that a group link gives
+/// also has Remove.
 struct GroupArtifactList: View {
   @EnvironmentObject var model: BoardModel
   let group: GroupSummary
@@ -93,6 +94,14 @@ struct GroupArtifactList: View {
         }
         Spacer(minLength: 0)
         action(row)
+        // A row that a group link gives lists only here, not under Links, so its Remove is here too.
+        if let link = row.artifact.link {
+          Button("Remove") { model.removeLink(link, of: .group(group.id)) }
+            .buttonStyle(.link).font(.caption)
+            .help("Remove this link from the group")
+            .accessibilityLabel("Remove link \(row.artifact.title)")
+            .clickAnchor("group-artifact-\(link)-remove")
+        }
       }
     }
   }
