@@ -20,7 +20,7 @@ struct GroupLock: Equatable {
   var groupID: String
   var groupName: String
   var folder: String
-  var accountName: String { ClaudeAccount(folder: folder).name }
+  var accountName: String { Account.name(ofFolder: folder) }
   var line: String { "Its group, \(groupName), runs on \(accountName). Change the group's account instead." }
 }
 
@@ -84,7 +84,7 @@ struct SessionAccountMove: Equatable {
   /// operator, and a group chat always ask, because the move changes what they
   /// load.
   static func decide(session s: SessionSummary, target: String, plan: AccountMove) -> Decision {
-    let to = ClaudeAccount(folder: target).name
+    let to = Account.name(ofFolder: target)
     if let blocked = plan.blocked.first(where: { $0.session == s.id }) {
       return .refuse(refusal(s.name, to: target, blocked.reason))
     }
@@ -104,13 +104,13 @@ struct SessionAccountMove: Equatable {
 
   /// The banner text for a move that sbd refuses.
   static func refusal(_ name: String, to folder: String, _ reason: String) -> String {
-    "Can't move \(name) to \(ClaudeAccount(folder: folder).name): \(reason)"
+    "Can't move \(name) to \(Account.name(ofFolder: folder)): \(reason)"
   }
 
   /// What a Manager conversation, the operator, or a group chat loses or
   /// changes on another account.
   private static func managerLines(_ s: SessionSummary, to: String, dropped: [String]) -> [String] {
-    let from = s.account.map { ClaudeAccount(folder: $0).name } ?? "its account"
+    let from = s.account.map(Account.name(ofFolder:)) ?? "its account"
     var lines: [String] = []
     if !dropped.isEmpty {
       lines.append(

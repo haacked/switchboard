@@ -21,7 +21,7 @@ extension GitHub {
           }
           latestOpinionatedReviews(first: 20) { nodes { author { __typename login } state submittedAt commit { oid } } }
           reviews(last: 20) { nodes { author { __typename login } state submittedAt } }
-          commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
+          commits(last: 1) { totalCount nodes { commit { statusCheckRollup { state } } } }
           firstComments: comments(first: 5) { nodes { ...comment } }
           lastComments: comments(last: 20) { nodes { ...comment } }
         }
@@ -247,6 +247,7 @@ extension GitHub {
       author: node["author"].map(login), codeOwnerRequests: node["reviewRequests"].flatMap(codeOwnerRequests),
       closesIssues: node["body"]?.string.flatMap { Issues.closingRefs(inBody: $0, repo: repo) })
     pr.createdAt = node["createdAt"]?.string
+    pr.commitCount = node["commits"]?["totalCount"]?.int
     var seen: Set<String> = []
     let comments = (nodes(node["firstComments"]) + nodes(node["lastComments"])).compactMap(parseComment)
       .filter { seen.insert($0.id).inserted }.sorted { $0.createdAt < $1.createdAt }

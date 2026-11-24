@@ -111,7 +111,8 @@ extension Service {
 
   /// The `manager-end` request, which removes a Manager conversation, and with `new` starts one in its place
   /// with the same account, MCP servers, and pin. `drop` names the conversation's own waits, pause condition, and
-  /// schedules that the removal may drop. Only the user ends a conversation, so it refuses a request that names a
+  /// schedules that the removal may drop. `resolve` and `by` pass to `rm`, which resolves the named to-dos under the
+  /// same rules as a delete of a work session. Only the user ends a conversation, so it refuses a request that names a
   /// `caller` and a client below any local session's live pane. It also refuses a client below sbd's tmux
   /// server that runs outside every pane. It runs off the state queue, because `remove` does.
   func managerEnd(_ args: JSON, caller: Caller) throws -> JSON {
@@ -160,7 +161,9 @@ extension Service {
     let session = ending.session
     defer { queue.sync { endingDrops[session.id] = nil } }
     let transcript = ending.findTranscript()
-    _ = try remove(["session": .string(session.id)], caller: caller)
+    var removal: [String: JSON] = ["session": .string(session.id)]
+    for key in ["resolve", "by"] { removal[key] = args[key] }
+    _ = try remove(.object(removal), caller: caller)
     var answer: [String: JSON] = [
       "ended": .string(session.id), "name": .string(session.name), "transcript": transcript.map(JSON.string) ?? .null,
       "claudeSessionId": .string(session.claudeSessionId),

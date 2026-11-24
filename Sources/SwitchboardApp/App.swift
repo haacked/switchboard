@@ -142,6 +142,10 @@ struct SwitchboardApp: App {
     } label: {
       MenuBarLabel().environmentObject(model)
     }
+
+    Settings {
+      SettingsView().environmentObject(model)
+    }
   }
 }
 
@@ -193,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 struct MenuBarLabel: View {
   @EnvironmentObject var model: BoardModel
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) private var openSettings
 
   var body: some View {
     let count = model.needsUser.count
@@ -209,6 +214,11 @@ struct MenuBarLabel: View {
     .onAppear {
       // Before the attach, because a held URL can open the window.
       model.showWindow = { openWindow(id: "main") }
+      model.showSettings = {
+        openSettings()
+        // An app that isn't frontmost would open Settings behind the window that has focus.
+        if !BackgroundLaunch.isRunning { NSApp.activate(ignoringOtherApps: true) }
+      }
       LinkInbox.shared.attach(model.openExternalLink)
     }
   }

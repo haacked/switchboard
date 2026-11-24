@@ -38,6 +38,16 @@ func offlineClient() -> Client {
   Client(home: Home(path: NSTemporaryDirectory() + "no-sbd-" + UUID().uuidString))
 }
 
+/// The width that `view` takes when nothing squeezes it.
+@MainActor func idealWidth<V: View>(_ view: V) -> CGFloat {
+  NSHostingView(rootView: view.fixedSize()).fittingSize.width
+}
+
+/// The width that `view` takes when its parent offers it `width`.
+@MainActor func fittedWidth<V: View>(of view: V, offered width: CGFloat) -> CGFloat {
+  NSHostingController(rootView: view).sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).width
+}
+
 /// A model on `offlineClient()`. `apply` sets the Dock badge, which needs NSApp.
 @MainActor
 func offlineModel() -> BoardModel {
@@ -138,6 +148,21 @@ func needsItem(_ id: String, manager: Bool = false, state: AttentionState = .nee
   s.triage = TriageItem(title: "Pick one", kind: .decision, summary: "", source: card ? .card : .summary)
   s.manager = manager ? true : nil
   if manager { s.kind = .manager }
+  return s
+}
+
+/// A yes-or-no decision headed "Header N" that asks "Question N?".
+func yesNoDecision(_ number: Int) -> PendingDecision {
+  PendingDecision(
+    number: number, header: "Header \(number)", question: "Question \(number)?",
+    options: [PendingDecision.Option(label: "Yes"), PendingDecision.Option(label: "No")])
+}
+
+/// A session whose item shows yes-or-no decisions 1 to 3 under `ref`.
+func listed(_ id: String, ref: String = "summary:1") -> SessionSummary {
+  var s = needsItem(id)
+  s.triage?.ref = ref
+  s.triage?.decisions = [1, 2, 3].map(yesNoDecision)
   return s
 }
 
@@ -290,6 +315,11 @@ func noteFixture(_ id: String, _ text: String, kind: Note.Kind? = .note, resolve
 
 func todoFixture(_ id: String, _ text: String, resolved: Bool = false) -> Note {
   noteFixture(id, text, kind: .todo, resolved: resolved)
+}
+
+func isDelete(_ a: SessionMenuAction) -> Bool {
+  if case .delete = a { return true }
+  return false
 }
 
 /// An issue that the session's PR body links.

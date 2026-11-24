@@ -41,6 +41,9 @@
 # The multiselect check clicks one row in the sidebar through the app's ShellSelfTest commands, adds another
 # row to the selection as a ⌘-click does, checks that the detail pane shows "2 sessions selected", clicks
 # Delete 2 Sessions…, and checks that the confirmation opens and that sbd still lists both sessions.
+# The settings check sends ⌘, through the app's ShellSelfTest commands and checks that it runs Settings… and
+# shows the Settings window at General. It then opens Settings at Issues the way the Issues view's gear button
+# does and checks that the window shows the Issues tab.
 # The boardselect check starts on the Board and drives its cards through the app's ShellSelfTest commands. It
 # checks that a click selects a card and stays on the Board, that ⌘-click adds a card, that ⇧-click adds the
 # cards between, that a click on empty space clears the selection, that a drag from empty space selects the
@@ -52,8 +55,12 @@
 # The wake check stops a session's claude three times through the app's WakeSelfTest,
 # and checks that three keys in its terminal start it once, that a click starts it,
 # and that a drag does not.
+# The links check gives a session two links and a group one session link, one group link, and one link to a
+# claude.ai artifact. In a window 1024 pt wide, it checks through the app's ShellSelfTest commands that the
+# session's side panel lists both links inside the panel, that Remove deletes one, and that the group's Links
+# popover on the Board lists the group link and the session link but not the artifact link.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# boardselect, boarddrag, wake). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# settings, boardselect, boarddrag, wake, links). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -68,9 +75,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | boardselect | boarddrag | wake) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | boardselect | boarddrag | wake | links) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, boardselect, boarddrag, and wake." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, boardselect, boarddrag, wake, and links." >&2
     exit 2
     ;;
   esac
@@ -121,11 +128,15 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
 export SB_HOME="$home"
+# sb takes a request as Claude's when CLAUDECODE is 1. The checks add links as the user, even when Claude Code runs
+# this script.
+unset CLAUDECODE SB_SESSION_ID
 sb() { "$bin_dir/sb" "$@"; }
 
 jq -n --arg claude "$root/Tests/GUI/received-bytes-stub" --arg home "$home" \
   '{claude: $claude, idleStopSeconds: 600, tickSeconds: 0.2, worktreeRoot: "\($home)/worktrees",
-    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}, sessionNames: {enabled: false}}' \
+    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}, sessionNames: {enabled: false},
+    codexHomes: []}' \
   >"$home/config.json"
 mkdir "$home/work" "$home/shots"
 : >"$home/sbd.log"
@@ -837,6 +848,42 @@ check_multiselect() {
 
 if wants multiselect; then check_multiselect; fi
 
+check_settings() {
+  check=settings
+  local shots="$home/shots/settings" result
+  mkdir "$shots"
+  echo "Checking the Settings window…"
+  new_session settings-one
+  shows() { [ "$(app where)" = "session(\"$1\")" ]; }
+  settings_is() { [ "$(app settings)" = "$1" ]; }
+  start_app() {
+    SB_SELECT="$session" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+    app_pid=$!
+    wait_for 60 shows "$session" || fail "the app did not select $session: $(app where)"
+  }
+
+  # The gear's path opens Settings from a closed window, so it fails when MenuBarLabel doesn't register the opener.
+  # ⌘, then needs a launch of its own, because a Settings window that is already open would pass it without the key.
+  start_app
+  settings_is hidden || fail "the Settings window shows before the gear: $(app settings)"
+  result=$(app open-settings issues)
+  [ "$result" = opened ] || fail "the app could not open Settings at Issues: $result"
+  wait_for 10 settings_is "shown issues" || fail "the gear's path did not show Settings at Issues: $(app settings)"
+  end_app
+
+  start_app
+  settings_is hidden || fail "the Settings window shows before ⌘,: $(app settings)"
+  result=$(app settings-key)
+  # The hidden test app may not refresh a menu item's state, so an enabled Settings… that owns ⌘, also counts.
+  [[ $result == ", ran Settings…" || $result == *"(Settings… is enabled)" ]] || fail "⌘, did not run Settings…: $result"
+  wait_for 10 settings_is "shown general" || fail "⌘, did not show Settings at General: $(app settings)"
+  end_app
+  save_shots
+  echo "ok: settings (⌘, runs Settings…, the window shows General, the gear's path shows Issues)"
+}
+
+if wants settings; then check_settings; fi
+
 check_boardselect() {
   check=boardselect
   local shots="$home/shots/boardselect" a b c result
@@ -959,3 +1006,95 @@ check_wake() {
 }
 
 if wants wake; then check_wake; fi
+
+# The rows draw only in the app, so the app's answers to ShellSelfTest commands are the evidence. `anchors` reports
+# whether each row and its Remove button lie inside the side panel and the window, which a layout that overflows
+# the 1024 pt CI window fails.
+check_links() {
+  check=links
+  local shots="$home/shots/links" a b group rfc slack linear design artifact result
+  mkdir "$shots"
+  echo "Checking links in the side panel and the Board…"
+  new_session links-a
+  a=$session
+  # The side panel hides beside an open shell at 1024 pt.
+  sb shell "$a" --close >/dev/null
+  sb link add "$a" https://example.com/rfc/flags --title "Flag RFC" >/dev/null
+  sb link add "$a" https://acme.slack.com/archives/C0123ABCD/p1700000000000100 >/dev/null
+  new_session links-b
+  b=$session
+  sb link add "$b" https://linear.app/acme/issue/ENG-12 >/dev/null
+  group=$(sb group add links-gui "$b" --json | jq -r '.id')
+  sb group link add links-gui https://example.com/design --title "Design doc" >/dev/null
+  sb group link add links-gui https://claude.ai/artifact/LinksGui1 >/dev/null
+  link_id() { sb get "$1" --json | jq -r --arg url "$2" '.links[]? | select(.url == $url) | .id'; }
+  group_link_id() {
+    sb group ls --json | jq -r --arg g "$group" --arg url "$1" '.groups[] | select(.id == $g) | .links[]? | select(.url == $url) | .id'
+  }
+  rfc=$(link_id "$a" https://example.com/rfc/flags)
+  slack=$(link_id "$a" https://acme.slack.com/archives/C0123ABCD/p1700000000000100)
+  linear=$(link_id "$b" https://linear.app/acme/issue/ENG-12)
+  design=$(group_link_id https://example.com/design)
+  artifact=$(group_link_id https://claude.ai/artifact/LinksGui1)
+  [ -n "$rfc" ] && [ -n "$slack" ] && [ -n "$linear" ] && [ -n "$design" ] && [ -n "$artifact" ] ||
+    check=sbd fail "sbd did not list every link the check added"
+  shows() { [ "$(app where)" = "$1" ]; }
+  # Each anchor is followed by :in or :out, so a name followed by :in is not a prefix of another name.
+  all_in() { # <anchors result> <name…>
+    local listed=$1 name
+    shift
+    [[ $listed != *":out"* ]] || return 1
+    for name in "$@"; do [[ ",$listed," == *",$name:in,"* ]] || return 1; done
+  }
+  panel_lists() {
+    result=$(app anchors panel-link- session-side-panel)
+    all_in "$result" "panel-link-$rfc" "panel-link-$rfc-remove" "panel-link-$slack" "panel-link-$slack-remove"
+  }
+  clicked() {
+    result=$(app click-anchor "$1")
+    [[ $result == "clicked at "* ]]
+  }
+  terminal_shows() { [ "$(app panes)" = 1 ]; }
+  only_link_left() { [ "$(sb get "$a" --json | jq -c '[.links[]?.id]')" = "[\"$1\"]" ]; }
+  pinned() {
+    result=$(app width 1024)
+    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
+  }
+
+  # A launch argument shows the side panel for this run only, whatever the user's saved setting is.
+  SB_SELECT="$a" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -sessionSidePanel YES >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows "session(\"$a\")" || fail "the app did not select $a: $(app where)"
+  # The Claude terminal takes its width once it attaches, so the side panel is measured after that.
+  wait_for 30 terminal_shows || fail "the app did not show the Claude terminal of $a: $(app panes) panes"
+  pinned
+  app snapshot "$shots/side-panel.png" >/dev/null
+  wait_for 10 panel_lists || fail "the side panel does not list both links of $a inside it: $result"
+  # A terminal wider than the space beside the panel would report more columns here than the pane shows.
+  echo "links: the Claude terminal's sizes beside the side panel: $(sb screen "$a" | grep '^sizes ')"
+  wait_for 10 clicked "panel-link-$rfc-remove" || fail "the app could not click Remove on $rfc: $result"
+  wait_for 10 only_link_left "$slack" || fail "Remove did not delete only $rfc: $(sb get "$a" --json | jq -c '.links')"
+  app width restore >/dev/null
+  end_app
+
+  popover_lists() {
+    result=$(app anchors group-link-)
+    all_in "$result" "group-link-$group-$design" "group-link-$group-$design-remove" "group-link-$b-$linear" \
+      "group-link-$b-$linear-remove" && [[ $result != *"$artifact"* ]]
+  }
+  lane_shows() { all_in "$(app anchors "group-links-$group")" "group-links-$group"; }
+  SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  pinned
+  wait_for 10 lane_shows || fail "the lane of $group does not show its Links link inside the window: $(app anchors group-links-)"
+  wait_for 10 clicked "group-links-$group" || fail "the app could not click the Links link of $group: $result"
+  wait_for 10 popover_lists || fail "the Links popover does not list the group's link and $b's link, or lists the artifact link: $result"
+  app snapshot "$shots/group-links.png" >/dev/null
+  app width restore >/dev/null
+  end_app
+  save_shots
+  echo "ok: links (side panel rows and Remove, the group's Links popover, 1024 pt)"
+}
+
+if wants links; then check_links; fi

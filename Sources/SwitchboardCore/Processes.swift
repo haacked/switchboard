@@ -1,14 +1,22 @@
 import Foundation
+import os
 
 public struct CommandResult: Sendable {
   public var status: Int32
   public var stdout: String
   public var stderr: String
+  /// True when `runCommand` sent SIGTERM because the timeout passed, or when
+  /// the program's output stayed open more than a second past the timeout. A
+  /// program that handles SIGTERM can then exit with any status. A child of
+  /// the program can keep the output open, and `stdout` and `stderr` then
+  /// hold only what arrived before `runCommand` stopped reading.
+  public var timedOut: Bool
 
-  public init(status: Int32, stdout: String, stderr: String) {
+  public init(status: Int32, stdout: String, stderr: String, timedOut: Bool = false) {
     self.status = status
     self.stdout = stdout
     self.stderr = stderr
+    self.timedOut = timedOut
   }
 }
 
@@ -51,30 +59,67 @@ public func runCommand(
   let stdin = input.map { _ in Pipe() }
   p.standardInput = stdin ?? FileHandle.nullDevice
   try p.run()
-  let kill = DispatchWorkItem { if p.isRunning { p.terminate() } }
+  let deadline = timeout.map { DispatchTime.now() + $0 }
+  let timedOut = OSAllocatedUnfairLock(initialState: false)
+  let kill = DispatchWorkItem {
+    if p.isRunning {
+      timedOut.withLock { $0 = true }
+      p.terminate()
+    }
+  }
   defer { kill.cancel() }
-  if let timeout { DispatchQueue(label: "runCommand.timeout").asyncAfter(deadline: .now() + timeout, execute: kill) }
+  if let deadline { DispatchQueue(label: "runCommand.timeout").asyncAfter(deadline: deadline, execute: kill) }
   if let stdin, let input {
     stdin.fileHandleForWriting.write(input)
     try? stdin.fileHandleForWriting.close()
   }
-  // Reads both pipes before waiting, so a full pipe can't stall the program.
-  // stdout is read on a queue of its own. A global queue gets no thread
-  // while a caller waits here on every thread of Swift's cooperative pool,
-  // as parallel tests do.
-  var outData = Data()
+  // Reads both pipes while the program runs, so a full pipe can't stall it.
   let group = DispatchGroup()
-  group.enter()
-  DispatchQueue(label: "runCommand.stdout").async {
-    outData = out.fileHandleForReading.readDataToEndOfFile()
-    group.leave()
-  }
-  let errData = err.fileHandleForReading.readDataToEndOfFile()
-  group.wait()
+  let outData = Drain(out, label: "runCommand.stdout", group)
+  let errData = Drain(err, label: "runCommand.stderr", group)
   p.waitUntilExit()
+  if let deadline {
+    // A child that outlives the program can keep the pipes open for as long as it runs.
+    if group.wait(timeout: max(deadline, .now()) + 1) == .timedOut {
+      timedOut.withLock { $0 = true }
+      outData.stop()
+      errData.stop()
+    }
+  } else {
+    group.wait()
+  }
   return CommandResult(
-    status: p.terminationStatus, stdout: String(decoding: outData, as: UTF8.self),
-    stderr: String(decoding: errData, as: UTF8.self))
+    status: p.terminationStatus, stdout: String(decoding: outData.bytes, as: UTF8.self),
+    stderr: String(decoding: errData.bytes, as: UTF8.self), timedOut: timedOut.withLock { $0 })
+}
+
+/// Reads a pipe to its end on a queue of its own. A global queue gets no thread while a caller waits in
+/// `runCommand` on every thread of Swift's cooperative pool, as parallel tests do.
+private final class Drain: Sendable {
+  private let state = OSAllocatedUnfairLock(initialState: (bytes: Data(), stopped: false))
+
+  init(_ pipe: Pipe, label: String, _ group: DispatchGroup) {
+    group.enter()
+    DispatchQueue(label: label).async { [state] in
+      let reader = pipe.fileHandleForReading
+      // `availableData` returns each chunk as it arrives. `read(upToCount:)` waits for the whole count.
+      while case let chunk = reader.availableData, !chunk.isEmpty {
+        let stopped = state.withLock { s in
+          if !s.stopped { s.bytes.append(chunk) }
+          return s.stopped
+        }
+        if stopped { break }
+      }
+      // Closing the read end gives a child that still writes SIGPIPE, so it can't fill memory or hold the thread.
+      try? reader.close()
+      group.leave()
+    }
+  }
+
+  var bytes: Data { state.withLock { $0.bytes } }
+
+  /// Stops collecting. The reader drops the chunk it waits for and closes the pipe when that chunk arrives.
+  func stop() { state.withLock { $0.stopped = true } }
 }
 
 /// The text in single quotes, for a command that a POSIX shell runs. It is correct for every

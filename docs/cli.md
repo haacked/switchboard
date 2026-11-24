@@ -32,6 +32,8 @@ sb note <session> Stacked on #1190
 sb note <session> --todo Tell Alex in #flags that the fix shipped
 sb note <session> --resolve <id>   # resolves a to-do; only you can
 sb note --resolved            # the resolved to-dos, newest first; --limit N (default 50)
+sb link add <session> https://example.com/rfc --title "Flag RFC"   # any http or https link; inside Claude, only on its own session
+sb link rm <session> <id>    # deletes a link you or Claude added, or hides one that sbd found; inside Claude, only a link Claude added
 sb issue <session> 174       # sets the issue that the tile shows; also owner/name#174 or an issue URL
 sb issue <session> --clear
 sb done <session>
@@ -70,6 +72,7 @@ sb decide <session> 2 to-do  # answer decision 2 with an option, by number or la
 sb decide <session> 3 --skip # or --text "..." for a typed answer
 sb decide <session> --submit # send every answer as one message
 sb decide <session> --resend # send them again when sbd can't tell whether they arrived
+sb decide <session> --ask 2 "why not B?"  # ask the session about decision 2 and print its reply
 sb reply <session>           # the session's last reply, as Markdown
 sb context <session>         # Claude's steps up to the session's Inbox item (--steps N)
 sb summary set < card.json   # inside a session: write its Inbox card for this turn

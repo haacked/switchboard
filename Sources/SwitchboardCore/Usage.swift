@@ -60,17 +60,30 @@ public struct AccountUsage: Codable, Equatable, Sendable {
   public var folder: String
   public var email: String?
   public var limits: [UsageLimit]
-  /// When sbd last read the limits, in ms since the epoch.
+  /// When sbd last read the limits, or for a `rollout` reading when Codex reported them, in ms since the epoch.
   public var checked: Int64?
   /// Why the last read failed. `limits` then holds the reading before it.
   public var error: String?
-  /// True when the account holds no login, so claude would ask for /login.
+  /// True when the account holds no login, so its agent would ask for one.
   /// nil means signed in, or a reading from an sbd that does not report it.
   public var signedOut: Bool?
+  /// The agent that the account's sessions run. An sbd that reads only Claude accounts leaves it out.
+  public var agent: Agent
+
+  /// "rollout" for a Codex reading, whose limits come from the newest Codex
+  /// rollout. `checked` is then the time Codex reported them. nil for a
+  /// Claude reading, whose limits come from the usage endpoint at `checked`.
+  /// `--json` writes it. A decode ignores it.
+  private var source: String? {
+    switch agent {
+    case .claude: nil
+    case .codex: "rollout"
+    }
+  }
 
   public init(
     name: String, folder: String, email: String? = nil, limits: [UsageLimit] = [], checked: Int64? = nil,
-    error: String? = nil, signedOut: Bool? = nil
+    error: String? = nil, signedOut: Bool? = nil, agent: Agent = .claude
   ) {
     self.name = name
     self.folder = folder
@@ -79,6 +92,36 @@ public struct AccountUsage: Codable, Equatable, Sendable {
     self.checked = checked
     self.error = error
     self.signedOut = signedOut
+    self.agent = agent
+  }
+
+  enum CodingKeys: String, CodingKey {
+    case name, folder, email, limits, checked, error, signedOut, agent, source
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    folder = try c.decode(String.self, forKey: .folder)
+    email = try c.decodeIfPresent(String.self, forKey: .email)
+    limits = try c.decode([UsageLimit].self, forKey: .limits)
+    checked = try c.decodeIfPresent(Int64.self, forKey: .checked)
+    error = try c.decodeIfPresent(String.self, forKey: .error)
+    signedOut = try c.decodeIfPresent(Bool.self, forKey: .signedOut)
+    agent = try c.decodeIfPresent(Agent.self, forKey: .agent) ?? .claude
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: CodingKeys.self)
+    try c.encode(name, forKey: .name)
+    try c.encode(folder, forKey: .folder)
+    try c.encodeIfPresent(email, forKey: .email)
+    try c.encode(limits, forKey: .limits)
+    try c.encodeIfPresent(checked, forKey: .checked)
+    try c.encodeIfPresent(error, forKey: .error)
+    try c.encodeIfPresent(signedOut, forKey: .signedOut)
+    try c.encode(agent, forKey: .agent)
+    try c.encodeIfPresent(source, forKey: .source)
   }
 
   /// The percent of the `session` limit, or nil when the reading has none.
@@ -89,6 +132,22 @@ public struct AccountUsage: Codable, Equatable, Sendable {
 
   /// Whether the last read failed and no earlier reading has limits to show.
   public var failedWithoutLimits: Bool { limits.isEmpty && error != nil }
+
+  /// When Codex reported the limits of a `rollout` reading, such as "reported 3h ago", or nil for a reading
+  /// that sbd fetched. A rollout reading is as old as the account's last Codex turn.
+  public func reported(now: Int64 = nowMs()) -> String? {
+    guard agent == .codex, let checked, !limits.isEmpty else { return nil }
+    return "reported \(ago(checked, now: now)) ago"
+  }
+
+  /// What a reader shows in place of limits when a read that did not fail found none, or nil.
+  public var noLimitsNote: String? {
+    guard limits.isEmpty, error == nil else { return nil }
+    switch agent {
+    case .claude: return nil
+    case .codex: return CodexRollout.noReading
+    }
+  }
 
   /// Whether the account can take more work: `.spent` when any limit is
   /// spent by `UsageLimit.isSpent`, with the latest reset among those limits.

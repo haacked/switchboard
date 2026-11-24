@@ -20,6 +20,7 @@ enum PlannedScope {
 
   private static let sessionOnly = Row(keys: ["session"], refs: ["session"])
   private static let noteKeys: Set<String> = ["session", "text", "by", "kind", "note"]
+  private static let linkKeys: Set<String> = ["session", "url", "title", "link", "by", "caller"]
   private static let waitKeys: Set<String> = [
     "session", "kind", "target", "who", "environment", "service", "state", "until", "since", "note", "then", "by",
     "needsYou", "wait", "outcome", "caller",
@@ -41,6 +42,8 @@ enum PlannedScope {
     "note": Row(keys: noteKeys, refs: ["session"]),
     "remove-note": Row(keys: noteKeys, refs: ["session"]),
     "resolve-note": Row(keys: noteKeys, refs: ["session"]),
+    "link-add": Row(keys: linkKeys, refs: ["session", "caller"]),
+    "link-rm": Row(keys: linkKeys, refs: ["session", "caller"]),
     "wait": Row(keys: waitKeys, refs: ["session"], waitTarget: true),
     "clear-wait": Row(keys: waitKeys, refs: ["session"]),
     "resolve-wait": Row(keys: waitKeys, refs: ["session"]),
@@ -81,10 +84,13 @@ enum PlannedScope {
     "removal-notices", "removal-notice-dismiss", "import", "importable", "accounts",
     "account-use",
     "account-move",
+    "account-add",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
+    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+    "decision-ask",
     "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
     "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
     "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
@@ -277,7 +283,8 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     ("send", "images"), ("send", "reports"), ("new", "account"), ("new", "group"), ("get", "host"),
     ("spawn", "account"), ("spawn", "group"), ("spawn", "followup"), ("spawn", "after"), ("ping", "session"),
     ("ls", "session"), ("wait", "on"), ("get", "Session"), ("send", "session "), ("events", "follow"),
-    ("answer", "always "),
+    ("answer", "always "), ("link-add", "from"), ("link-add", "insideClaude"), ("link-rm", "group"),
+    ("link-rm", "Link"),
   ])
   func aKeyThatTheOpDoesNotReadIsRefused(op: String, key: String) {
     var args = PlannedScope.baseArgs(op)

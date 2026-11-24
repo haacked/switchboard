@@ -26,6 +26,8 @@ enum HostScope {
   private static let session = Rule(keys: ["session"], refs: ["session"])
   /// The keys that `noteRequest`, `makeNote`, and `resolveNote` read.
   private static let noteKeys: Set<String> = ["session", "text", "by", "kind", "note"]
+  /// The keys that `sessionLinkRequest` and `requireOwnSession` read.
+  private static let linkKeys: Set<String> = ["session", "url", "title", "link", "by", "caller"]
   /// The fields of `WaitRequest`, and the keys that `waitRequest` reads for `clear-wait` and `resolve-wait`.
   private static let waitKeys: Set<String> = [
     "session", "kind", "target", "who", "environment", "service", "state", "until", "since", "note", "then", "by",
@@ -47,6 +49,8 @@ enum HostScope {
     "note": Rule(keys: noteKeys, refs: ["session"]),
     "remove-note": Rule(keys: noteKeys, refs: ["session"]),
     "resolve-note": Rule(keys: noteKeys, refs: ["session"]),
+    "link-add": Rule(keys: linkKeys, refs: ["session", "caller"]),
+    "link-rm": Rule(keys: linkKeys, refs: ["session", "caller"]),
     "wait": Rule(keys: waitKeys, refs: ["session"], waitTarget: true),
     "clear-wait": Rule(keys: waitKeys, refs: ["session"]),
     "resolve-wait": Rule(keys: waitKeys, refs: ["session"]),
@@ -92,16 +96,20 @@ enum HostScope {
       refused[op] = reaches
     }
     for op in [
-      "import", "importable", "accounts", "account-use", "account-move", "usage", "mcp", "hosts", "host-connect",
-      "slash-commands", "removed-ls", "manager-pin", "manager-model", "item-context", "manager-mcp-request", "operator",
+      "import", "importable", "accounts", "account-use", "account-move", "account-add", "usage", "mcp", "hosts",
+      "host-connect",
+      "slash-commands", "removed-ls", "manager-pin", "manager-model", "operator-model", "operator-judge",
+      "item-context", "manager-mcp-request", "operator",
       "operator-report", "operator-reports", "wait-approve", "quick-ask", "ref-details", "pause", "snooze", "unsnooze",
       "highlight",
       "schedule",
       "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "rm-plan", "rm-queue",
       "rm-cancel", "rm-keep", "rm-retry",
       "removal-notices", "removal-notice-dismiss",
-      "host-disconnect", "live", "live-next", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
+      "host-disconnect", "live", "live-next", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+      "clock",
       "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+      "decision-ask",
       "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
       "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
       "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
@@ -211,9 +219,10 @@ extension RequestOrigin {
 /// from reading a repo that the host's `repos` don't list. The event log can still hold data that sbd read while the
 /// host's `repos` listed the repo, or that an older sbd read. The copies that reach the box leave that data out.
 extension Service {
-  /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it.
+  /// The event kinds whose data comes from this Mac's GitHub login, or from a model call whose input held it. The
+  /// data of `decision_asked` holds a copy of the session's verdict and Inbox item, which can come from either.
   static let gitHubEventKinds: Set<String> = [
-    "pr", "dependencies", "merge", "cleanup", "worktree", "triage", "digest", MergeBrief.event,
+    "pr", "dependencies", "merge", "cleanup", "worktree", "triage", "digest", "decision_asked", MergeBrief.event,
     ReviewRequestAttempt.event, AutoContinue.eventKind, DraftReplies.targetEvent, DraftReplies.postingEvent,
     DraftReplies.postedEvent, DraftReplies.failedEvent, DraftReplies.unknownEvent,
   ]
@@ -285,7 +294,9 @@ extension SessionFacts {
   /// The facts without what this Mac's GitHub login read, and without what sbd derived from it: the PR, its
   /// comments, dependencies, merge and review-request attempts, the model's briefs, the drafts' targets, the
   /// cleanup checks, the board moves, and the outcome of a wait that the GitHub poller resolved. The turn summary
-  /// goes too, because its model call read the session's summary with its PR.
+  /// goes too, because its model call read the session's summary with its PR. The hold of a question about a
+  /// decision goes too, because its saved verdict and item can come from the PR. The host then sees the verdict and
+  /// the item of the clarifying turn.
   var withoutGitHub: SessionFacts {
     var f = self
     f.pr = nil
@@ -302,6 +313,7 @@ extension SessionFacts {
     f.boardSince = nil
     f.boardBack = nil
     f.triage = nil
+    f.heldAsk = nil
     if f.waitOutcomeKind.map(GitHubPoller.waitKinds.contains) == true {
       f.waitOutcome = nil
       f.waitOutcomeKind = nil

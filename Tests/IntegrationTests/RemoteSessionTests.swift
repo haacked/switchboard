@@ -488,7 +488,7 @@ private struct Lifecycle {
     #expect(done.live)
     #expect(
       sbd.stubArgs().first?.hasPrefix(
-        "--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
+        "--session-id \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id)) --model opus")
         == true)
     #expect(try sbd.boxTmuxSessions() == ["\(remote.id)-claude", "\(remote.id)-shell"])
     #expect(sbd.boxStubArgs().count == 1)
@@ -550,11 +550,14 @@ private struct Lifecycle {
     try sbd.waitFor(remote.id, "the remote claude to run again") { $0.claudePid != nil }
     try sbd.waitFor(local.id, "the local claude to run again") { $0.claudePid != nil }
 
-    #expect(sbd.stubArgs().last == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id))")
+    #expect(
+      sbd.stubArgs().last
+        == "--resume \(local.claudeSessionId) --settings \(sbd.home.claudeSettings(local.id)) --model opus")
     let resumed = (sbd.boxStubArgs().last ?? "").split(separator: " ").map(String.init)
-    try #require(resumed.count == 4, "\(resumed)")
+    try #require(resumed.count == 6, "\(resumed)")
     #expect(Array(resumed.prefix(3)) == ["--resume", remote.claudeSessionId, "--settings"])
     #expect(real(resumed[3]) == real(sbd.boxSettings))
+    #expect(Array(resumed.suffix(2)) == ["--model", "opus"])
     let remoteLauncher = try String(contentsOfFile: "\(sbd.boxSB)/sessions/\(remote.id)/claude.sh", encoding: .utf8)
     let localLauncher = try String(contentsOfFile: "\(sbd.home.sessionFolder(local.id))/claude.sh", encoding: .utf8)
     #expect(

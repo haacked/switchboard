@@ -48,12 +48,22 @@ final class MessageDrafts {
     "decision:\(session)/\(ref)/\(decision)/other"
   }
 
-  /// The Other answer keys of every decision that the sessions show.
-  static func otherAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
+  /// The key of the unsent question in one decision's thread, keyed like `otherAnswerKey`.
+  static func askKey(session: String, ref: String, decision: Int) -> String {
+    "decision:\(session)/\(ref)/\(decision)/ask"
+  }
+
+  /// The draft keys of every decision that the sessions show.
+  static func decisionKeys(_ sessions: [SessionSummary]) -> Set<String> {
     Set(
       sessions.flatMap { s in
         s.shownDecisions.map { list in
-          list.decisions.map { otherAnswerKey(session: s.id, ref: list.ref, decision: $0.number) }
+          list.decisions.flatMap { d in
+            [
+              otherAnswerKey(session: s.id, ref: list.ref, decision: d.number),
+              askKey(session: s.id, ref: list.ref, decision: d.number),
+            ]
+          }
         } ?? []
       })
   }

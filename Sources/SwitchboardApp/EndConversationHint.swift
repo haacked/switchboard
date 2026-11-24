@@ -8,7 +8,7 @@ struct EndConversationHint: View {
   let session: SessionSummary
   let hint: EndHint
   /// The parent shows the confirmation. This row leaves the screen once sbd stops sending the hint.
-  @Binding var ending: EndConversationText?
+  @Binding var ending: ConversationRemovalText?
 
   var body: some View {
     HStack(spacing: 8) {

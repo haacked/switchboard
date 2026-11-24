@@ -814,6 +814,33 @@ extension Service {
   }
 }
 
+/// The verdict and the item that an ask about a decision saves while the unlisted PR's rule gives the session's item.
+private let heldReason = "Vault sentinel title (#4242) needs your decisions"
+private let heldSummary = "secret/vault pull/4242 asks two decisions"
+
+extension Service {
+  /// Records an ask about decision 2 of an open list, as `decision-ask` does. The list's decisions and the question
+  /// carry no PR text. Only the saved verdict and item do.
+  fileprivate func giveHeldAsk(_ id: String) throws {
+    let decisions = [1, 2].map {
+      PendingDecision(
+        number: $0, header: "D\($0)", question: "Which?", options: [.init(label: "A"), .init(label: "B")])
+    }
+    let item = TriageItem(
+      title: "Vault sentinel title", kind: .decision, summary: heldSummary, decisions: decisions, source: .rule,
+      ref: "rule:held")
+    let ask = DecisionAsk(
+      ref: "rule:held", number: 2, askId: "q1", text: "Why B?", message: "Question about decision 2",
+      verdict: .init(state: .needsYou, reason: heldReason), item: item)
+    let opened: JSON = ["decisions": try JSON(encoding: decisions), "ref": "rule:held"]
+    let asked = try JSON(encoding: ask)
+    queue.sync {
+      _ = record(id, "decisions_opened", opened)
+      _ = record(id, "decision_asked", asked)
+    }
+  }
+}
+
 private func text(_ answer: Response) -> String {
   (answer.result?.text ?? "") + (answer.error ?? "")
 }
@@ -935,6 +962,40 @@ private func text(_ answer: Response) -> String {
         #expect(!text(answer).contains(mark), "events answered \(mark)")
         #expect(!text(get).contains(mark), "get answered \(mark)")
       }
+    }
+  }
+
+  // MARK: The hold of a question about a decision
+
+  /// The saved verdict and item hold the unlisted PR's text. The host gets the session's verdict and item without
+  /// the hold, as it gets them without the PR.
+  @Test(.timeLimit(.minutes(1)), arguments: ownRequests)
+  func noAnswerToTheHostCarriesTheHeldVerdictOrItemOfAnUnlistedPR(op: String, args: [String: JSON]) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      try service.giveHeldAsk("m1")
+      let onMac = service.handle(Request(op: "get", args: ["session": "m1"]))
+      try #require(onMac.result?["reason"] == .string(heldReason), "\(text(onMac))")
+      try #require(onMac.result?["triage"]?["summary"] == .string(heldSummary), "\(text(onMac))")
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "\(op) answered \(mark)") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+  func eventsToTheHostLoseTheSnapshotsOfAnAskAboutAnUnlistedPR(full: Bool) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      try service.giveHeldAsk("m1")
+
+      let answer = service.handle(
+        Request(op: "events", args: ["session": "m1", "full": .bool(full)]), origin: .remote("mini"))
+
+      let asked = try #require(answer.result?.array?.first { $0["kind"] == "decision_asked" }, "\(text(answer))")
+      #expect(asked["data"] == .object([:]))
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "events answered \(mark)") }
     }
   }
 

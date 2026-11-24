@@ -6,7 +6,7 @@ import SwitchboardCore
 extension Service {
   /// Marks the session's folder trusted in the account that claude runs
   /// under, when sbd created the folder. Without it, claude stops at the
-  /// trust dialog and reads no prompt.
+  /// trust dialog and reads no prompt. A Codex folder gets no Claude trust entry.
   func trustOwnFolder(_ id: String) {
     guard let session = entries[id]?.session, let folder = ClaudeTrust.ownFolder(session, home: home),
       case .local(let account) = claudeAccount(of: id)

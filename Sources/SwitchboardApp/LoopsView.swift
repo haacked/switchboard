@@ -108,6 +108,7 @@ private struct LoopListHeader: View {
 /// session.
 private struct LoopRows: View {
   @EnvironmentObject var model: BoardModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focused: Bool
   let rows: [LoopRow]
   let now: Int64
@@ -130,7 +131,7 @@ private struct LoopRows: View {
         if let row = model.currentLoop { model.showLoopSession(row.session) }
       }
       .onChange(of: model.loopJumps) {
-        if let id = model.currentLoop?.id { withAnimation { proxy.scrollTo(id) } }
+        if let id = model.currentLoop?.id { proxy.scrollTo(id, reduceMotion: reduceMotion) }
       }
     }
   }

@@ -378,4 +378,175 @@ import Testing
     let properties = try #require(tool["inputSchema"]?["properties"]?.object)
     #expect(properties["full"]?["type"]?.string == "boolean")
   }
+
+  // MARK: Links
+
+  @Test func getSessionWithFullCarriesTheSessionsLinks() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    try sbd.postPromptHook(s.id, prompt: "Review \(SlackExample.root)")
+    let mcp = try MCPClient(sbd)
+
+    let got = try #require(try mcp.call("get_session", ["session": .string(s.id), "full": true]).json)
+
+    let links = try #require(got["links"]?.array)
+    #expect(links.compactMap { $0["url"]?.string } == [SlackExample.root])
+    #expect(links.first?["kind"]?.string == "slack")
+    #expect(links.first?["by"]?.string == "found")
+    #expect(links.first?["thread"]?.string == SlackExample.rootTs)
+  }
+
+  @Test func listSessionsWithFullCarriesLinksOnTheRightSessionOnly() throws {
+    let sbd = try Instance()
+    let a = try sbd.new(name: "alpha")
+    let b = try sbd.new(name: "bravo")
+    try sbd.postSlackSend(a.id, link: SlackExample.dm, channel: SlackExample.dmChannel, ts: SlackExample.replyTs)
+    let mcp = try MCPClient(sbd)
+
+    let listed = try #require(try mcp.call("list_sessions", ["full": true]).json?.array)
+
+    let alpha = try #require(listed.first { $0["id"]?.string == a.id })
+    let bravo = try #require(listed.first { $0["id"]?.string == b.id })
+    #expect(alpha["links"]?.array?.compactMap { $0["url"]?.string } == [SlackExample.dm])
+    #expect(bravo["links"] == nil)
+  }
+
+  @Test func theBriefFormsCarryNoLinks() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    try sbd.postPromptHook(s.id, prompt: "Review \(SlackExample.root)")
+    let mcp = try MCPClient(sbd)
+
+    let got = try #require(try mcp.call("get_session", ["session": .string(s.id)]).json)
+    let listed = try #require(try mcp.call("list_sessions").json?.array)
+
+    #expect(try sbd.sessionLinks(s.id) != nil)
+    #expect(got["links"] == nil)
+    #expect(!listed.isEmpty)
+    #expect(listed.allSatisfy { $0["links"] == nil })
+  }
+
+  static let rfc = "https://example.com/rfcs/flag-evaluations"
+
+  @Test func addLinkAddsToTheCallersSessionAsClaude() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let other = try sbd.new(name: "bravo")
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let result = try mcp.call("add_link", ["url": .string(Self.rfc), "title": "Flag RFC"])
+
+    #expect(!result.isError, "\(result.text)")
+    let links = try #require(try sbd.sessionLinks(s.id))
+    #expect(links.compactMap { $0["url"]?.string } == [Self.rfc])
+    #expect(links.first?["by"]?.string == "claude")
+    #expect(links.first?["title"]?.string == "Flag RFC")
+    #expect(links.first?["id"]?.string?.hasPrefix("l") == true)
+    #expect(try sbd.sessionLinks(other.id) == nil)
+  }
+
+  @Test func addLinkWithoutACallerIsAnError() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call("add_link", ["url": .string(Self.rfc)])
+
+    #expect(result.isError, "\(result.text)")
+    #expect(result.text.contains("add_link works only in a session that Switchboard started"), "\(result.text)")
+    #expect(try sbd.sessionLinks(s.id) == nil)
+  }
+
+  @Test func removeLinkWithoutACallerIsAnError() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    try sbd.sb("link", "add", s.id, Self.rfc, env: inside(s.id))
+    let id = try #require(try sbd.sessionLinks(s.id)?.first?["id"]?.string)
+    let mcp = try MCPClient(sbd)
+
+    let result = try mcp.call("remove_link", ["link": .string(id)])
+
+    #expect(result.isError, "\(result.text)")
+    #expect(result.text.contains("remove_link works only in a session that Switchboard started"), "\(result.text)")
+    #expect(try sbd.sessionLinks(s.id)?.count == 1)
+  }
+
+  @Test func removeLinkRemovesClaudesLinkAndRefusesYours() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+    _ = try mcp.call("add_link", ["url": "https://example.com/docs/cache-design"])
+    try sbd.sb("link", "add", s.id, Self.rfc)
+    let links = try #require(try sbd.sessionLinks(s.id))
+    let claudes = try #require(links.first { $0["by"]?.string == "claude" }?["id"]?.string)
+    let yours = try #require(links.first { $0["by"]?.string == "you" }?["id"]?.string)
+
+    let refused = try mcp.call("remove_link", ["link": .string(yours)])
+    let removed = try mcp.call("remove_link", ["link": .string(claudes)])
+
+    #expect(refused.isError, "\(refused.text)")
+    #expect(refused.text.contains("Only you can remove a link you added"), "\(refused.text)")
+    #expect(!removed.isError, "\(removed.text)")
+    #expect(try sbd.sessionLinks(s.id)?.compactMap { $0["id"]?.string } == [yours])
+  }
+
+  @Test func removeLinkRefusesAFoundLink() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    try sbd.postPromptHook(s.id, prompt: "Review \(SlackExample.root)")
+    let before = try #require(try sbd.sessionLinks(s.id))
+    let id = try #require(before.first?["id"]?.string)
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let result = try mcp.call("remove_link", ["link": .string(id)])
+
+    #expect(result.isError, "\(result.text)")
+    #expect(result.text.contains("Only you can hide a link that Switchboard found"), "\(result.text)")
+    #expect(try sbd.sessionLinks(s.id) == before)
+  }
+
+  /// The tool reads no `session`, so an extra one never reaches another session.
+  @Test func addLinkWithASessionArgumentNeverChangesThatSession() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(name: "alpha")
+    let other = try sbd.new(name: "bravo")
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let named = try mcp.call("add_link", ["url": .string(Self.rfc), "session": .string(other.id)])
+    let asOther = try mcp.call(
+      "add_link",
+      ["url": "https://example.com/docs/cache-design", "session": .string(other.id), "caller": .string(other.id)])
+
+    #expect(!named.isError, "\(named.text)")
+    #expect(!asOther.isError, "\(asOther.text)")
+    #expect(
+      try sbd.sessionLinks(s.id)?.compactMap { $0["url"]?.string }
+        == [Self.rfc, "https://example.com/docs/cache-design"])
+    #expect(try sbd.sessionLinks(other.id) == nil)
+  }
+
+  /// Both tools act on the caller's session, so neither can name another.
+  @Test func theLinkToolsTakeNoSession() throws {
+    let sbd = try Instance()
+    let tools = try MCPClient(sbd).tools()
+
+    for (name, required) in [("add_link", "url"), ("remove_link", "link")] {
+      let tool = try #require(tools.first { $0["name"]?.string == name }, "\(name)")
+      let properties = try #require(tool["inputSchema"]?["properties"]?.object)
+      #expect(properties["session"] == nil, "\(name): \(properties.keys)")
+      #expect(properties["caller"] == nil, "\(name): \(properties.keys)")
+      #expect(properties[required] != nil, "\(name): \(properties.keys)")
+      #expect(tool["inputSchema"]?["required"]?.array?.compactMap(\.string) == [required])
+    }
+  }
+
+  @Test(arguments: [("list_sessions", "artifacts, and links"), ("get_session", "artifacts and links")])
+  func theSessionToolsDescriptionsNameLinks(_ name: String, _ phrase: String) throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let tool = try #require(try mcp.tools().first { $0["name"]?.string == name })
+
+    #expect(tool["description"]?.string?.contains(phrase) == true, "\(tool["description"]?.string ?? "")")
+  }
 }

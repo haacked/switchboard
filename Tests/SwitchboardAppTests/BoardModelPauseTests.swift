@@ -48,6 +48,13 @@ import Testing
     #expect(model.presentingSheet)
   }
 
+  @Test func theOpenNotesSheetCountsAsASheet() {
+    let model = offlineModel()
+    #expect(!model.presentingSheet)
+    model.editingNotes = "s1"
+    #expect(model.presentingSheet)
+  }
+
   @Test func resumeStillSendsResumeForTheSession() async {
     let sent = await firstRequest { $0.resume("s1") }
 

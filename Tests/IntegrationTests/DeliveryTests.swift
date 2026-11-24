@@ -254,7 +254,9 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     case .delivered:
       try sbd.sb("decide", s.id, "--submit")
       try sbd.waitFor(s.id, "the reply to the decisions") { $0.lastReply?.hasPrefix("Done: My decisions") == true }
-      try #require(try !sbd.events(s.id, "delivered", text: try sbd.submittedMessage(s.id)).isEmpty)
+      // claude can finish the turn before the paste records `delivered`.
+      let message = try sbd.submittedMessage(s.id)
+      try sbd.waitFor("the decisions' delivered") { try !sbd.events(s.id, "delivered", text: message).isEmpty }
     }
   }
 }
@@ -342,6 +344,21 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     #expect(sbd.settledStubInputCount(text) == 1)
   }
 
+  /// The gate appears after sbd recorded `pasting` and while the paste is
+  /// still in the terminal. sbd read the gate before it recorded `pasting`, so
+  /// it records `delivered` while the gate exists.
+  @Test func aPasteThatStartedBeforeHoldDeliveredPassesIt() throws {
+    let sbd = try Instance(config: Path.direct.config)
+    let s = try Path.direct.session(sbd)
+    let text = "started before the gate"
+
+    try sbd.sb("send", s.id, text)
+    try sbd.waitFor("pasting") { try sbd.events(s.id, "pasting", text: text).count == 1 }
+    sbd.hold("hold-delivered")
+
+    try sbd.waitFor("delivered while the gate exists") { try !sbd.events(s.id, "delivered", text: text).isEmpty }
+  }
+
   /// sbd can't store the `sent` event, so it refuses the send and pastes nothing.
   @Test func aSendThatCantStoreItsSentEventPastesNothing() throws {
     let sbd = try Instance(config: Path.direct.config)
@@ -403,7 +420,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.sb("send", s.id, text)
     try sbd.waitFor(s.id, "the first copy's reply") { $0.lastReply == "Done: \(text)" }
     try #require(sbd.transcriptContains(s, text))
-    let deliveredBefore = try sbd.events(s.id, "delivered", text: text).count
+    try sbd.waitFor("the first copy's delivered") { try sbd.events(s.id, "delivered", text: text).count == 1 }
     sbd.hold("hold-delivered")
     sbd.hold("hold")
     let before = sbd.completePastes()
@@ -416,7 +433,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.startSbd()
 
     try sbd.waitFor("delivery_unknown") { try sbd.events(s.id, "delivery_unknown", text: text).count == 1 }
-    #expect(try sbd.events(s.id, "delivered", text: text).count == deliveredBefore)
+    #expect(try sbd.events(s.id, "delivered", text: text).count == 1)
   }
 
   static let draft = "half a thought"

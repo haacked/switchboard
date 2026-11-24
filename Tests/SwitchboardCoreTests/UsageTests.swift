@@ -200,6 +200,36 @@ let legacyWithoutASession = Data(
   }
 }
 
+/// `sb usage --json` writes `"source": "rollout"` for every Codex reading and leaves it out of a Claude one.
+@Suite struct UsageSourceTests {
+  func encoded(_ reading: AccountUsage) throws -> JSON {
+    try JSONCoding.decoder.decode(JSON.self, from: JSONCoding.encoder.encode(reading))
+  }
+
+  @Test func aCodexPlaceholderWithoutLimitsHasTheRolloutSource() throws {
+    #expect(try encoded(AccountUsage(name: "codex", folder: "/c", agent: .codex))["source"]?.string == "rollout")
+  }
+
+  @Test func aClaudeReadingHasNoSource() throws {
+    #expect(try encoded(AccountUsage(name: "a", folder: "/a"))["source"] == nil)
+  }
+
+  @Test func aDecodedCodexReadingKeepsItsAgent() throws {
+    let reading = AccountUsage(name: "codex", folder: "/c", checked: 1, agent: .codex)
+
+    #expect(try JSONCoding.convert(try encoded(reading), to: AccountUsage.self) == reading)
+  }
+
+  /// An older sbd writes no `agent`, and `sb` and the app read its rows during an update.
+  @Test func aRowWithoutAnAgentIsAClaudeRow() throws {
+    let usage = Data(#"{"name":"a","folder":"/a","limits":[]}"#.utf8)
+    let account = Data(#"{"name":"a","folder":"/a","active":true,"sessions":0}"#.utf8)
+
+    #expect(try JSONCoding.decoder.decode(AccountUsage.self, from: usage).agent == .claude)
+    #expect(try JSONCoding.decoder.decode(AccountInfo.self, from: account).agent == .claude)
+  }
+}
+
 @Suite struct UsageBudgetTests {
   func reading(_ limits: [UsageLimit], error: String? = nil) -> AccountUsage {
     AccountUsage(name: "A", folder: "/tmp/A", email: nil, limits: limits, checked: 1, error: error)

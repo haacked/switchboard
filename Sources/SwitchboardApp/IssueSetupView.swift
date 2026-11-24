@@ -2,31 +2,37 @@ import AppKit
 import SwiftUI
 import SwitchboardCore
 
-/// The Issues view's setup sheet: the sources, the team's labels and logins, and the default start preset.
+/// Settings ▸ Issues: the Issues view's sources, the team's labels and logins, and the default start preset.
 struct IssueSetupView: View {
+  /// The team fields and the start preset as the pane last loaded or saved them.
+  struct Loaded: Equatable {
+    var team: IssueTeam
+    var preset: String?
+  }
+
   @EnvironmentObject var model: BoardModel
-  @Environment(\.dismiss) private var dismiss
-  @Binding var uncheckedRepos: Set<String>
   @State private var offerLabelFocused = false
   @State private var name = ""
   @State private var label = ""
   @State private var person = ""
-  @State private var addError: String?
+  /// sbd's refusal of the last add or remove of a source.
+  @State private var sourceError: String?
+  /// sbd's refusal of the last save.
+  @State private var saveError: String?
   @State private var adding = false
   @State private var labels = ""
   @State private var people = ""
   @State private var backlog = ""
   @State private var defaultPreset: String?
-  /// The team that the fields loaded, or nil before the first read. The sheet can open before it.
-  @State private var loadedTeam: IssueTeam?
+  /// The values that the fields loaded, or nil before the first read. The pane can open before it.
+  @State private var loaded: Loaded?
 
   var body: some View {
     let list = model.issueList
     VStack(alignment: .leading, spacing: 14) {
-      Text("Issue Sources").font(.title2.bold())
       if !model.offeredIssueRepos.isEmpty {
         GroupBox("Your Repositories") {
-          IssueRepoOffer(unchecked: $uncheckedRepos) { offerLabelFocused = $0 }.padding(4)
+          IssueRepoOffer(unchecked: $model.uncheckedIssueRepos) { offerLabelFocused = $0 }.padding(4)
         }
       }
       GroupBox("Sources") {
@@ -40,7 +46,8 @@ struct IssueSetupView: View {
               Text(filterText(source)).foregroundStyle(.secondary)
               Spacer()
               Button {
-                model.removeIssueSource(source)
+                sourceError = nil
+                model.removeIssueSource(source) { sourceError = $0 }
               } label: {
                 Image(systemName: "minus.circle")
               }
@@ -70,7 +77,7 @@ struct IssueSetupView: View {
               .disabled(!canAdd || adding)
               .keyboardShortcut(returnOwner == .add ? .defaultAction : nil)
           }
-          if let problem = addProblem ?? addError {
+          if let problem = addProblem ?? sourceError {
             Text(problem).font(.caption).foregroundStyle(.red)
           } else {
             Text(
@@ -80,7 +87,7 @@ struct IssueSetupView: View {
           }
         }
         .padding(4)
-        .announcesRefusal(addError)
+        .announcesRefusal(sourceError)
       }
       GroupBox("My Team") {
         VStack(alignment: .leading, spacing: 6) {
@@ -103,30 +110,70 @@ struct IssueSetupView: View {
           .help("Presets are prompt templates under issues.presets in config.json")
       }
       HStack {
-        Spacer()
-        Button("Cancel", role: .cancel) { dismiss() }
-          .keyboardShortcut(.cancelAction)
-        Button("Save") {
-          model.saveIssueSettings(
-            labels: Self.list(labels, loaded: loadedTeam?.labels),
-            people: Self.list(people, loaded: loadedTeam?.people),
-            backlog: Self.list(backlog, loaded: loadedTeam?.backlog), defaultPreset: defaultPreset)
-          dismiss()
+        if let saveError {
+          Text(saveError).font(.caption).foregroundStyle(.red)
         }
-        .keyboardShortcut(returnOwner == .save ? .defaultAction : nil)
+        Spacer()
+        Button("Save") { save() }
+          .disabled(!hasChanges)
+          .keyboardShortcut(returnOwner == .save ? .defaultAction : nil)
       }
+      .announcesRefusal(saveError)
     }
     .padding(20)
     .frame(width: 600)
-    .onAppear { model.loadRepos() }
-    .onChange(of: model.issueList == nil, initial: true) {
-      guard loadedTeam == nil, let list = model.issueList else { return }
-      loadedTeam = list.team
-      labels = Self.text(list.team.labels)
-      people = Self.text(list.team.people)
-      backlog = Self.text(list.team.backlog)
-      defaultPreset = IssuePreset.choose(list.presets, last: nil, default: list.defaultPreset)?.name
+    .onAppear {
+      if model.knownRepos == nil { model.loadRepos() }
+      reload()
     }
+    // The Settings window keeps the pane between opens, so a change through `sb issues` or another save shows in it.
+    .onChange(of: model.issueList.map(Self.loaded)) { reload() }
+  }
+
+  /// The team and the start preset that the list gives the fields.
+  static func loaded(from list: IssueList) -> Loaded {
+    Loaded(team: list.team, preset: IssuePreset.choose(list.presets, last: nil, default: list.defaultPreset)?.name)
+  }
+
+  private var hasChanges: Bool {
+    Self.hasChanges(labels: labels, people: people, backlog: backlog, preset: defaultPreset, loaded: loaded)
+  }
+
+  /// Whether the fields differ from what the pane loaded. Before the first read, any typed text is a change.
+  static func hasChanges(labels: String, people: String, backlog: String, preset: String?, loaded: Loaded?) -> Bool {
+    let team = loaded?.team ?? IssueTeam()
+    return labels != text(team.labels) || people != text(team.people) || backlog != text(team.backlog)
+      || preset != loaded?.preset
+  }
+
+  /// Takes sbd's team and preset into the fields, unless the user has edited a field since the last load or save.
+  private func reload() {
+    guard let list = model.issueList, !hasChanges else { return }
+    show(Self.loaded(from: list))
+  }
+
+  private func show(_ values: Loaded) {
+    loaded = values
+    labels = Self.text(values.team.labels)
+    people = Self.text(values.team.people)
+    backlog = Self.text(values.team.backlog)
+    defaultPreset = values.preset
+  }
+
+  private func save() {
+    let team = IssueTeam(
+      labels: Self.list(labels, loaded: loaded?.team.labels), people: Self.list(people, loaded: loaded?.team.people),
+      backlog: Self.list(backlog, loaded: loaded?.team.backlog))
+    saveError = nil
+    // A refusal leaves config.json as it was, so the loaded values go back to sbd's, and Save works again.
+    model.saveIssueSettings(
+      labels: team.labels, people: team.people, backlog: team.backlog, defaultPreset: defaultPreset
+    ) { error in
+      guard let error else { return }
+      saveError = error
+      loaded = model.issueList.map(Self.loaded)
+    }
+    show(Loaded(team: team, preset: defaultPreset))
   }
 
   private var trimmedName: String { name.trimmingCharacters(in: .whitespaces) }
@@ -138,7 +185,7 @@ struct IssueSetupView: View {
   private enum ReturnOwner { case offer, add, save }
 
   /// The one button that Return presses. Return adds the checked repositories while the offer's label field has
-  /// focus, and it adds a typed source instead of saving the sheet without it.
+  /// focus, and it adds a typed source instead of saving the pane without it.
   private var returnOwner: ReturnOwner { offerLabelFocused ? .offer : trimmedName.isEmpty ? .save : .add }
 
   private var canAdd: Bool { !trimmedName.isEmpty && addProblem == nil }
@@ -152,10 +199,10 @@ struct IssueSetupView: View {
 
   private func add() {
     adding = true
-    addError = nil
+    sourceError = nil
     model.addIssueSources([trimmedName], label: label, person: person) { error in
       adding = false
-      addError = error
+      sourceError = error
       if error == nil {
         name = ""
         label = ""
