@@ -105,7 +105,7 @@ import Testing
     #expect(
       sbd.stubArgs()
         == [
-          "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- Fix the cache. It reads twice."
+          "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- Fix the cache. It reads twice."
         ]
     )
   }

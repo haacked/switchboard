@@ -45,7 +45,7 @@ extension Service {
       let built = TopupCandidates.build(
         repo: gate.repo, group: gate.group, issues: lists.issues, openPRs: lists.openPRs,
         sessions: coverageRows(gate: gate), followups: followups, viewer: issueCache.viewer, team: issueSettings.team)
-      let env = headlessEnv(session: holder, account: config.triage.account.map(ClaudeAccount.init(folder:)))
+      let env = headlessEnv(session: holder, account: triageAccount(for: holder).account)
       return (holder, built, env)
     }
     guard let setup else {
@@ -60,7 +60,7 @@ extension Service {
 
     let settings = operatorSettings
     let call = headlessCall(
-      .topupPick, session: holder, arguments: TopupPick.arguments(model: settings.judgeModel),
+      .topupPick, session: holder, arguments: TopupPick.arguments(model: settings.model),
       input: TopupPick.input(rubric: gate.rubric, k: k, candidates: built.candidates, sessions: status.counted),
       env: env, folder: home.path, timeout: Double(settings.topupTimeoutSeconds)
     ) { try TopupPick.parse($0, candidates: built.candidates, k: k) }

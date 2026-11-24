@@ -1109,7 +1109,7 @@ private let foreignPRSessions = [
     "switchboard", checkout: "/Users/me/dev/switchboard", repository: "haacked/switchboard", pr: "haacked/switchboard"),
 ]
 
-private func permutations<T>(_ items: [T]) -> [[T]] {
+func permutations<T>(_ items: [T]) -> [[T]] {
   guard let first = items.first else { return [[]] }
   return permutations(Array(items.dropFirst())).flatMap { rest in
     (0...rest.count).map { i in

@@ -2,12 +2,14 @@ import Foundation
 import SwitchboardCore
 
 /// `sb operator [<text>] [--log]`. It opens the operator, and creates it when none exists. `report`,
-/// `reports`, and `approve` are reserved first words.
+/// `reports`, `approve`, `model`, and `judge` are reserved first words.
 func operatorCommand(_ a: Args) {
   switch a.positional.first {
   case "report": return operatorReport(a)
   case "reports": return operatorReports(a)
   case "approve": return operatorApprove(a)
+  case "model": return operatorModel(a)
+  case "judge": return operatorJudge(a)
   default: break
   }
   if a.switches.contains("--log") { return printChatLog(a, ["operator": true]) }
@@ -54,4 +56,34 @@ private func reportLine(_ row: JSON) -> String {
   let status = row["open"]?.bool == true ? "open" : row["needsYou"]?.bool == true ? "closed" : "info"
   let about = row["aboutName"]?.string.map { "\($0): " } ?? ""
   return "\(time)  \(status)  \(about)\(row["text"]?.string ?? "")".printable
+}
+
+/// `sb operator model [<name>]`.
+private func operatorModel(_ a: Args) {
+  var args: [String: JSON] = [:]
+  let words = a.positional.dropFirst()
+  if let model = words.first {
+    guard words.count == 1 else { die("operator model takes one model name") }
+    // A conversation that read injected instructions could otherwise move the operator to a pricier model.
+    refuseInsideClaudeCode("operator model <name> needs the user, so it doesn't run inside Claude Code")
+    args["model"] = .string(model)
+  }
+  let result = call("operator-model", args)
+  if a.json { return printJSON(result) }
+  print("The operator and its judges run \(result["model"]?.string ?? "")".printable)
+  if !args.isEmpty { print("The operator switches when its claude next starts.") }
+}
+
+/// `sb operator judge --kind K --input FILE [--model M]`.
+private func operatorJudge(_ a: Args) {
+  guard let kind = a.values["--kind"], let path = a.values["--input"] else {
+    die("usage: sb operator judge --kind reply-gate|ci-failure|pick-issues --input <file> [--model M]")
+  }
+  guard let text = try? String(contentsOfFile: path, encoding: .utf8), let input = JSON.parse(text), input.object != nil
+  else { die("\(path) isn't a JSON object") }
+  var args: [String: JSON] = ["kind": .string(kind), "input": input]
+  if let model = a.values["--model"] { args["model"] = .string(model) }
+  let result = call("operator-judge", args, timeout: 300)
+  if a.json { return printJSON(result) }
+  print("\(result["answer"]?.string ?? "")  \(result["detail"]?.string ?? "")".printable)
 }

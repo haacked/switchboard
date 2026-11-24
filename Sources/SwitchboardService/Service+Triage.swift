@@ -25,9 +25,15 @@ extension Service {
   /// Records the card that the session wrote for its current turn. A new
   /// prompt drops it. When the card asks the user something, `childItems`
   /// lists the session's children that ask the user in their own Inbox item,
-  /// so the CLI can say not to ask their questions again.
+  /// so the CLI can say not to ask their questions again. A clarifying turn's card would replace the item that
+  /// the user asked from, so sbd refuses it.
   private func setSummary(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
+    if let ask = entries[id]!.facts.clarifying, ask.started {
+      throw APIError(
+        "This turn answers a question about decision \(ask.number). Switchboard did not save a summary card. Reply in text, and Switchboard shows your reply under that decision."
+      )
+    }
     guard let raw = args["card"] else { throw APIError("summary set needs the card as JSON") }
     let cleaned = try TriageCard.clean(raw, now: nowMs())
     let event = record(id, Triage.sessionEvent, try JSON(encoding: cleaned.card))
@@ -206,11 +212,31 @@ extension Service {
   // MARK: Summaries
 
   /// The account of a one-shot call that sbd makes for the session `id`: `triage.account` when it is set, or else
-  /// the session's own. `key` is the account that the call's quota counts against. `account` is the override that
-  /// `headlessEnv` applies, nil when the call takes the session's pane environment.
+  /// `headlessAccount(of:)`.
   func triageAccount(for id: String) -> (key: String, account: ClaudeAccount?) {
-    let account = config.triage.account.map(ClaudeAccount.init(folder:))
-    return (account?.folder ?? claudeAccount(of: id).key, account)
+    if let account = triageClaudeAccount { return (account.folder, account) }
+    return headlessAccount(of: id)
+  }
+
+  /// The account of a one-shot call that runs as the session `id`. `key` is the account that the call's quota
+  /// counts against. `account` is the override that `headlessEnv` applies. It is nil when the call takes the
+  /// session's pane environment. A session whose account is a Codex folder takes `headlessStandIn`, because
+  /// claude can't run under a Codex folder.
+  func headlessAccount(of id: String) -> (key: String, account: ClaudeAccount?) {
+    let own = claudeAccount(of: id)
+    switch own {
+    case .local, .host: return (own.key, nil)
+    case .codex: return (headlessStandIn.folder, headlessStandIn)
+    }
+  }
+
+  /// The Claude account that a one-shot turn runs under in place of a Codex folder: `triage.account`, else the
+  /// active account.
+  var headlessStandIn: ClaudeAccount { triageClaudeAccount ?? activeAccount }
+
+  /// `triage.account`, or nil when it is unset or names a Codex folder.
+  var triageClaudeAccount: ClaudeAccount? {
+    config.triage.account.flatMap { claudeAccount(folder: $0) }
   }
 
   /// Starts each model call that `verdict` asks for: the turn's summary and the PR's merge brief.

@@ -72,6 +72,18 @@ extension Service {
     return .object(["model": .string(managerModel)])
   }
 
+  /// The `operator-model` request. With `model`, it saves the model in config.json's `operator`. The operator uses
+  /// it from its next launch, and every judge call from the next call. The answer is the model.
+  func operatorModelRequest(_ args: JSON) throws -> JSON {
+    if let value = args["model"] {
+      guard let model = value.string else { throw APIError("the model is a name, such as haiku") }
+      if let problem = Manager.modelProblem(model) { throw APIError(problem) }
+      try saveSetting(section: "operator", "model", .string(model))
+      logLine("the operator's model is \(model)")
+    }
+    return .object(["model": .string(operatorSettings.model)])
+  }
+
   /// The `operator` request: sends `text` to the operator, or without text
   /// opens it. It creates the operator when none exists. The answer is the
   /// operator's summary, with `delivery` when it took text. `from` and

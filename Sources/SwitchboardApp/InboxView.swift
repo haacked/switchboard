@@ -89,6 +89,7 @@ struct InboxView: View {
 /// the item's Claude terminal.
 struct TriageList: View {
   @EnvironmentObject var model: BoardModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focused: Bool
 
   var body: some View {
@@ -117,7 +118,7 @@ struct TriageList: View {
         // The rows have no layout yet when the Inbox replaces the Board. A scroll
         // right away often does nothing, so this waits 0.3 s.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-          if let id = model.currentInboxItem { withAnimation { proxy.scrollTo(id) } }
+          if let id = model.currentInboxItem { proxy.scrollTo(id, reduceMotion: reduceMotion) }
         }
       }
     }
@@ -140,13 +141,19 @@ struct TriageRow: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         InlineText(plain: session.inboxTitle, links: false).fontWeight(.medium).lineLimit(2)
-        Text(
-          [repo, model.inboxName(session), ago(session.since)]
-            .compactMap { $0 }.joined(separator: " · ")
-        )
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .lineLimit(1)
+        HStack(spacing: Spacing.xSmall) {
+          if let group = Self.groupLabel(for: session) {
+            // The caption beside the chip truncates first.
+            GroupChip(name: group).layoutPriority(1)
+          }
+          Text(
+            [repo, model.inboxName(session), ago(session.since)]
+              .compactMap { $0 }.joined(separator: " · ")
+          )
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .lineLimit(1)
+        }
       }
       Spacer(minLength: 0)
       IssueBadge(session: session)
@@ -160,6 +167,48 @@ struct TriageRow: View {
     .accessibilityValue(session.state.title)
     .highlightAccessibility(session.isHighlighted)
     .accessibilityAddTraits(current ? .isSelected : [])
+  }
+
+  /// The name of the session's group, or nil when the session has no group or is not a work session. A group chat's
+  /// name already names its group.
+  static func groupLabel(for session: SessionSummary) -> String? {
+    guard session.kind == .work, let name = session.groupName, !name.isEmpty else { return nil }
+    return name
+  }
+}
+
+/// A group's name in a gray capsule on an Inbox row. A long name truncates at `maxTextWidth`, or sooner in a narrow
+/// row.
+struct GroupChip: View {
+  static let maxTextWidth: CGFloat = 140
+  let name: String
+
+  var body: some View {
+    ShrinkingCapLayout(limit: Self.maxTextWidth) {
+      Text(verbatim: name).lineLimit(1).truncationMode(.tail)
+    }
+    .pill(.secondary)
+    .help("Group: \(name)")
+    .accessibilityLabel("Group \(name)")
+  }
+}
+
+/// Sizes its one child to the narrowest of the child's natural width, `limit`, and the width its parent proposes.
+/// `frame(maxWidth:)` would instead take the whole proposed width up to `limit`, so a short name would sit in a wide
+/// capsule.
+private struct ShrinkingCapLayout: Layout {
+  let limit: CGFloat
+
+  func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+    guard let child = subviews.first else { return .zero }
+    let natural = child.sizeThatFits(.unspecified)
+    let width = min(limit, proposal.width ?? .infinity)
+    if natural.width <= width { return natural }
+    return child.sizeThatFits(ProposedViewSize(width: width, height: proposal.height))
+  }
+
+  func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+    subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: bounds.height))
   }
 }
 

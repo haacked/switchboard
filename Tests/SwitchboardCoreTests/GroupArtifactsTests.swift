@@ -45,6 +45,20 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
       + kept)
 }
 
+/// A group link that the user added.
+private func groupLink(
+  _ url: String = artifactShortURL, id: String = "l1", title: String? = nil, by author: LinkAuthor = .you, t: Int64
+) -> ExternalLink {
+  ExternalLink(id: id, title: title ?? url, url: url, by: author, t: t)
+}
+
+/// The row that `GroupArtifact(link:)` derives from a link that it must accept.
+private func linkRow(
+  _ url: String = artifactShortURL, id: String = "l1", title: String? = nil, by author: LinkAuthor = .you, t: Int64
+) throws -> GroupArtifact {
+  try #require(GroupArtifact(link: groupLink(url, id: id, title: title, by: author, t: t)))
+}
+
 /// The group list (`GroupArtifacts.list`): live members' and the chat's entries plus the kept rows, one row per
 /// artifact, newest `updated` first.
 @Suite struct GroupArtifactsTests {
@@ -196,7 +210,11 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
     var s: [SessionArtifact]
     var others: [ArtifactMember] = []
     var kept: [GroupArtifact] = []
+    /// The group's links. Each one that `GroupArtifact(link:)` accepts lists as a row.
+    var links: [ExternalLink] = []
     var testDescription: String { name }
+
+    var linkRows: [GroupArtifact] { links.compactMap(GroupArtifact.init(link:)) }
   }
 
   static let removals: [RemovalCase] = [
@@ -232,6 +250,21 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
       name: "a removal at the other member's update time",
       s: [artifact(published: 1000, updated: 1000, removed: 2000)],
       others: [ArtifactMember(id: "b", name: "bravo", artifacts: [artifact(published: 1500, updated: 2000)])]),
+    RemovalCase(
+      name: "a link to the same artifact, added after the publish", s: [artifact(published: 1000, updated: 2000)],
+      links: [groupLink(t: 5000)]),
+    RemovalCase(
+      name: "a link to the same artifact, added before the publish", s: [artifact(published: 1000, updated: 2000)],
+      links: [groupLink(t: 500)]),
+    RemovalCase(
+      name: "a link added after a delete", s: [artifact(published: 1000, updated: 2000, removed: 3000)],
+      links: [groupLink(t: 4000)]),
+    RemovalCase(
+      name: "a code link to the same artifact", s: [artifact(published: 1000, updated: 2000)],
+      links: [groupLink(artifactCodeURL, t: 1500)]),
+    RemovalCase(
+      name: "a link at the publish's update time", s: [artifact(published: 1000, updated: 2000)],
+      links: [groupLink(t: 2000)]),
   ]
 
   /// `forgetSession` turns the member's entries into kept rows with its id and name. The list must not change.
@@ -243,8 +276,8 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
     let live: [ArtifactMember] = others + [s]
     let keptRows: [GroupArtifact] = c.kept + kept(c.s, session: s.id, name: s.name)
 
-    let before = list(live, kept: c.kept)
-    let after = list(others, kept: keptRows)
+    let before = list(live, kept: c.kept + c.linkRows)
+    let after = list(others, kept: keptRows + c.linkRows)
 
     #expect(after == before)
   }
@@ -258,7 +291,7 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
     let last: [ArtifactMember] = others + [s]
     let first: [ArtifactMember] = [s] + others
 
-    #expect(list(last, kept: c.kept) == list(first, kept: c.kept))
+    #expect(list(last, kept: c.kept + c.linkRows) == list(first, kept: c.kept + c.linkRows))
   }
 
   /// The group's chat publishes plan artifacts. Its entries list like a member's.
@@ -268,6 +301,247 @@ private func list(_ live: [ArtifactMember], kept: [GroupArtifact] = []) -> [Grou
       id: "s1", name: "alpha", artifacts: [artifact(second, id: secondUUID, published: 2000, updated: 2000)])
 
     #expect(list([member, chat]).map(\.session) == ["s1", "c1"])
+  }
+
+  // MARK: A row from a group link
+
+  @Test func aLinkRowHasTheLinksFieldsAndNoSession() throws {
+    let r = try linkRow(title: "Flag evaluations plan", t: 7000)
+
+    #expect(r.url == artifactShortURL)
+    #expect(r.artifactId == nil)
+    #expect(r.title == "Flag evaluations plan")
+    #expect(r.published == 7000)
+    #expect(r.updated == 7000)
+    #expect(r.removed == nil)
+    #expect(r.session == nil)
+    #expect(r.sessionName == nil)
+    #expect(r.link == "l1")
+  }
+
+  @Test func aCodeLinkRowHasTheUUIDAsItsArtifactId() throws {
+    let r = try linkRow(artifactCodeURL, t: 7000)
+
+    #expect(r.artifactId == artifactUUID)
+  }
+
+  /// A link row's `updated` is when the link was added.
+  @Test func theCaptionSaysAddedOnALinkRowAndUpdatedOnASessionRow() throws {
+    let minute: Int64 = 60_000
+    let now: Int64 = 10 * minute
+
+    #expect(try linkRow(t: now - 5 * minute).caption(now: now) == "added 5m ago")
+    #expect(
+      row(published: 0, updated: now - 5 * minute, session: "s1", name: "alpha").caption(now: now) == "updated 5m ago")
+    #expect(
+      row(published: 0, updated: 0, removed: now - 5 * minute, session: "s1", name: "alpha").caption(now: now)
+        == "removed 5m ago")
+  }
+
+  // MARK: Merging a link with a session's rows
+
+  @Test func aLinkAloneListsTheLinksRow() throws {
+    let l = try linkRow(t: 7000)
+
+    #expect(GroupArtifacts.list([l]) == [l])
+  }
+
+  @Test func aLinkNewerThanTheLastPublishKeepsTheSessionsFields() throws {
+    let s = row(published: 1000, updated: 2000, session: "s1", name: "flags-cache")
+
+    let rows = GroupArtifacts.list([s, try linkRow(t: 5000)])
+
+    #expect(rows.count == 1)
+    let r = try #require(rows.first)
+    #expect(r.url == artifactShortURL)
+    #expect(r.artifactId == artifactUUID)
+    #expect(r.title == "Delta Rates")
+    #expect(r.session == "s1")
+    #expect(r.sessionName == "flags-cache")
+    #expect(r.published == 1000)
+    #expect(r.updated == 2000)
+    #expect(r.removed == nil)
+    #expect(r.link == "l1")
+  }
+
+  @Test func aLinkOlderThanTheFirstPublishKeepsTheSessionsPublished() throws {
+    let s = row(published: 1000, updated: 2000, session: "s1", name: "flags-cache")
+
+    let rows = GroupArtifacts.list([try linkRow(t: 500), s])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.published == 1000)
+    #expect(rows.first?.updated == 2000)
+    #expect(rows.first?.title == "Delta Rates")
+    #expect(rows.first?.link == "l1")
+  }
+
+  @Test func aLinkAndAKeptRowKeepTheKeptRowsFields() throws {
+    let k = row(title: "Kept", published: 1000, updated: 2000, session: "gone", name: "removed-one")
+
+    let rows = list([], kept: [k, try linkRow(t: 5000)])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.title == "Kept")
+    #expect(rows.first?.session == "gone")
+    #expect(rows.first?.sessionName == "removed-one")
+    #expect(rows.first?.link == "l1")
+  }
+
+  @Test func aLinkWithALiveAndAKeptRowTakesTheLatestSessionRow() throws {
+    let b = ArtifactMember(id: "b", name: "bravo", artifacts: [artifact(title: "Live", published: 3000, updated: 3000)])
+    let k = row(title: "Kept", published: 1000, updated: 2000, session: "gone", name: "removed-one")
+
+    let rows = list([b], kept: [k, try linkRow(t: 9000)])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.title == "Live")
+    #expect(rows.first?.session == "b")
+    #expect(rows.first?.published == 1000)
+    #expect(rows.first?.updated == 3000)
+    #expect(rows.first?.link == "l1")
+  }
+
+  @Test func aLinkAddedAfterADeleteLeavesTheRowRemoved() throws {
+    let s = row(published: 1000, updated: 2000, removed: 3000, session: "s1", name: "flags-cache")
+
+    let rows = GroupArtifacts.list([s, try linkRow(t: 4000)])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.removed == 3000)
+    #expect(rows.first?.updated == 2000)
+    #expect(rows.first?.link == "l1")
+  }
+
+  @Test func aRepublishAfterADeleteWithALinkPresentIsNotRemoved() throws {
+    let deleted = row(published: 1000, updated: 2000, removed: 3000, session: "gone", name: "removed-one")
+    let republished = row(published: 1500, updated: 5000, session: "s1", name: "flags-cache")
+
+    let rows = GroupArtifacts.list([deleted, try linkRow(t: 4000), republished])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.removed == nil)
+    #expect(rows.first?.updated == 5000)
+    #expect(rows.first?.session == "s1")
+  }
+
+  @Test func aSessionRowWithoutALinkHasNoLink() {
+    let rows = GroupArtifacts.list([row(published: 1000, updated: 2000, session: "s1", name: "flags-cache")])
+
+    #expect(rows.first?.link == nil)
+  }
+
+  @Test func twoLinksOfOneArtifactKeepTheEarliestLink() throws {
+    let later = try linkRow(id: "l1", title: "Later", t: 3000)
+    let earlier = try linkRow("\(artifactShortURL)#top", id: "l2", title: "Earlier", t: 2000)
+
+    let rows = GroupArtifacts.list([later, earlier])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.link == "l2")
+    #expect(rows.first?.title == "Earlier")
+    #expect(rows.first?.session == nil)
+  }
+
+  @Test func twoLinksOfOneArtifactAddedAtOnceKeepTheFirstLinkById() throws {
+    let b = try linkRow(id: "lb", title: "B", t: 2000)
+    let a = try linkRow("\(artifactShortURL)/", id: "la", title: "A", t: 2000)
+
+    let rows = GroupArtifacts.list([b, a])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.link == "la")
+    #expect(rows.first?.title == "A")
+  }
+
+  /// A `/code/artifact/<uuid>` link names the uuid that a publish of the short link records.
+  @Test func aCodeLinkJoinsAShortURLRowWithThatArtifactId() throws {
+    let s = row(artifactShortURL, id: artifactUUID, published: 1000, updated: 2000, session: "s1", name: "alpha")
+
+    let rows = GroupArtifacts.list([s, try linkRow(artifactCodeURL, t: 5000)])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.url == artifactShortURL)
+    #expect(rows.first?.session == "s1")
+    #expect(rows.first?.link == "l1")
+  }
+
+  /// sbd cannot map a short id to a uuid, so the two links of one page list apart without a session row.
+  @Test func aShortLinkAndACodeLinkWithoutASessionRowListTwoRows() throws {
+    let rows = GroupArtifacts.list([
+      try linkRow(artifactShortURL, id: "l1", t: 3000), try linkRow(artifactCodeURL, id: "l2", t: 2000),
+    ])
+
+    #expect(rows.count == 2)
+  }
+
+  @Test func aShortLinkAndACodeLinkJoinThroughASessionRowAndKeepTheEarliestLink() throws {
+    let s = row(artifactShortURL, id: artifactUUID, published: 1000, updated: 1000, session: "s1", name: "alpha")
+    let short = try linkRow(artifactShortURL, id: "l1", t: 3000)
+    let code = try linkRow(artifactCodeURL, id: "l2", t: 2000)
+
+    let rows = GroupArtifacts.list([short, s, code])
+
+    #expect(rows.count == 1)
+    #expect(rows.first?.session == "s1")
+    #expect(rows.first?.link == "l2")
+  }
+
+  /// The link and the code row share nothing directly. The short row matches the link by URL and the code row by
+  /// id, so all three are one artifact in every order.
+  @Test func aLinkAndASessionRowJoinedOnlyThroughAThirdRowListOneRowInEveryOrder() throws {
+    let rows = [
+      try linkRow(artifactShortURL, t: 5000),
+      row(
+        artifactShortURL, id: artifactUUID, title: "Short", published: 1000, updated: 1000, session: "a", name: "alpha"),
+      row(
+        artifactCodeURL, id: artifactUUID, title: "Code", published: 2000, updated: 3000, session: "b", name: "bravo"),
+    ]
+
+    let lists = permutations(rows).map(GroupArtifacts.list)
+
+    #expect(Set(lists.map { "\($0)" }).count == 1)
+    #expect(lists.first?.count == 1)
+    #expect(lists.first?.first?.session == "b")
+    #expect(lists.first?.first?.title == "Code")
+    #expect(lists.first?.first?.published == 1000)
+    #expect(lists.first?.first?.link == "l1")
+  }
+
+  /// Ties on `updated` and `t` make the tiebreak decide, and the list must not depend on the order of the rows.
+  @Test func aMixOfSessionKeptAndLinkRowsListsTheSameInEveryOrder() throws {
+    let rows = [
+      row(published: 1000, updated: 2000, session: "s1", name: "alpha"),
+      row(published: 900, updated: 2000, removed: 1500, session: "gone", name: "removed-one"),
+      try linkRow(artifactShortURL, id: "l1", t: 2000),
+      try linkRow(artifactCodeURL, id: "l2", t: 2000),
+      row(id: nil, title: "Other title", published: 1200, updated: 2000, session: "s3", name: "charlie"),
+    ]
+
+    let lists = permutations(rows).map(GroupArtifacts.list)
+
+    #expect(lists.count == 120)
+    #expect(Set(lists.map { "\($0)" }).count == 1)
+    #expect(lists.first?.count == 1)
+    #expect(lists.first?.first?.link == "l1")
+    #expect(lists.first?.first?.published == 900)
+    #expect(lists.first?.first?.removed == nil)
+    #expect(lists.first?.first?.session != nil)
+  }
+
+  @Test func linkOnlyRowsListTheSameInEveryOrder() throws {
+    let rows = [
+      try linkRow(artifactShortURL, id: "l3", t: 2000),
+      try linkRow("\(artifactShortURL)#a", id: "l1", t: 2000),
+      try linkRow("\(artifactShortURL)/", id: "l2", t: 2000),
+      try linkRow(second, id: "l0", t: 2000),
+    ]
+
+    let lists = permutations(rows).map(GroupArtifacts.list)
+
+    #expect(Set(lists.map { "\($0)" }).count == 1)
+    #expect(lists.first?.map(\.url) == [artifactShortURL, second])
+    #expect(lists.first?.map(\.link) == ["l1", "l0"])
   }
 
   // MARK: names(_:)

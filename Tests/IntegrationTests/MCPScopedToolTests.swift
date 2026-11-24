@@ -229,4 +229,69 @@ import Testing
     #expect(groups.first?["artifacts"]?.array?.compactMap { $0["url"]?.string } == [artifactPageURL])
     #expect(!result.text.contains(outsidePage))
   }
+
+  // MARK: Group artifact links
+
+  @Test func aScopedAddGroupArtifactDefaultsToTheScopesGroup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    let result = try mcp.call("add_group_artifact", ["url": .string("\(artifactPageURL)#top")])
+
+    #expect(!result.isError, "\(result.text)")
+    #expect(result.json?["id"]?.string == s.group.id)
+    let links = result.json?["links"]?.array ?? []
+    #expect(links.compactMap { $0["url"]?.string } == [artifactPageURL])
+    #expect(links.compactMap { $0["by"]?.string } == ["claude"])
+    #expect(result.json?["artifacts"]?.array?.compactMap { $0["url"]?.string } == [artifactPageURL])
+    #expect(try sbd.groupLinks(s.other.id).isEmpty)
+  }
+
+  @Test func aScopedAddGroupArtifactRefusesAnotherGroup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    for how in Naming.allCases {
+      let result = try mcp.call(
+        "add_group_artifact", ["group": .string(name(s.other.id, s.other.name, how)), "url": .string(artifactPageURL)])
+      #expect(result.isError, "\(how)")
+    }
+
+    #expect(try sbd.groupLinks(s.other.id).isEmpty)
+    #expect(try sbd.groupLinks(s.group.id).isEmpty)
+  }
+
+  @Test func aScopedRemoveGroupArtifactDefaultsToTheScopesGroup() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let id = try sbd.addGroupLink(group: s.group.id, url: artifactPageURL, by: .claude)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    let result = try mcp.call("remove_group_artifact", ["link": .string(id)])
+
+    #expect(!result.isError, "\(result.text)")
+    #expect(result.json?["id"]?.string == s.group.id)
+    let links = result.json?["links"]?.array ?? []
+    #expect(links.isEmpty)
+  }
+
+  /// Without `group`, the scope's group is the one asked, and it has no link with another group's id.
+  @Test func aScopedRemoveGroupArtifactRefusesAnotherGroupsLink() throws {
+    let sbd = try Instance()
+    let s = try scope(sbd)
+    let theirs = try sbd.addGroupLink(group: s.other.id, url: artifactPageURL, by: .claude)
+    let mcp = try MCPClient(sbd, group: s.group.id)
+
+    for how in Naming.allCases {
+      let result = try mcp.call(
+        "remove_group_artifact", ["group": .string(name(s.other.id, s.other.name, how)), "link": .string(theirs)])
+      #expect(result.isError, "\(how)")
+    }
+    let unnamed = try mcp.call("remove_group_artifact", ["link": .string(theirs)])
+
+    #expect(unnamed.isError)
+    #expect(try sbd.groupLinks(s.other.id).map(\.id) == [theirs])
+  }
 }

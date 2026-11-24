@@ -50,7 +50,13 @@ let usage = """
                                   runs it on this Mac. Without --host, it runs
                                   on its parent's host. A remote host takes
                                   no --followup or --account
-    account                       list the Claude accounts and the active one
+    account                       list the Claude and Codex accounts, each with
+                                  its agent, and the active one, which is a
+                                  Claude account. Sessions run only on Claude
+                                  accounts for now
+    account add <name> --agent claude|codex
+                                  make ~/.claude-<name> or ~/.codex-<name> and
+                                  print the command that signs it in
     account use <name|folder> [--move | --new-only]
                                   run new sessions under this account. --move
                                   moves the sessions whose claude is stopped
@@ -95,9 +101,9 @@ let usage = """
                                   conversation loads none. --all loads the full
                                   setup, which a claude.ai connector needs. A change
                                   restarts its claude, after the turn when one runs
-    manager model [<name>]        show or set the model of each Manager conversation,
-                                  sonnet by default. It applies from the next time a
-                                  conversation's claude starts, and not to the operator
+    manager model [<name>]        show or set the model of each Manager conversation
+                                  and group chat, sonnet by default. It applies
+                                  from the next time their claude starts
     manager skills [<conv>]       list the skills that the Manager conversations
                                   and the operator can load, or only those of
                                   the conversation's account, each labeled work
@@ -134,6 +140,15 @@ let usage = """
                                   message asks about, after reading the
                                   session's last reply in it. Only the operator
                                   runs it, in its own pane
+    operator model [<name>]       show or set the model of the operator and of its
+                                  judges, sonnet by default. The operator switches
+                                  when its claude next starts, and a judge call
+                                  from the next call
+    operator judge --kind reply-gate|ci-failure|pick-issues --input <file> [--model M]
+                                  run one judgment through the operator's judge
+                                  path, for comparing models. The file is JSON
+                                  with the arguments of the kind's prompt: see
+                                  bin/operator-eval. It acts on nothing
     operator reports [--all]      list the operator's reports, oldest first, and
                                   whether each is open. --all lifts the limit of
                                   \(Event.defaultLimit)
@@ -257,6 +272,13 @@ let usage = """
     note <session> --rm <id>      remove a note. It refuses an open to-do
     note --resolved [--limit N]   list the resolved to-dos, newest first
                                   (default 50). The record outlives the session
+    link add <session> <url> [--title T]
+                                  add an http or https link; the title defaults
+                                  to the URL. Inside Claude, only on its own
+                                  session ($SB_SESSION_ID)
+    link rm <session> <link-id>   remove a link you or Claude added, or hide one
+                                  that Switchboard found. Inside Claude, only a
+                                  link that Claude added
     rename <session> <name>
     issue <session> <ref>|--clear set the GitHub issue that the session's tile
                                   shows: 123, #123, owner/name#123, or an issue
@@ -370,6 +392,11 @@ let usage = """
     decide <session> --resend     send the submitted answers again, only when sbd
                                   restarted while sending them and can't tell whether
                                   the session got them
+    decide <session> --ask <n> <question> [--no-wait] [--timeout S]
+                                  ask the session about decision n and print its reply,
+                                  waiting up to S seconds (600 by default). The session
+                                  answers in a turn that keeps its Inbox item. --no-wait
+                                  prints the question's id. Refuses inside Claude Code
     reply <session>               the session's last reply, as Markdown
     context <session> [--steps N] Claude's last steps up to the session's Inbox item, with
                                   N steps before it (5 by default)
@@ -417,9 +444,14 @@ let usage = """
                                   most \(SessionGroup.descriptionLimit) characters
     group link add <group> <url> [--title T]
                                   add an http or https link, such as an RFC;
-                                  the title defaults to the URL. Only you add
-                                  links: inside Claude it is refused
+                                  the title defaults to the URL. A claude.ai
+                                  artifact link also lists under the group's
+                                  artifacts. Inside Claude, only a claude.ai
+                                  artifact link can be added, without --title:
+                                  its title is its URL
     group link rm <group> <link-id>
+                                  remove a link. Inside Claude, only a link
+                                  that Claude added can be removed
     group account <group> [<account> | --clear]
                                   show, set, or clear the Claude account that the
                                   group's sessions run under. A stopped session
@@ -528,6 +560,8 @@ let usage = """
                                   sheet offers, most recently used first
     repo add <path>               add the repository that holds the folder. A
                                   worktree adds its main checkout
+    auto-mode [on|off]            show or set whether new sessions start in
+                                  auto mode. Sessions that exist keep theirs
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -599,7 +633,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file",
+      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -720,7 +754,7 @@ func printSession(_ s: SessionSummary) {
     print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
   }
   print("  folder:  \(s.cwd)")
-  if let account = s.account { print("  account: \(ClaudeAccount(folder: account).name)") }
+  if let account = s.account { print("  account: \(Account.name(ofFolder: account))") }
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let note = s.branchSwitchNote { print("  warning: \(note)".printable) }
@@ -751,6 +785,7 @@ func printSession(_ s: SessionSummary) {
   }
   for p in s.plans ?? [] { printPlan(p, indent: "  ") }
   for a in (s.artifacts ?? []).newestFirst { print("  artifact: \(a.title)  \(a.url)  (\(a.caption()))".printable) }
+  for l in (s.links ?? []).reversed() { print(linkLine(l)) }
   print("  claude session: \(s.claudeSessionId)")
   if let r = s.lastReply { print("  last reply: \(oneLine(r, max: 200))".printable) }
   printPause(s)
@@ -1100,6 +1135,8 @@ case "wait":
   waitCommand(a)
 case "note":
   noteCommand(a)
+case "link":
+  linkCommand(a)
 case "schedule", "schedules":
   scheduleCommand(a)
 case "shell":
@@ -1221,6 +1258,8 @@ case "repo", "repos":
   repo(a)
 case "autocontinue":
   autoContinue(a)
+case "auto-mode":
+  autoMode(a)
 case "activity":
   activity(a)
 case "live":

@@ -244,11 +244,11 @@ extension JudgeFallbackTests {
     #expect(prompt.contains(WaitActionTests.target), Comment(rawValue: prompt))
   }
 
-  /// sbd reads `operator.judgeModel` from config.json on each call, so an edit after sbd started applies.
-  @Test func theJudgeRunsTheModelThatOperatorJudgeModelNamesWhenItRuns() throws {
+  /// sbd reads `operator.model` from config.json on each call, so an edit after sbd started applies.
+  @Test func theJudgeRunsTheModelThatOperatorModelNamesWhenItRuns() throws {
     let github = try FakeGitHub()
     let sbd = try instance(github)
-    try sbd.set("operator", to: ["mergeRepos": [.string(Self.charts)], "judgeModel": "opus"])
+    try sbd.set("operator", to: ["mergeRepos": [.string(Self.charts)], "model": "opus"])
     let s = try readyTarget(github, sbd)
 
     _ = try arm(sbd, s)

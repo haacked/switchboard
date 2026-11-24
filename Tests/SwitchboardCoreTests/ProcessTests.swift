@@ -81,6 +81,64 @@ import Testing
   }
 }
 
+/// `CommandResult.timedOut` tells a timeout apart from the status that a program gives when SIGTERM ends it.
+@Suite struct ProcessesTimeoutTests {
+  /// The shell waits on `sleep` in the background, so the trap runs as soon as SIGTERM arrives.
+  @Test(.timeLimit(.minutes(1))) func aProgramThatExitsOneOnSIGTERMIsReportedAsTimedOut() throws {
+    let r = try runCommand("/bin/bash", ["-c", "trap 'exit 1' TERM; sleep 30 & wait"], timeout: 0.3)
+
+    #expect(r.status == 1)
+    #expect(r.timedOut)
+  }
+
+  /// The background `sleep` ignores SIGTERM, so it keeps the pipes open after SIGTERM ends the shell.
+  @Test(.timeLimit(.minutes(1))) func aChildThatHoldsThePipesAfterTheTimeoutDoesNotHoldTheCaller() throws {
+    let start = Date()
+    let r = try runCommand(
+      "/bin/bash", ["-c", "trap 'exit 1' TERM; (trap '' TERM; exec sleep 20) & echo $!; wait"], timeout: 0.3)
+    let elapsed = Date().timeIntervalSince(start)
+    if let pid = pid_t(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) { kill(pid, SIGKILL) }
+
+    #expect(elapsed < 5)
+    #expect(r.timedOut)
+    #expect(r.status == 1)
+    #expect(pid_t(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) != nil, "\(r.stdout)")
+  }
+
+  /// The program exits at once, and its background child keeps the pipes open past the timeout.
+  @Test(.timeLimit(.minutes(1))) func aChildThatHoldsThePipesOfAProgramThatExitedInTimeDoesNotHoldTheCaller() throws {
+    let start = Date()
+    let r = try runCommand("/bin/sh", ["-c", "sleep 20 & echo $!"], timeout: 0.5)
+    let elapsed = Date().timeIntervalSince(start)
+    if let pid = pid_t(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)) { kill(pid, SIGKILL) }
+
+    #expect(elapsed < 5)
+    #expect(r.timedOut)
+    #expect(r.status == 0)
+  }
+
+  /// The background `yes` writes without end. Once `runCommand` gives up on the pipe, the reader closes it, and
+  /// `yes` dies of SIGPIPE instead of filling memory.
+  @Test(.timeLimit(.minutes(1))) func aChildThatKeepsWritingAfterTheCallReturnsDiesOfSIGPIPE() throws {
+    let r = try runCommand("/bin/sh", ["-c", "yes > /dev/stderr & echo $! >&1; exit 0"], timeout: 0.1)
+    let pid = try #require(pid_t(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)), "\(r.stdout)")
+    defer { kill(pid, SIGKILL) }
+
+    let deadline = Date().addingTimeInterval(10)
+    while kill(pid, 0) == 0, Date() < deadline { usleep(50_000) }
+
+    #expect(r.timedOut)
+    #expect(kill(pid, 0) != 0, "yes still runs")
+  }
+
+  @Test func aProgramThatFinishesInTimeIsNotTimedOut() throws {
+    let r = try runCommand("/bin/sh", ["-c", "exit 1"], timeout: 30)
+
+    #expect(r.status == 1)
+    #expect(!r.timedOut)
+  }
+}
+
 @Suite struct ShellQuoteTests {
   @Test(arguments: [
     ("", "''"), ("a b", "'a b'"), ("'", #"''\'''"#), ("it's", #"'it'\''s'"#), ("''", #"''\'''\'''"#),

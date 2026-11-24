@@ -946,6 +946,44 @@ extension HoverCardContentTests {
   }
 }
 
+extension HoverCardContentTests {
+  @Suite struct Links {
+    static func link(_ id: String) -> ExternalLink {
+      ExternalLink(id: id, title: "Link \(id)", url: "https://example.com/\(id)", by: .you, t: now - minute)
+    }
+
+    static func session(_ links: [ExternalLink]?, artifacts: [SessionArtifact]? = nil) -> SessionSummary {
+      var s = bare()
+      s.links = links
+      s.artifacts = artifacts
+      return s
+    }
+
+    @Test(arguments: [nil, []] as [[ExternalLink]?])
+    func aSessionWithoutLinksHasNoLinksLine(_ links: [ExternalLink]?) {
+      #expect(content(Self.session(links)).details == ["active 42s ago"])
+    }
+
+    @Test func oneLinkSaysOneLink() {
+      #expect(content(Self.session([Self.link("l1")])).details == ["active 42s ago", "1 link"])
+    }
+
+    @Test func twoLinksSayTwoLinks() {
+      #expect(content(Self.session([Self.link("l1"), Self.link("l2")])).details == ["active 42s ago", "2 links"])
+    }
+
+    @Test func theLinksLineComesAfterTheArtifactsLine() {
+      let s = Self.session([Self.link("l1"), Self.link("l2")], artifacts: [artifactFixture("a", title: "Delta Rates")])
+
+      #expect(content(s).details == ["active 42s ago", "Artifact: Delta Rates", "2 links"])
+    }
+
+    @Test func accessibilityTextIncludesTheLinksLine() {
+      #expect(content(Self.session([Self.link("l1")])).accessibilityText.contains("1 link"))
+    }
+  }
+}
+
 // MARK: - Link cards
 
 /// The card that a session link in text opens. It adds the state and the id, which no tile shows beside the text.

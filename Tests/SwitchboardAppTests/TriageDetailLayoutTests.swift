@@ -49,11 +49,6 @@ import Testing
     #expect(hosted.prLinks.map(\.label) == [PRLink.accessibilityLabel("#4812")])
   }
 
-  /// The width that `view` takes when nothing squeezes it.
-  func idealWidth<V: View>(_ view: V) -> CGFloat {
-    NSHostingView(rootView: view.fixedSize()).fittingSize.width
-  }
-
   @Test func aLongNameLeavesThePRNumberReadableInFull() throws {
     let hosted = host(session(name: Self.longName))
 

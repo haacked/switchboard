@@ -21,6 +21,12 @@ public enum RepoLabels {
     fullLabels(sessions, evenForOneRepo: evenForOneRepo, fullName: fullName).mapValues(capped)
   }
 
+  /// The session's repo as owner/name when known, otherwise its folder's repo name. nil for a session with no repo,
+  /// the Manager, and a group chat.
+  public static func label(for session: SessionSummary) -> String? {
+    labels([session], evenForOneRepo: true, fullName: true)[session.id]
+  }
+
   /// The labels that `labels` gives, before `capped` shortens them.
   static func fullLabels(_ sessions: [SessionSummary], evenForOneRepo: Bool, fullName: Bool = false) -> [String: String]
   {

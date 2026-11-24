@@ -20,14 +20,14 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   public var keptArtifacts: [GroupArtifact]?
   /// The links that the user added, in the order they were added. A merge puts the other group's links after this
   /// group's. Nil in a group that has none.
-  public var links: [GroupLink]?
+  public var links: [ExternalLink]?
 
   /// The longest description, in characters.
   public static let descriptionLimit = 280
 
   public init(
     id: String, name: String, description: String? = nil, descriptionBy: Author? = nil, notes: [Note] = [],
-    created: Int64, account: String? = nil, links: [GroupLink]? = nil
+    created: Int64, account: String? = nil, links: [ExternalLink]? = nil
   ) {
     self.id = id
     self.name = name
@@ -45,10 +45,12 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   }
 
   /// Adds `link` after the group's links, under a new id when the group already uses its id. It adds nothing and
-  /// returns false when the group already has a link to the same URL.
-  @discardableResult public mutating func addLink(_ link: GroupLink) -> Bool {
+  /// returns false when the group already has a link to the same URL, or to the same claude.ai artifact in another
+  /// form.
+  @discardableResult public mutating func addLink(_ link: ExternalLink) -> Bool {
     var all = links ?? []
-    guard !all.contains(where: { $0.url == link.url }) else { return false }
+    let target = link.target
+    guard !all.contains(where: { $0.target == target }) else { return false }
     var link = link
     if all.contains(where: { $0.id == link.id }) { link.id = shortId("l", taken: all.map(\.id)) }
     all.append(link)
@@ -101,14 +103,21 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   /// `other`'s becomes a note at `now` by its author, so no text is lost.
   /// This group keeps its account and never takes `other`'s. It adds
   /// `other`'s kept artifact rows after its own, and `other`'s links after
-  /// its own, leaving out each link whose URL this group already has.
+  /// its own, leaving out each link that `addLink` refuses. A link of yours
+  /// replaces Claude's link to the same artifact, so the merge keeps your title.
   public func absorbing(_ other: SessionGroup, now: Int64) -> SessionGroup {
     var kept = keeping(other.keptArtifacts ?? [])
     for var note in other.notes {
       if kept.notes.contains(where: { $0.id == note.id }) { note.id = shortId("n", taken: kept.notes.map(\.id)) }
       kept.notes.append(note)
     }
-    for link in other.links ?? [] { kept.addLink(link) }
+    for link in other.links ?? [] {
+      guard !kept.addLink(link), link.by == .you,
+        let claudes = kept.links?.first(where: { $0.by == .claude && $0.target == link.target })
+      else { continue }
+      _ = kept.removeLink(id: claudes.id)
+      kept.addLink(link)
+    }
     if kept.description == nil {
       if let theirs = other.description {
         kept.describe(theirs, by: other.descriptionBy)
@@ -126,50 +135,6 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
   }
 }
 
-/// A web page that the user attached to a group, such as an RFC or a design doc. Only the user adds one.
-public struct GroupLink: Codable, Equatable, Sendable, Identifiable {
-  public var id: String
-  public var title: String
-  public var url: String
-  public var by: Author
-  /// Milliseconds since the epoch.
-  public var t: Int64
-
-  /// The longest title, in characters.
-  public static let titleLimit = 200
-  /// The longest URL, in characters.
-  public static let urlLimit = 2000
-
-  public init(id: String, title: String, url: String, by: Author, t: Int64) {
-    self.id = id
-    self.title = title
-    self.url = url
-    self.by = by
-    self.t = t
-  }
-
-  /// The URL without surrounding whitespace. It refuses a URL that is not http or https, that has no host, or that
-  /// holds whitespace, because sessions will read it as one token.
-  public static func cleanURL(_ text: String?) throws -> String {
-    let url = (text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !url.isEmpty else { throw APIError("a link needs a URL") }
-    guard url.count <= urlLimit else {
-      throw APIError("a link URL has at most \(urlLimit) characters, and this one has \(url.count)")
-    }
-    guard !url.contains(where: \.isWhitespace), let parsed = URL(string: url),
-      let scheme = parsed.scheme?.lowercased(), ["http", "https"].contains(scheme), parsed.host?.isEmpty == false
-    else { throw APIError("a link needs an http or https URL with a host, not \(url)") }
-    return url
-  }
-
-  /// The title on one line. Without a title, it is the URL, cut to `titleLimit` characters with an ellipsis when it
-  /// is longer. It refuses a given title over `titleLimit`.
-  public static func cleanTitle(_ text: String?, url: String) throws -> String {
-    if let title = try SessionGroup.cleanLine(text, limit: titleLimit, noun: "a link title") { return title }
-    return url.count <= titleLimit ? url : String(url.prefix(titleLimit - 1)) + "…"
-  }
-}
-
 /// A group and the ids of its sessions, follow-ups included.
 public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var id: String
@@ -182,9 +147,10 @@ public struct GroupSummary: Codable, Equatable, Sendable, Identifiable {
   public var sessions: [String]
   /// The plans attached to the group, or nil when it has none.
   public var plans: [PlanSummary]?
-  /// The artifacts of the group's sessions, its chat, and its removed sessions, newest first, or nil when it has none.
+  /// The artifacts of the group's sessions, its chat, its removed sessions, and its links to claude.ai artifacts,
+  /// newest first, or nil when it has none.
   public var artifacts: [GroupArtifact]?
-  public var links: [GroupLink]?
+  public var links: [ExternalLink]?
 
   public init(_ group: SessionGroup, sessions: [String]) {
     id = group.id

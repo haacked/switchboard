@@ -9,7 +9,7 @@ let decisionsSummaryAnswer = Instance.root.appendingPathComponent(
 
 /// Three decisions as a session writes them with `sb summary set`: one with
 /// a recommended option, one without, and one multi-select decision.
-private let threeDecisionCard = """
+let threeDecisionCard = """
   {
     "title": "Answer three design choices",
     "summary": "It planned the storage.\\nIt needs three decisions.",
@@ -25,7 +25,7 @@ private let threeDecisionCard = """
   }
   """
 
-private let threeHeaders = ["Database", "Name", "Icons"]
+let threeHeaders = ["Database", "Name", "Icons"]
 
 /// A card with one yes-or-no decision for each header.
 private func decisionCard(_ headers: [String]) -> String {

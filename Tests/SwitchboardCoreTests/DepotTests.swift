@@ -380,6 +380,20 @@ private let heldByTrunk: [TrunkQueueState] = [.pending, .testing, .passed, .fail
         == Verdict(state: .needsYou, reason: "fix Depot CI on #42: Django Tests Pass on Depot and 2 more"))
   }
 
+  @Test func cancelledRunWithAFailedJobDoesNotAskForAFix() throws {
+    let pr = withDepot(
+      samplePR(checks: "PENDING"), sampleDepot(["unit tests"], status: "cancelled", errors: ["Cancelled by user"]))
+
+    #expect(pr.depotFailure == nil)
+    #expect(try verdict(pr) == readTheReply)
+  }
+
+  @Test func cancelledRunDoesNotResolveACIWait() {
+    let pr = withDepot(samplePR(checks: "PENDING"), sampleDepot(["a"], status: "cancelled"))
+
+    #expect(waitOn(.ci).resolution(of: pr) == nil)
+  }
+
   @Test func oneFailedDepotJobIsNamedAlone() throws {
     #expect(
       try verdict(withDepot(samplePR(checks: "PENDING"), sampleDepot(["unit tests"])))

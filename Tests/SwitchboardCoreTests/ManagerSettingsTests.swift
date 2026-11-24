@@ -60,23 +60,15 @@ import Testing
     let c = try JSONCoding.decode(Config.self, from: #"{"manager": {"model": "haiku"}}"#)
 
     #expect(c.manager.model == "haiku")
-    #expect(c.model == nil)
+    #expect(c.model == "opus")
   }
 
-  // MARK: Launch model
+  @Test(arguments: [#""""#, #"" ""#, #""-p""#, #""--model""#, #""a b""#, #"" haiku""#, "5", "true", "[]"])
+  func aBadManagerModelFallsBackToSonnet(_ value: String) throws {
+    let c = try JSONCoding.decode(Config.self, from: #"{"manager": {"model": \#(value)}, "branchPrefix": "haacked/"}"#)
 
-  @Test(arguments: [SessionKind.work, .manager, .chat, .operator])
-  func aStoredModelWinsForEveryKind(_ kind: SessionKind) {
-    #expect(Manager.launchModel(for: kind, stored: "opus", managerModel: "haiku") == "opus")
-  }
-
-  @Test func aManagerConversationWithoutAStoredModelRunsTheManagerModel() {
-    #expect(Manager.launchModel(for: .manager, stored: nil, managerModel: "haiku") == "haiku")
-  }
-
-  @Test(arguments: [SessionKind.work, .chat, .operator])
-  func anyOtherKindWithoutAStoredModelRunsClaudesDefault(_ kind: SessionKind) {
-    #expect(Manager.launchModel(for: kind, stored: nil, managerModel: "haiku") == nil)
+    #expect(c.manager.model == "sonnet")
+    #expect(c.branchPrefix == "haacked/")
   }
 
   // MARK: Model names

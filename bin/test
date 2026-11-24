@@ -153,13 +153,19 @@ if [ "${1:-}" = --claude ]; then
   fi
 fi
 
-# Builds the tests and sets `run` to the swift test arguments that filter them
-# to the selection. It never selects all of a ci-only target
-# (bin/lib/test-selection.sh), which CI runs on every push. Exits when no test
-# can read a changed file.
+# Builds the bundles of the tests it selects and sets `run` to the swift test
+# arguments that filter them to the selection. It never selects all of a
+# ci-only target (bin/lib/test-selection.sh), which CI runs on every push. Exits
+# when no test can read a changed file.
+# A bundle that it does not build keeps its last build, which can predate the
+# change, so every --filter must name a target whose bundle it built. The
+# selection names every test target that depends on a changed target.
+# test_filters can add smoke suites of a target that the selection did not
+# name, so it then builds the bundles of those targets too. When a test target
+# has no bundle of its own, it builds every bundle (test_bundles_exist).
 targeted() {
   source bin/lib/test-selection.sh
-  local base changed json selection filter target
+  local base changed json selection filters filter target built missing
   if ! json=$(swift package dump-package) || ! jq -e .targets <<<"$json" >/dev/null 2>&1; then
     for target in $ci_only_targets; do
       echo "bin/test: could not read the package's targets, so every test outside $target runs. CI runs $target on every push." >&2
@@ -178,12 +184,22 @@ targeted() {
     echo "bin/test: no test reads the files changed against origin/main. bin/test --all runs every test." >&2
     exit 0
   fi
-  build_tests
+  if test_bundles_exist $(jq -r '.targets[] | select(.type == "test") | .name' <<<"$json"); then
+    built=$(selection_targets <<<"$selection")
+    build_test_bundles $built
+    filters=$(test_filters <<<"$selection")
+    missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
+    if [ -n "$missing" ]; then build_test_bundles $missing; fi
+  else
+    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
+    build_tests
+    filters=$(test_filters <<<"$selection")
+  fi
   run=(--skip-build)
   while IFS= read -r filter; do
     echo "bin/test: runs the tests that match $filter" >&2
     run+=(--filter "$filter")
-  done < <(test_filters <<<"$selection")
+  done <<<"$filters"
   echo "bin/test: CI runs every other test on every push, so a local run does not need them" >&2
 }
 

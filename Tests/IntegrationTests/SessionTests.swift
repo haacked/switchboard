@@ -12,7 +12,7 @@ import Testing
     #expect(done.reason == "read its last reply and decide what's next")
     #expect(
       sbd.stubArgs().first
-        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello there")
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- hello there")
     try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
     #expect(try sbd.sb("screen", s.id).contains("⏺ Done: hello there"))
   }
@@ -178,7 +178,8 @@ import Testing
     #expect(try sbd.sb("send", s.id, "- fix A") == "resumed\n")
     try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: - fix A" }
     #expect(
-      sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- - fix A")
+      sbd.stubArgs().last
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- - fix A")
   }
 
   @Test func startsAConversationThatClaudeLeftBeforeItsFirstPromptWithItsId() throws {
@@ -191,7 +192,8 @@ import Testing
     #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
     try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
     #expect(
-      sbd.stubArgs().last == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- begin")
+      sbd.stubArgs().last
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- begin")
   }
 
   @Test func restartsClaudeWithoutTheVariablesThatItsTmuxSessionKeptFromAnEarlierStart() throws {
@@ -354,7 +356,7 @@ import Testing
     try sbd.waitFor(s.id, "claude") { $0.live }
     #expect(
       sbd.stubArgs() == [
-        "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- first\nsecond"
+        "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- first\nsecond"
       ])
   }
 
@@ -446,7 +448,8 @@ import Testing
     try expectMultilineAsOnePrompt(sbd, s, after: "hello")
     #expect(
       sbd.stubArgs().last
-        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- \(Self.multiline)")
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- \(Self.multiline)"
+    )
   }
 
   @Test func keepsASessionRunningWhileATerminalIsAttached() throws {

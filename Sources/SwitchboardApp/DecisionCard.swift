@@ -155,9 +155,7 @@ struct DecisionCard: View {
       // A rule title can reach 100 characters, so it wraps.
       InlineText(plain: session.inboxTitle).font(.title3.bold()).textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
-      Text(item.kind.rawValue).font(.caption.bold()).padding(.horizontal, 6).padding(.vertical, 2)
-        .background(Capsule().fill(session.state.color.opacity(0.18)))
-        .foregroundStyle(session.state.color)
+      Text(item.kind.rawValue).pill(session.state.color, size: .regular)
         .fixedSize()
         .accessibilityLabel("Kind: \(item.kind.rawValue)")
       NotesButton(session: session).fixedSize()

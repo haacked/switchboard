@@ -17,8 +17,10 @@ private func row(
     session: session, sessionName: sessionName)
 }
 
-private func group(_ artifacts: [GroupArtifact]?, plans: [PlanSource] = []) -> GroupSummary {
-  var g = GroupSummary(SessionGroup(id: "g", name: "G", created: 0), sessions: ["s1"])
+private func group(
+  _ artifacts: [GroupArtifact]?, plans: [PlanSource] = [], links: [ExternalLink]? = nil
+) -> GroupSummary {
+  var g = GroupSummary(SessionGroup(id: "g", name: "G", created: 0, links: links), sessions: ["s1"])
   g.artifacts = artifacts
   if !plans.isEmpty {
     g.plans = plans.enumerated().map { i, source in
@@ -29,9 +31,20 @@ private func group(_ artifacts: [GroupArtifact]?, plans: [PlanSource] = []) -> G
 }
 
 private func rows(
-  _ artifacts: [GroupArtifact]?, plans: [PlanSource] = [], liveNames: [String: String] = ["s1": "fix-cache"]
+  _ artifacts: [GroupArtifact]?, plans: [PlanSource] = [], links: [ExternalLink]? = nil,
+  liveNames: [String: String] = ["s1": "fix-cache"]
 ) -> [GroupArtifactRows.Row] {
-  GroupArtifactRows(group: group(artifacts, plans: plans), liveNames: liveNames, now: now).rows
+  GroupArtifactRows(group: group(artifacts, plans: plans, links: links), liveNames: liveNames, now: now).rows
+}
+
+/// A group link to an artifact, added five minutes before `now`.
+private func groupLink(url: String = shortLink, by author: LinkAuthor = .you) -> ExternalLink {
+  ExternalLink(id: "l1", title: "Flag evaluations plan", url: url, by: author, t: now - 5 * minute)
+}
+
+/// The row of the group link.
+private func linkRow(_ link: ExternalLink = groupLink()) throws -> GroupArtifact {
+  try #require(GroupArtifact(link: link))
 }
 
 @Suite struct GroupArtifactRowsTests {
@@ -132,5 +145,48 @@ private func rows(
     let artifacts = [row(removed: now - minute)]
 
     #expect(GroupArtifactRows(group: group(artifacts), liveNames: [:], now: now).linkTitle == "Artifacts")
+  }
+
+  // MARK: A row from a group link
+
+  @Test(arguments: [(LinkAuthor.you, "added by you"), (.claude, "added by Claude")])
+  func aLinkOnlyRowIsLabeledWithWhoAddedTheLink(_ author: LinkAuthor, _ label: String) throws {
+    let link = groupLink(by: author)
+
+    #expect(rows([try linkRow(link)], links: [link]).map(\.sessionLabel) == [label])
+  }
+
+  @Test func aLinkOnlyRowsCaptionSaysWhenTheLinkWasAdded() throws {
+    #expect(rows([try linkRow()], links: [groupLink()]).map(\.caption) == ["added 5m ago"])
+  }
+
+  @Test func aLinkOnlyRowOffersUseAsPlan() throws {
+    #expect(rows([try linkRow()], links: [groupLink()]).map(\.action) == [.useAsPlan])
+  }
+
+  @Test func aLinkOnlyRowThatAPlanNamesSaysPlan() throws {
+    let plan = PlanSource(kind: .artifact, url: shortLink)
+
+    #expect(rows([try linkRow()], plans: [plan], links: [groupLink()]).map(\.action) == [.plan])
+  }
+
+  /// A session row that a link also names keeps the session's label and caption.
+  @Test func aSessionRowWithALinkIsLabeledWithTheSession() throws {
+    var r = row(session: "s1", sessionName: "fix-cache")
+    r.link = "l1"
+
+    let labeled = try #require(rows([r], links: [groupLink(by: .claude)]).first)
+
+    #expect(labeled.sessionLabel == "by fix-cache")
+    #expect(labeled.caption == "updated 5m ago")
+  }
+
+  @Test func linkTitleCountsLinkRows() throws {
+    let artifacts = [
+      row(url: "https://claude.ai/artifact/a", artifactId: nil),
+      try linkRow(groupLink(url: "https://claude.ai/artifact/b")),
+    ]
+
+    #expect(GroupArtifactRows(group: group(artifacts), liveNames: [:], now: now).linkTitle == "Artifacts 2")
   }
 }

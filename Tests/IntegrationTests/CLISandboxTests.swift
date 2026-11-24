@@ -189,6 +189,26 @@ private func sandboxLog() -> String {
     }
   }
 
+  /// Every session is told to run `sb summary help`, which reads a prompt file. Without the prompts folder in
+  /// the profile and the environment, the sandboxed `sb` can't find its prompts and exits.
+  @Test func summaryHelpRunsUnderTheProfileOnlyWithThePromptsFolder() throws {
+    try withSandbox { b in
+      let prompts = Prompts.folder(environment: [:]).path
+      let profile = try HostCLI.profile(sb: sbBinary, socket: b.mini.path, promptsFolder: prompts)
+      let env = HostCLI.environment(
+        hostHome: b.hostHome, host: "mini", cwd: "/home/u/worktrees/x", session: nil, claudecode: nil,
+        promptsFolder: prompts)
+
+      let granted = try runCommand(
+        "/usr/bin/sandbox-exec", ["-p", profile, sbBinary, "summary", "help"], env: env, input: Data(), timeout: 30,
+        cwd: b.hostHome)
+      let denied = try b.sandboxed(["summary", "help"], env: b.environment())
+
+      #expect(granted.status == 0 && granted.stdout.contains("Inbox card"), "\(text(granted))")
+      #expect(denied.status != 0, "\(text(denied))")
+    }
+  }
+
   // MARK: Reads of this Mac's files
 
   @Test func sendWithAnImageReadsTheMacFileOnlyWithoutTheSandbox() throws {

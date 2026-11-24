@@ -32,6 +32,18 @@ private func followup(_ repository: String?) -> Followup {
 
 @Suite struct RepoLabelsTests {
 
+  @Test func aSingleSessionLabelUsesOwnerNameWhenKnown() {
+    #expect(RepoLabels.label(for: session("a", repo: "/dev/acme/app", repository: "acme/app")) == "acme/app")
+  }
+
+  @Test func aSingleSessionLabelFallsBackToTheFolderName() {
+    #expect(RepoLabels.label(for: session("a", repo: "/dev/acme/app")) == "app")
+  }
+
+  @Test func aManagerSessionHasNoSingleSessionLabel() {
+    #expect(RepoLabels.label(for: session("m", repo: "/dev/acme/app", manager: true)) == nil)
+  }
+
   struct SourceCase: Sendable, CustomTestStringConvertible {
     var name: String
     var repo: String?
