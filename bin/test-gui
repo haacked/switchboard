@@ -44,6 +44,9 @@
 # The settings check sends ⌘, through the app's ShellSelfTest commands and checks that it runs Settings… and
 # shows the Settings window at General. It then opens Settings at Issues the way the Issues view's gear button
 # does and checks that the window shows the Issues tab.
+# The shortcuts check walks the menu bar and checks that every key it finds is the key of the AppShortcut entry
+# that names the item. It then posts ? to the Inbox, checks that the overlay opens, posts ? to the overlay's sheet,
+# and checks that it closes. Help > Keyboard Shortcuts opens and closes it the same way.
 # The boardselect check starts on the Board and drives its cards through the app's ShellSelfTest commands. It
 # checks that a click selects a card and stays on the Board, that ⌘-click adds a card, that ⇧-click adds the
 # cards between, that a click on empty space clears the selection, that a drag from empty space selects the
@@ -60,7 +63,7 @@
 # session's side panel lists both links inside the panel, that Remove deletes one, and that the group's Links
 # popover on the Board lists the group link and the session link but not the artifact link.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# settings, boardselect, boarddrag, wake, links). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# settings, shortcuts, boardselect, boarddrag, wake, links). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -75,9 +78,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | boardselect | boarddrag | wake | links) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | shortcuts | boardselect | boarddrag | wake | links) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, boardselect, boarddrag, wake, and links." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, shortcuts, boardselect, boarddrag, wake, and links." >&2
     exit 2
     ;;
   esac
@@ -883,6 +886,40 @@ check_settings() {
 }
 
 if wants settings; then check_settings; fi
+
+check_shortcuts() {
+  check=shortcuts
+  local shots="$home/shots/shortcuts" result
+  mkdir "$shots"
+  echo "Checking the keyboard shortcuts overlay…"
+  new_session shortcuts-one
+  overlay_is() { [ "$(app overlay)" = "$1" ]; }
+  overlay_shows() { [[ "$(app overlay)" == "shown navigation,sessions"* ]]; }
+  SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 overlay_is hidden || fail "the app did not answer the overlay command: $(app overlay)"
+
+  result=$(app menu-shortcuts)
+  [ "$result" = none ] || fail "the menus and AppShortcut disagree: $result"
+
+  # The Inbox list has focus and takes no typed text, so ? opens the overlay. A ? that the overlay's sheet gets closes it.
+  app question >/dev/null
+  wait_for 10 overlay_shows || fail "? did not open the overlay: $(app overlay)"
+  app question sheet >/dev/null
+  wait_for 10 overlay_is hidden || fail "? in the overlay did not close it: $(app overlay)"
+
+  result=$(app menu Help Keyboard Shortcuts)
+  [ "$result" = ran ] || fail "Help > Keyboard Shortcuts did not run: $result"
+  wait_for 10 overlay_shows || fail "Help > Keyboard Shortcuts did not open the overlay: $(app overlay)"
+  result=$(app menu Help Keyboard Shortcuts)
+  [ "$result" = ran ] || fail "Help > Keyboard Shortcuts did not run while the overlay showed: $result"
+  wait_for 10 overlay_is hidden || fail "Help > Keyboard Shortcuts did not close the overlay: $(app overlay)"
+  end_app
+  save_shots
+  echo "ok: shortcuts (every menu key is in AppShortcut, ? opens and closes the overlay, so does Help > Keyboard Shortcuts)"
+}
+
+if wants shortcuts; then check_shortcuts; fi
 
 check_boardselect() {
   check=boardselect

@@ -20,13 +20,13 @@ private struct NavButton: View {
     switch direction {
     case .back:
       HistoryButton(
-        "Back", "arrow.left", help: "Back (\(AppShortcut.back.glyphs))", id: "nav-back", enabled: model.canGoBack
+        "Back", "arrow.left", help: AppShortcut.back.help("Back"), id: "nav-back", enabled: model.canGoBack
       ) {
         model.goBack()
       }
     case .forward:
       HistoryButton(
-        "Forward", "arrow.right", help: "Forward (\(AppShortcut.forward.glyphs))", id: "nav-forward",
+        "Forward", "arrow.right", help: AppShortcut.forward.help("Forward"), id: "nav-forward",
         enabled: model.canGoForward
       ) {
         model.goForward()
@@ -41,7 +41,7 @@ private struct RecentPlacesButton: View {
 
   var body: some View {
     HistoryButton(
-      "Recent Places", "clock", help: "Recent places (\(AppShortcut.showRecentPlaces.glyphs))", id: "nav-history",
+      "Recent Places", "clock", help: AppShortcut.showRecentPlaces.help("Recent places"), id: "nav-history",
       enabled: model.hasRecentPlaces
     ) {
       model.showingRecentPlaces.toggle()

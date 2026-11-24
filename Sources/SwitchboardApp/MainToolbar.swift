@@ -89,7 +89,7 @@ private struct ImportButton: View {
     } label: {
       Label("Import Sessions", systemImage: "square.and.arrow.down")
     }
-    .help("Import Claude sessions that run outside Switchboard (\(AppShortcut.importSessions.glyphs))")
+    .help(AppShortcut.importSessions.help("Import Claude sessions that run outside Switchboard"))
   }
 }
 
@@ -102,6 +102,6 @@ private struct NewSessionButton: View {
     } label: {
       Label("New Session", systemImage: "plus")
     }
-    .help("Start a session (\(AppShortcut.newSession.glyphs))")
+    .help(AppShortcut.newSession.help("Start a session"))
   }
 }

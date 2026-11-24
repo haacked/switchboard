@@ -38,7 +38,12 @@ import SwiftUI
 /// [<container>]` scrolls each click anchor whose name starts with the prefix into view, in every window, and
 /// reports `none` or the sorted names joined by commas, each followed by `:in` when the anchor lies inside its
 /// window's content and inside the container anchor's frame, else `:out`. `click-anchor <name>` clicks the view
-/// with that click anchor in the main window, as `click-delete-selected` does.
+/// with that click anchor in the main window, as `click-delete-selected` does. `menu-shortcuts` checks every menu
+/// item that has a key against `AppShortcut` and reports `none`, or each mismatch joined by "; ": `unlisted <title>
+/// <keys>` for an item that no entry names, `wrong <title> <keys> want <keys>`, or `missing <entry>` for a menu
+/// entry that no item carries. `question [sheet]` posts a ? press to the main window, or to its sheet, through the
+/// app's event queue, so the press passes through the app's key monitors as a typed ? does. `overlay` reports
+/// `hidden`, or `shown` and the overlay's areas joined by commas.
 @MainActor
 enum ShellSelfTest {
   /// The shortcuts that `nav-keys` sends, in order. Search Sessions is last, because it opens a sheet. New
@@ -123,6 +128,18 @@ enum ShellSelfTest {
     case "nav-keys":
       guard let window else { return "no window" }
       return navKeys.map { menuItem(running: $0.binding, in: window) }.joined(separator: "; ")
+    case "menu-shortcuts":
+      let found = menuShortcutMismatches()
+      return found.isEmpty ? "none" : found.joined(separator: "; ")
+    case "question":
+      let target = rest == "sheet" ? window?.attachedSheet : window
+      guard let target else { return "no window" }
+      guard let event = keyDown("?", ignoringModifiers: "/", in: target) else { return "no event" }
+      NSApp.postEvent(event, atStart: false)
+      return "posted"
+    case "overlay":
+      guard let request = model.shortcutsOverlay else { return "hidden" }
+      return "shown " + request.areas.map { "\($0)" }.joined(separator: ",")
     case "settings-key":
       guard let window else { return "no window" }
       return menuItem(running: KeyboardShortcut(","), in: window)
@@ -205,6 +222,47 @@ enum ShellSelfTest {
     default:
       return "unknown command"
     }
+  }
+
+  /// The actions of the items that macOS adds to the Edit menu. Their keys use the Globe key, which a
+  /// `KeyboardShortcut` can't name.
+  private static let systemActions: Set<Selector> = [
+    Selector(("startDictation:")), #selector(NSApplication.orderFrontCharacterPalette(_:)),
+  ]
+
+  private static let modifierPairs: [(NSEvent.ModifierFlags, EventModifiers)] = [
+    (.command, .command), (.option, .option), (.shift, .shift), (.control, .control),
+  ]
+
+  private static func menuShortcutMismatches() -> [String] {
+    let entries = AppShortcut.allCases.filter { $0.kind == .menu || $0.kind == .menuAlternate }
+    var found: [String] = []
+    var carried: Set<AppShortcut> = []
+    let menus = (NSApp.mainMenu?.items ?? []).compactMap { $0.submenu.map { refreshedMenu($0.title) ?? $0 } }
+    for item in menus.flatMap(\.items) {
+      guard let key = item.keyEquivalent.first, !(item.action.map(systemActions.contains) ?? false) else { continue }
+      let mask = item.keyEquivalentModifierMask
+      let press = AppShortcut.Press(key, EventModifiers(Self.modifierPairs.filter { mask.contains($0.0) }.map(\.1)))
+      let keys = AppShortcut.glyphs(KeyboardShortcut(KeyEquivalent(press.key), modifiers: press.modifiers))
+      guard let entry = entry(titled: item.title, in: entries) else {
+        if !AppShortcut.systemPresses.contains(press) { found.append("unlisted \(item.title) \(keys)") }
+        continue
+      }
+      carried.insert(entry)
+      if press != AppShortcut.Press(entry.keys[0]) {
+        found.append("wrong \(item.title) \(keys) want \(AppShortcut.glyphs(entry.keys[0]))")
+      }
+    }
+    return found + entries.filter { !carried.contains($0) }.map { "missing \($0)" }
+  }
+
+  /// The entry that names `title`: an exact title first, then the longest title that ends in "…" and starts the
+  /// item's title, so "New Session in Work…" finds the group item and "New Session…" finds New Session.
+  private static func entry(titled title: String, in entries: [AppShortcut]) -> AppShortcut? {
+    if let exact = entries.first(where: { $0.menuTitles.contains(title) }) { return exact }
+    return entries.flatMap { entry in entry.menuTitles.map { (entry, $0) } }
+      .filter { $0.1.hasSuffix("…") && title.hasPrefix(String($0.1.dropLast())) }
+      .max { $0.1.count < $1.1.count }?.0
   }
 
   /// The menu bar's menu with `title`. SwiftUI sets the items' titles when the menu opens. This function asks for
@@ -409,19 +467,23 @@ enum ShellSelfTest {
     (view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
   }
 
+  /// A key press of `char` in `window`, with ⇧ added when a US keyboard types `char` with ⇧.
+  private static func keyDown(
+    _ char: String, ignoringModifiers: String? = nil, flags: NSEvent.ModifierFlags = [], in window: NSWindow
+  ) -> NSEvent? {
+    let (code, shift) = TerminalSelfTest.keystroke(for: char)
+    return NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: shift ? flags.union(.shift) : flags,
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+      characters: char, charactersIgnoringModifiers: ignoringModifiers ?? char, isARepeat: false, keyCode: code)
+  }
+
   /// Reports the menu item that `shortcut` runs. When none runs, it reports the item that owns the key and
   /// whether that item is enabled. The event has ⇧ when the character is a shifted one, such as "}", because
   /// a keyboard sends ⇧⌘] that way.
   private static func menuItem(running shortcut: KeyboardShortcut, in window: NSWindow) -> String {
     let char = String(shortcut.key.character)
-    let (code, shift) = TerminalSelfTest.keystroke(for: char)
-    let flags: NSEvent.ModifierFlags = shift ? [.command, .shift] : .command
-    guard
-      let event = NSEvent.keyEvent(
-        with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: window.windowNumber, context: nil, characters: char, charactersIgnoringModifiers: char,
-        isARepeat: false, keyCode: code)
-    else { return "\(char) no event" }
+    guard let event = keyDown(char, flags: .command, in: window) else { return "\(char) no event" }
     var ran: String?
     let observer = NotificationCenter.default.addObserver(
       forName: NSMenu.didSendActionNotification, object: nil, queue: nil

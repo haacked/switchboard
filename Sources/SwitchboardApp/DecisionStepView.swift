@@ -478,7 +478,7 @@ struct DecisionStepBar: View {
           }
           .primaryShortcut(true)
           .help(
-            "\(next == .review ? "Review every answer" : "Next decision") (] or \(AppShortcut.primaryAction.glyphs))"
+            "\(next == .review ? "Review every answer" : "Next decision") (\(AppShortcut.glyphs(AppShortcut.decisionNext.keys[0])) or \(AppShortcut.primaryAction.glyphs))"
           )
           .accessibilityLabel(next == .review ? "Review" : "Next")
         }

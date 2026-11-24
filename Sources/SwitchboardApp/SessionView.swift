@@ -95,7 +95,8 @@ struct SessionView: View {
             // Open Shell comes first, so it keeps the place that `ShellSelfTest.labelPoint` clicks.
             Button("Message") { model.revealMessageField(session.id) }
               .help(
-                "Show a field that sends Claude a message, with images dropped on it or pasted into it (\(AppShortcut.messageClaude.glyphs))"
+                AppShortcut.messageClaude.help(
+                  "Show a field that sends Claude a message, with images dropped on it or pasted into it")
               )
           }
           TerminalPane(

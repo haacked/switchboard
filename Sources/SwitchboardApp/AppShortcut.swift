@@ -279,6 +279,9 @@ enum AppShortcut: CaseIterable, Identifiable {
   /// The keys as the overlay and help tags show them, such as "⇧⌘]" or "⌘/ or ?".
   var glyphs: String { label ?? keys.map(Self.glyphs).joined(separator: " or ") }
 
+  /// A help tag that ends with the shortcut, such as "Back (⌘[)".
+  func help(_ text: String) -> String { "\(text) (\(glyphs))" }
+
   private static func command(_ key: Character, _ more: EventModifiers = []) -> KeyboardShortcut {
     KeyboardShortcut(KeyEquivalent(key), modifiers: more.union(.command))
   }
@@ -289,13 +292,16 @@ enum AppShortcut: CaseIterable, Identifiable {
     var modifiers: EventModifiers
 
     init(_ key: Character, _ modifiers: EventModifiers = .command) {
-      let shifted: [Character: Character] = ["}": "]", "{": "["]
-      if let base = shifted[key] {
-        self.key = base
-        self.modifiers = Self.relevant(modifiers).union(.shift)
-      } else {
+      self.modifiers = NavKey.modifiers(modifiers)
+      switch key {
+      case "}":
+        self.key = "]"
+        self.modifiers.insert(.shift)
+      case "{":
+        self.key = "["
+        self.modifiers.insert(.shift)
+      default:
         self.key = Character(key.lowercased())
-        self.modifiers = Self.relevant(modifiers)
       }
     }
 
@@ -306,11 +312,17 @@ enum AppShortcut: CaseIterable, Identifiable {
       hasher.combine(key)
       hasher.combine(modifiers.rawValue)
     }
-
-    private static func relevant(_ modifiers: EventModifiers) -> EventModifiers {
-      modifiers.intersection([.control, .option, .shift, .command])
-    }
   }
+
+  /// The keys that AppKit and SwiftUI put in every Mac app's menus, such as Quit, Close, and the Edit menu, and
+  /// ⌘P, which SwiftUI may add to the File menu. No entry may take one.
+  static let systemPresses: Set<Press> = [
+    Press("q"), Press("h"), Press("h", [.command, .option]), Press(","), Press("w"), Press("w", [.command, .option]),
+    Press("m"), Press("m", [.command, .option]), Press("f", [.command, .control]), Press("z"),
+    Press("z", [.command, .shift]), Press("x"), Press("c"), Press("v"), Press("v", [.command, .option, .shift]),
+    Press("a"), Press("p"), Press("e"), Press("e", [.command, .control]), Press(" ", [.command, .control]),
+    Press("/", [.command, .shift]),
+  ]
 
   static func glyphs(_ shortcut: KeyboardShortcut) -> String {
     let press = Press(shortcut)

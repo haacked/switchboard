@@ -23,6 +23,7 @@ struct SwitchboardApp: App {
         .onAppear {
           model.start()
           NavMouse.install(model)
+          ShortcutsKey.install(model)
           Snapshot.start(model)
         }
         .frame(minWidth: ContentView.windowMinWidth, minHeight: 560)
@@ -102,6 +103,11 @@ struct SwitchboardApp: App {
             .disabled(!model.canFocusTerminal)
         }
         .disabled(model.presentingSheet)
+      }
+      CommandGroup(replacing: .help) {
+        Button("Keyboard Shortcuts", action: model.toggleShortcuts)
+          .shortcut(.keyboardShortcuts)
+          .disabled(model.presentingSheet && model.shortcutsOverlay == nil)
       }
       CommandMenu("Session") {
         let acknowledgeTarget = model.acknowledgeTarget

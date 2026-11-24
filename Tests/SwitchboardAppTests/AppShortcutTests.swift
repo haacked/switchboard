@@ -372,17 +372,6 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
 // MARK: - Collisions
 
 @Suite struct AppShortcutCollisions {
-  /// The standard menu items every Mac app has. ⌘P is the macOS Print key, which SwiftUI may add to the default
-  /// File menu. ⌘E is Use Selection for Find.
-  static let standardKeys: [KeyboardShortcut] = [
-    KeyboardShortcut("q"), KeyboardShortcut("w"), KeyboardShortcut("h"),
-    KeyboardShortcut("h", modifiers: [.command, .option]), KeyboardShortcut("m"),
-    KeyboardShortcut("m", modifiers: [.command, .option]), KeyboardShortcut(","), KeyboardShortcut("c"),
-    KeyboardShortcut("v"), KeyboardShortcut("x"), KeyboardShortcut("a"), KeyboardShortcut("z"),
-    KeyboardShortcut("z", modifiers: [.command, .shift]), KeyboardShortcut("f", modifiers: [.command, .control]),
-    KeyboardShortcut("p"), KeyboardShortcut("e"),
-  ]
-
   /// The pairs of `entries` whose first keys are one key press.
   func clashes(_ entries: [AppShortcut]) -> [String] {
     var seen: [AppShortcut.Press: AppShortcut] = [:]
@@ -408,9 +397,7 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
 
   @Test(arguments: boundEntries)
   func noBoundEntryTakesAStandardMacKey(_ entry: AppShortcut) {
-    let standard = Self.standardKeys.map { AppShortcut.Press($0) }
-
-    #expect(!standard.contains(AppShortcut.Press(entry.keys[0])))
+    #expect(!AppShortcut.systemPresses.contains(AppShortcut.Press(entry.keys[0])))
   }
 
   /// ⌘T is Move Focus to Terminal, so New Conversation takes ⌥⌘N, and ⌘K is Search Sessions, so Ask takes ⇧⌘K.

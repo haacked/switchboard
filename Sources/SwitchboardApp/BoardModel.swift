@@ -147,9 +147,12 @@ final class BoardModel: ObservableObject {
   private(set) var loopEditorOpening = 0
   /// A loop editor's save is on its way to sbd, so a second Save would add a second loop.
   @Published var savingLoop = false
+  /// The open shortcuts overlay.
+  @Published var shortcutsOverlay: ShortcutsOverlayRequest?
   var presentingSheet: Bool {
     newSession != nil || showingImport || showingSearch || showingDoneRemoval || quickAsk != nil
       || pickingSnoozeTime != nil || pickingPauseTime != nil || editingNotes != nil || loopEditor != nil
+      || shortcutsOverlay != nil
   }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
