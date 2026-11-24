@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Draws the README's screenshots into docs/images from a seeded, private Switchboard.
+#
+#   bin/screenshots              builds the app and draws every image
+#   bin/screenshots board hero   draws only the named images
+#   bin/screenshots --bin DIR    uses the Switchboard, sbd, and sb in DIR and builds nothing
+#   bin/screenshots --out DIR    writes the PNGs to DIR instead of docs/images
+#
+# It seeds a fake home with made-up repos, sessions, PRs, groups, and Claude accounts, so no real session,
+# repo, or account shows in an image. It never touches ~/.sb, the running sbd, the installed app's
+# settings, or the screen:
+#   - The home is a fresh /tmp/sbt.XXXXXX, which the test fixtures' reap script cleans up.
+#   - sbd and every pane get HOME and CLAUDE_CONFIG_DIR inside the home, so a stand-in claude never runs
+#     under a real account. The stand-in only sleeps. A local server answers sbd's usage reads.
+#   - The app runs outside its bundle as SwitchboardShot, so its settings live in a defaults domain of that
+#     name, which the script deletes.
+#   - Each launch sets SB_SNAPSHOT. The app then draws its window into a PNG by itself, with no screen
+#     recording permission. It never becomes the active app, and its window is transparent and lets clicks
+#     through, so it never takes focus or covers the user's windows.
+# Every image is drawn in light mode at the same window size. It ends the app, sbd, the tmux server, and every
+# process whose arguments name the home, then removes the home.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+root=$PWD
+
+images=(hero inbox-permission board group-chat accounts session-panel search)
+bin='' out=$root/docs/images wanted=()
+while [ $# -gt 0 ]; do
+  case $1 in
+  --bin | --out)
+    [ $# -ge 2 ] || { echo "bin/screenshots: $1 needs a folder" >&2; exit 2; }
+    if [ "$1" = --bin ]; then
+      bin=$(cd "$2" 2>/dev/null && pwd) || { echo "bin/screenshots: $2 is not a folder" >&2; exit 2; }
+    else
+      out=$2
+    fi
+    shift 2
+    ;;
+  -h | --help) sed -n '2,/^set /p' "$0" | sed -e '$d' -e 's/^# \{0,1\}//' && exit 0 ;;
+  -*) echo "bin/screenshots: unknown option $1" >&2 && exit 2 ;;
+  *)
+    [[ " ${images[*]} " == *" $1 "* ]] || { echo "bin/screenshots has no image named $1. The images are ${images[*]}." >&2; exit 2; }
+    wanted+=("$1") && shift
+    ;;
+  esac
+done
+[ ${#wanted[@]} -gt 0 ] || wanted=("${images[@]}")
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+
+if [ -z "$bin" ]; then
+  echo "Building Switchboard, sbd, and sb…"
+  bin/lib/swiftpm build >/dev/null
+  bin=$(swift build --show-bin-path)
+fi
+for b in Switchboard sbd sb; do [ -x "$bin/$b" ] || { echo "no $b in $bin" >&2; exit 2; }; done
+
+width=1440 height=900
+domain=SwitchboardShot
+# Fixtures/reap ends a home's processes only for a path of this shape. A Unix socket path can't exceed 103 bytes,
+# so the home stays short. owner.pid lets a later test run's reap clean up after a run that was killed before
+# its trap ran.
+home=$(mktemp -d /tmp/sbt.XXXXXX)
+echo $$ >"$home/owner.pid"
+cleanup() {
+  status=$?
+  trap - EXIT
+  if [ "$status" -ne 0 ]; then
+    echo "--- sbd.log" >&2; tail -n 20 "$home/sbd.log" >&2 2>/dev/null || true
+    echo "--- app.log" >&2; tail -n 20 "$home/app.log" >&2 2>/dev/null || true
+  fi
+  SB_HOME=$home "$root/Tests/IntegrationTests/Fixtures/reap" || true
+  defaults delete "$domain" >/dev/null 2>&1 || true
+  rm -f "$HOME/Library/Preferences/$domain.plist"
+  exit "$status"
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+# The app finds sbd and sb next to itself. A clone costs no copy on APFS.
+mkdir -p "$home/bin"
+cp -c "$bin/Switchboard" "$home/bin/$domain"
+cp -c "$bin/sbd" "$bin/sb" "$home/bin/"
+sb() { "$home/bin/sb" "$@"; }
+# sb refuses some requests inside Claude Code, and a session id from the caller would point hooks at it.
+unset CLAUDECODE SB_SESSION_ID
+export SB_HOME=$home
+
+source "$root/bin/lib/screenshot-seed.sh"
+seed
+
+# HOME keeps sbd's URL cache and the tmux server's config out of the real home folder.
+HOME=$home "$home/bin/sbd" --home "$home" >"$home/sbd.log" 2>&1 &
+for _ in $(seq 100); do sb ls >/dev/null 2>&1 && break; sleep 0.2; done
+sb ls >/dev/null 2>&1 || { echo "sbd did not answer" >&2; exit 1; }
+if grep -E 'ignoring .*config.json|skipping' "$home/sbd.log" >&2; then echo "sbd rejected part of config.json" >&2; exit 1; fi
+seed_live
+
+# shot <name> [KEY=VALUE…] draws one image. Each KEY=VALUE goes into the app's environment. The app exits once
+# it has drawn, with status 1 when it drew nothing.
+shot() {
+  local name=$1 file=$out/$1.png pid
+  shift
+  rm -f "$file"
+  env SB_SNAPSHOT="$file" SB_SNAPSHOT_SIZE="${width}x$height" SB_SNAPSHOT_DELAY=6 SB_SNAPSHOT_EXIT=1 "$@" \
+    "$home/bin/$domain" -boardLanes repo >"$home/app.log" 2>&1 &
+  pid=$!
+  for _ in $(seq 120); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+  kill -KILL "$pid" 2>/dev/null && { echo "the app did not finish $name.png in 60 s" >&2; exit 1; }
+  wait "$pid" || { echo "the app drew no $name.png" >&2; exit 1; }
+}
+
+# fit <name> scales a full window's image to 1800 pixels wide, twice the width that GitHub shows a README image at.
+fit() {
+  sips --resampleWidth 1800 "$out/$1.png" >/dev/null
+  echo "$out/$1.png"
+}
+
+for name in "${wanted[@]}"; do
+  case $name in
+  hero) shot hero SB_INBOX=sdecid && fit hero ;;
+  inbox-permission) shot inbox-permission SB_INBOX=sperm1 && fit inbox-permission ;;
+  board) shot board SB_BOARD_SELECT= && fit board ;;
+  group-chat) shot group-chat SB_SELECT="$chat" && fit group-chat ;;
+  accounts) shot accounts SB_ACCOUNTS=open && fit accounts ;;
+  session-panel)
+    # The drawing leaves the terminal blank, so the image keeps only the side panel, which spans
+    # x 1200 to 1440 and y 155 to 720 in points of the window.
+    shot session-panel SB_SELECT=swait1
+    file=$out/session-panel.png
+    scale=$(($(sips -g pixelWidth "$file" | awk '/pixelWidth/ {print $2}') / width))
+    sips -c $((565 * scale)) $(((width - 1200) * scale)) --cropOffset $((155 * scale)) $((1200 * scale)) "$file" >/dev/null
+    echo "$file"
+    ;;
+  search) shot search SB_SHEET=search SB_SEARCH=search && fit search ;;
+  esac
+done

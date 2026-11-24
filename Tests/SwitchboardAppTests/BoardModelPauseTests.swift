@@ -31,6 +31,30 @@ import Testing
     #expect(sent.args[field] == nil)
   }
 
+  @Test func pauseUntilSendsTheTimeAsWholeSeconds() async {
+    let until = Date(timeIntervalSince1970: 1_800_000_000.7)
+    let sent = await firstRequest { $0.pause("s1", until: until) }
+
+    #expect(sent.op == "pause")
+    #expect(sent.args["session"] == "s1")
+    #expect(sent.args["until"] == "2027-01-15T08:00:00Z")
+    #expect(sent.args["group"] == nil)
+  }
+
+  @Test func theOpenPausePickerCountsAsASheet() {
+    let model = offlineModel()
+    #expect(!model.presentingSheet)
+    model.pickingPauseTime = "s1"
+    #expect(model.presentingSheet)
+  }
+
+  @Test func theOpenNotesSheetCountsAsASheet() {
+    let model = offlineModel()
+    #expect(!model.presentingSheet)
+    model.editingNotes = "s1"
+    #expect(model.presentingSheet)
+  }
+
   @Test func resumeStillSendsResumeForTheSession() async {
     let sent = await firstRequest { $0.resume("s1") }
 

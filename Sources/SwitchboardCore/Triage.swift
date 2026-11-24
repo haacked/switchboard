@@ -452,6 +452,9 @@ public enum Triage {
   public static func itemAndDecisions(_ facts: SessionFacts, _ verdict: Verdict, kind: SessionKind) -> (
     item: TriageItem?, decisions: DecisionList?, decisionsSent: Bool
   ) {
+    // A verdict from the operator's items comes only while no prompt blocks, so its item comes first. The owner's
+    // decision list stays in its facts while an ask shows, and comes back once the ask closes.
+    if let routed = operatorSourcedItem(facts, verdict) { return (routed, nil, false) }
     switch kind.inboxItems {
     case .all:
       let live = liveItem(facts, verdict)
@@ -500,7 +503,8 @@ public enum Triage {
   private static func item(_ facts: SessionFacts, _ verdict: Verdict, live: TriageItem?) -> TriageItem? {
     guard var item = live else { return nil }
     if let list = facts.decisionList, item.source != .card { item.decisions = list.decisions }
-    if !verdict.removalFailed { addReplyAsk(facts, to: &item) }
+    // The last reply of a held item comes from the clarifying turn, which the hold hides.
+    if !verdict.removalFailed, !verdict.savedAtAsk { addReplyAsk(facts, to: &item) }
     for i in item.drafts.indices {
       // Only the session's own card names a target. The model's summary reads text that can quote PR comments.
       if item.source == .session {
@@ -541,7 +545,10 @@ public enum Triage {
   static func liveItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
     guard AttentionState.inbox.contains(verdict.state) else { return nil }
     var item: TriageItem
-    if let card = facts.cards.first {
+    if verdict.savedAtAsk, let ask = facts.heldAsk {
+      item = ask.item
+      item.ref = ask.ref
+    } else if let card = facts.cards.first {
       item = cardItem(card)
       item.ref = card.ref
     } else if let own = facts.sessionSummary, let ref = sessionSummaryRef(facts) {
@@ -811,11 +818,29 @@ public enum Triage {
     return sentences[0] + " " + pick
   }
 
-  /// A reason line as a title: its first letter capitalized, and the first
-  /// "; " a colon.
   /// The ref of a rule item with this title.
   static func ruleRef(_ title: String) -> String { "rule:\(title)" }
 
+  private static let reportPrefix = "report:"
+  private static let heldPrefix = "held:"
+
+  /// The ref of an ask item whose latest report is `id`.
+  static func reportRef(_ id: Int64) -> String { reportPrefix + String(id) }
+
+  public static func isReportRef(_ ref: String) -> Bool { ref.hasPrefix(reportPrefix) }
+
+  /// The id of the latest report that an ask item's ref names, or nil for any other ref.
+  public static func reportID(ref: String) -> Int64? {
+    isReportRef(ref) ? Int64(ref.dropFirst(reportPrefix.count)) : nil
+  }
+
+  /// The ref of the item of the Operator's overdue waits with these ids.
+  static func heldRef(_ waitIDs: [String]) -> String { heldPrefix + waitIDs.joined(separator: ",") }
+
+  public static func isHeldRef(_ ref: String) -> Bool { ref.hasPrefix(heldPrefix) }
+
+  /// A reason line as a title: its first letter capitalized, and the first
+  /// "; " a colon.
   static func title(_ reason: String, max: Int = titleLength) -> String {
     let text = capitalized(reason).replacingOccurrences(of: "; ", with: ": ")
     return oneLine(text, max: max)
@@ -880,15 +905,24 @@ public enum Triage {
   /// a notification, or Next Needing You. The app checks this itself, so a
   /// summary from an older sbd cannot add an item that this rule leaves out.
   public static func inInbox(_ s: SessionSummary) -> Bool {
-    switch s.kind.inboxItems {
+    itemSourceAllowed(
+      kind: s.kind, source: s.triage?.source, blocking: hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt))
+  }
+
+  /// Whether an item from `source` (nil for no item) may reach the Inbox on a session of `kind`. `blocking` says
+  /// whether the session shows a prompt that stops its turn.
+  public static func itemSourceAllowed(kind: SessionKind, source: TriageSource?, blocking: Bool) -> Bool {
+    // Background follow-through routes its asks and overdue waits to a session of any kind (#410).
+    if source == .report { return true }
+    return switch kind.inboxItems {
     case .all: true
-    case .blockingPrompts: s.triage != nil && hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
+    case .blockingPrompts: source != nil && blocking
     case .operatorItems:
-      // The summary doesn't say which rule gave a `.rule` item. sbd gives the operator one only for the wait
-      // rule or a dialog without a card, and both reach the Inbox.
-      switch s.triage?.source {
+      // The summary doesn't say which rule gave a `.rule` item. sbd gives the operator one only for a dialog
+      // without a card, an exit at the trust dialog, or a `notify` outcome, and each reaches the Inbox.
+      switch source {
       case .report, .rule: true
-      case .card: hasBlockingPrompt(cards: s.cards, openPrompt: s.openPrompt)
+      case .card: blocking
       case .session, .summary, .fallback, nil: false
       }
     }
@@ -902,7 +936,7 @@ public enum Triage {
     case .work: s.name
     case .chat: groupName.map { Chat.name(group: $0) } ?? s.name
     case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
-    case .operator: Manager.operatorName
+    case .operator: "Background follow-through"
     }
   }
 
@@ -966,7 +1000,7 @@ public struct TriageSettings: Codable, Equatable, Sendable {
   /// Goes to every work session and group chat as `--append-system-prompt`. A Manager conversation and the
   /// operator get their own prompt instead. Empty turns it off.
   public var systemPrompt =
-    "\(TriageSettings.choiceGuidance) The exception is a turn that ends with three or more separate decisions of your own for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a comment or review on your GitHub PR for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, copied as is. Leave `replyTo` out if you don't have that URL. Don't post the reply yourself, because the user's Post button in the Inbox is the approval. \(ChildQuestions.guidance) \(SessionLink.guidance) \(BranchSwitch.guidance)"
+    "\(TriageSettings.choiceGuidance) The exception is a turn that ends with three or more separate decisions of your own for the user: list them in your reply, then write them with `sb summary set` and its decisions field, and don't call AskUserQuestion. Don't write decisions for a list of work you finished. `sb summary help` shows the format. When you write a reply to a comment or review on your GitHub PR for the user to post, put it in `sb summary set` as a draft with `replyTo` set to the comment's `html_url` from `gh api`, copied as is. Leave `replyTo` out if you don't have that URL. Don't post the reply yourself, because the user's Post button in the Inbox is the approval. \(ChildQuestions.guidance) \(ChildChanges.guidance) \(SessionLink.guidance) \(BranchSwitch.guidance)"
 
   /// The rule that the default `systemPrompt` starts with. A Manager conversation gets it alone.
   public static let choiceGuidance =

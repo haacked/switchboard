@@ -5,8 +5,7 @@ import Testing
 extension Instance {
   /// A private sbd whose poller asks `github`, with the stub gh. Polls run
   /// only when a test asks, unless `pollSeconds` starts the poller's timer.
-  /// These tests need no fast process checks, so sbd ticks once a second
-  /// instead of running ps five times a second. `extra` adds other config keys.
+  /// `extra` adds other config keys.
   static func withGitHub(
     _ github: FakeGitHub, pollSeconds: Double = 0, config extra: [String: JSON] = [:]
   ) throws -> Instance {
@@ -14,8 +13,7 @@ extension Instance {
       "github": [
         "gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url),
         "pollSeconds": .number(pollSeconds),
-      ],
-      "tickSeconds": 1,
+      ]
     ]
     return try Instance(config: config.merging(extra) { $1 })
   }
@@ -134,6 +132,29 @@ extension FakeGitHub {
         "pr:      #18303 Approved, checks success  https://github.com/PostHog/charts/pull/18303"))
     try sbd.poll(all: true)
     #expect(try sbd.events(s.id).filter { $0.kind == "pr" }.count == 1)
+  }
+
+  @Test func refusesToLinkAPRThatAnotherLiveSessionOwns() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let branch = "haacked/cdp-dlq-runbook-lookup-step"
+    let owner = try sbd.session(in: "PostHog/charts", branch: branch, name: "owner")
+    try sbd.poll()
+    #expect(try sbd.get(owner.id).pr?.number == 18303)
+    let second = try sbd.session(in: "PostHog/charts", branch: branch, folder: "second", name: "second")
+    try sbd.poll(all: true)
+    let after = try sbd.get(second.id)
+    #expect(after.pr == nil)
+    #expect(after.prOwnedBy == "owner")
+    #expect(try sbd.get(owner.id).pr?.number == 18303)
+    #expect(try sbd.get(owner.id).prOwnedBy == nil)
+    try sbd.poll(all: true)
+    #expect(try sbd.events(second.id).filter { $0.kind == "pr-owned" }.count == 1)
+    try sbd.sb("done", owner.id)
+    try sbd.poll(all: true)
+    let released = try sbd.get(second.id)
+    #expect(released.pr?.number == 18303)
+    #expect(released.prOwnedBy == nil)
   }
 
   @Test func showsEachPRRuleAsThePRChanges() throws {
@@ -317,19 +338,50 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 122896)
   }
 
-  @Test func followsTheSessionToAnotherBranch() throws {
+  @Test func keepsItsFirstPRWhenItChecksOutAnotherBranchWithAPR() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+    #expect(try sbd.events(s.id).filter { $0.kind == "pr" }.count == 1)
+  }
+
+  @Test func linksTheNewBranchsPROnceTheFirstPRIsMerged() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
+    try sbd.poll()
+    try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
+    try sbd.poll(all: true)
+    #expect(try sbd.get(s.id).pr?.number == 122953)
+
+    github.change(122953) { $0["state"] = "MERGED" }
+    try sbd.poll(all: true)
+    try sbd.poll(all: true)
+
+    #expect(try sbd.get(s.id).pr?.number == 122896)
+  }
+
+  @Test func keepsTheFirstPRUntilItMovesToABranchWithNoPR() throws {
     let github = try FakeGitHub()
     let sbd = try Instance.withGitHub(github)
     let s = try sbd.session(in: "PostHog/posthog", branch: "haacked/cdp-dlq-breaker-counts-lookups")
     try sbd.poll()
     try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
     try sbd.poll()
-    #expect(try sbd.get(s.id).pr?.number == 122896)
+    #expect(try sbd.get(s.id).pr?.number == 122953)
     try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/no-pr-yet")
     try sbd.poll()
     let after = try sbd.get(s.id)
     #expect(after.pr == nil)
-    #expect(after.earlierPRs == [122896, 122953])
+    #expect(after.earlierPRs == [122953])
     #expect(after.startBranch == "haacked/cdp-dlq-breaker-counts-lookups")
   }
 
@@ -347,20 +399,19 @@ extension FakeGitHub {
     try sbd.poll()
     let switched = try sbd.get(s.id)
     #expect(switched.branch == "haacked/mcp-experiment-condition-ids")
-    #expect(switched.pr?.number == 122896)
+    #expect(switched.pr?.number == 122953)
     #expect(switched.startBranch == "haacked/cdp-dlq-breaker-counts-lookups")
-    #expect(switched.earlierPRs == [122953])
+    #expect(switched.earlierPRs == nil)
     let get = try sbd.sb("get", s.id)
     #expect(get.contains("branch:  haacked/mcp-experiment-condition-ids"))
     #expect(
       get.contains(
         "warning: Switched from haacked/cdp-dlq-breaker-counts-lookups to haacked/mcp-experiment-condition-ids"))
-    #expect(get.contains("earlier PRs: #122953"))
     #expect(try sbd.sb("ls").contains("[switched from haacked/cdp-dlq-breaker-counts-lookups]"))
     let listed = try sbd.client.sessions().first { $0.id == s.id }
     #expect(listed?.branch == "haacked/mcp-experiment-condition-ids")
     #expect(listed?.startBranch == "haacked/cdp-dlq-breaker-counts-lookups")
-    #expect(listed?.earlierPRs == [122953])
+    #expect(listed?.earlierPRs == nil)
     // A detached HEAD keeps the last branch. A poll that finds no change records nothing.
     try sbd.git(s.cwd, "checkout", "-q", "--detach")
     try sbd.poll(all: true)
@@ -373,7 +424,7 @@ extension FakeGitHub {
     let restarted = try sbd.get(s.id)
     #expect(restarted.branch == "haacked/mcp-experiment-condition-ids")
     #expect(restarted.startBranch == "haacked/cdp-dlq-breaker-counts-lookups")
-    #expect(restarted.earlierPRs == [122953])
+    #expect(restarted.earlierPRs == nil)
   }
 
   @Test func showsTheCheckedOutBranchOfAFolderWithoutAGitHubRemote() throws {
@@ -394,7 +445,7 @@ extension FakeGitHub {
     #expect(try sbd.get(s.id).pr?.number == 122953)
     try sbd.git(s.cwd, "checkout", "-q", "-b", "haacked/mcp-experiment-condition-ids")
     try sbd.poll()
-    #expect(try sbd.get(s.id).pr?.number == 122896)
+    #expect(try sbd.get(s.id).pr?.number == 122953)
     try sbd.git(s.cwd, "checkout", "-q", "haacked/cdp-dlq-breaker-counts-lookups")
     try sbd.poll()
     #expect(try sbd.get(s.id).pr?.number == 122953)
@@ -402,7 +453,7 @@ extension FakeGitHub {
     #expect(try sbd.count("branch", of: s.id) == 2)
     let back = try sbd.get(s.id)
     #expect(back.startBranch == nil)
-    #expect(back.earlierPRs == [122896])
+    #expect(back.earlierPRs == nil)
     #expect(try !sbd.sb("get", s.id).contains("warning: Switched"))
   }
 

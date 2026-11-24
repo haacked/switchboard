@@ -203,7 +203,7 @@ extension Instance {
   func aSessionInTheInboxLeavesItWhenPaused(_ prompt: String, _ state: AttentionState) throws {
     let sbd = try Instance()
     let s = try sbd.new(prompt: prompt)
-    try sbd.waitFor(s.id, "\(state.title)") { $0.state == state && $0.claudePid != nil }
+    try sbd.waitFor(s.id, "\(state.title)") { $0.lastReply != nil && $0.state == state && $0.claudePid != nil }
     try #require(try sbd.triage().contains { $0.id == s.id }, "the session never reached the Inbox")
 
     try sbd.pauseJSON(s.id)
@@ -364,9 +364,10 @@ extension Instance {
   }
 
   /// sbd stops while the resumed claude waits before SessionStart, so the queue that `unpause` built in memory
-  /// is gone. The restarted sbd must rebuild the same order from the log.
+  /// is gone. The restarted sbd must rebuild the same order from the log. The restarted sbd has no record of the
+  /// launch prompt in flight, so only the production wait after SessionStart keeps a held note from going first.
   @Test func theResumeMessageStaysFirstWhenSbdRestartsBeforeItIsPasted() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.productionPasteSettle)
     let s = try sbd.pausedStopped()
     try sbd.sb("send", s.id, "first held note")
     try sbd.sb("send", s.id, "second held note")
@@ -429,8 +430,8 @@ extension Instance {
   @Test func aPasteThatStartsAfterThePauseWaitsForTheResume() throws {
     let sbd = try Instance()
     let s = try sbd.liveIdle()
-    // sbd pastes only 1.5 s after SessionStart. A paste that `send` starts reaches the gate at once.
-    usleep(2_000_000)
+    // sbd pastes only `pasteSettleSeconds` after SessionStart. A paste that `send` starts reaches the gate at once.
+    Thread.sleep(forTimeInterval: Instance.pasteSettleSeconds + 0.3)
     sbd.hold("hold-paste")
     let reply = try #require(JSON.parse(try sbd.sb("send", "--json", s.id, "late note")))
     try #require(reply["delivery"] == "pasted", "\(reply.text)")
@@ -601,23 +602,26 @@ extension Instance {
     #expect(try sbd.launchEvents(s.id, after: mark).isEmpty)
   }
 
-  @Test func aPausedParentHearsOfItsChildOnlyAfterTheResumeMessage() throws {
+  @Test func aPausedParentHearsOfItsChildOnlyInTheDigestAfterTheResume() throws {
     let sbd = try Instance()
     let parent = try sbd.pausedStopped("p")
     let pauseMark = try sbd.lastEventId(parent.id)
 
     let kid = try sbd.childOf(parent.id, name: "kid")
-    try sbd.waitFor(kid.id, "the child to need you") { $0.state == .needsYou }
+    try sbd.waitForReply(kid)
     try sbd.tickThrice()
 
     #expect(try !sbd.events(parent.id, after: pauseMark).contains { $0.kind == "sent" })
     #expect(try sbd.launchEvents(parent.id, after: pauseMark).isEmpty)
     let mark = try sbd.lastEventId(parent.id)
     try sbd.sb("resume", parent.id)
-    let prompts = try sbd.waitForPrompts(parent.id, after: mark, count: 2)
+    let prompts = try sbd.waitForPrompts(parent.id, after: mark, count: 1)
     #expect(prompts.first == defaultResume)
-    #expect(prompts.dropFirst().first?.contains("kid (\(kid.id)) needs you") == true, "\(prompts)")
-    #expect(try sbd.sbdMessages(parent.id).filter { $0.data["text"]?.string?.contains(kid.id) == true }.count == 1)
+    try sbd.sb("send", parent.id, "what changed")
+    try sbd.waitFor("the digest", timeout: 30) {
+      try sbd.events(parent.id, after: mark).contains { $0.kind == "digest" }
+    }
+    #expect(try sbd.sbdMessages(parent.id).filter { $0.data["text"]?.string?.contains(kid.id) == true }.isEmpty)
   }
 
   // MARK: The live cap

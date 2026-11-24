@@ -50,34 +50,20 @@ struct SwitchboardApp: App {
         Button("New Group") { model.startNewGroup() }
           .keyboardShortcut("g", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
+        Button("New Loop…") { model.loopEditor = .new }
+          .disabled(model.presentingSheet)
       }
-      CommandMenu("Session") {
-        let acknowledgeTarget = model.acknowledgeTarget
-        Button("Next Needing You") { model.selectNextNeedingYou() }
-          .keyboardShortcut("j")
-        Button("Open Manager") { model.openManager() }
-          .keyboardShortcut("m", modifiers: [.command, .shift])
-        Button("Open Operator") { model.openOperator() }
+      CommandGroup(after: .sidebar) {
         ForEach(MainView.allCases, id: \.self) { view in
           Button("Show \(view.title)") { model.show(view) }
             .keyboardShortcut(KeyEquivalent(view.shortcutKey))
         }
-        Button("New Loop…") { model.loopEditor = .new }
-          .disabled(model.presentingSheet)
         Button("Filter Sessions…") { model.showingFilter.toggle() }
           .keyboardShortcut("o", modifiers: [.command, .shift])
           .disabled(model.presentingSheet)
-        Divider()
+      }
+      CommandMenu("Go") {
         Group {
-          Button("Search Sessions…") { model.showingSearch = true }
-            .keyboardShortcut(NavShortcuts.searchSessions)
-          Button("Ask Switchboard…") { model.openQuickAsk() }
-            .keyboardShortcut(NavShortcuts.quickAsk)
-            .disabled(model.presentingSheet)
-          Button("Next Session") { model.selectAdjacentSession(by: 1) }
-            .keyboardShortcut(NavShortcuts.nextSession)
-          Button("Previous Session") { model.selectAdjacentSession(by: -1) }
-            .keyboardShortcut(NavShortcuts.previousSession)
           Button("Back") { model.goBack() }
             .keyboardShortcut(NavShortcuts.back)
             .disabled(!model.canGoBack)
@@ -87,16 +73,41 @@ struct SwitchboardApp: App {
           Button("Show Recent Places") { model.showingRecentPlaces.toggle() }
             .keyboardShortcut(NavShortcuts.showRecentPlaces)
             .disabled(!model.hasRecentPlaces)
+        }
+        .disabled(model.presentingSheet)
+        Divider()
+        Button("Next Needing You") { model.selectNextNeedingYou() }
+          .keyboardShortcut("j")
+        Group {
+          Button("Next Session") { model.selectAdjacentSession(by: 1) }
+            .keyboardShortcut(NavShortcuts.nextSession)
+          Button("Previous Session") { model.selectAdjacentSession(by: -1) }
+            .keyboardShortcut(NavShortcuts.previousSession)
+        }
+        .disabled(model.presentingSheet)
+        Divider()
+        Button("Open Manager") { model.openManager() }
+          .keyboardShortcut("m", modifiers: [.command, .shift])
+          .operatorTranscriptAlternate { model.openOperator() }
+        Group {
+          Button("Search Sessions…") { model.showingSearch = true }
+            .keyboardShortcut(NavShortcuts.searchSessions)
+          Button("Ask Switchboard…") { model.openQuickAsk() }
+            .keyboardShortcut(NavShortcuts.quickAsk)
+          Divider()
           Button("Move Focus to List") { model.requestListFocus() }
             .keyboardShortcut(NavShortcuts.focusList)
           Button("Move Focus to Terminal") { model.focusTerminal() }
             .keyboardShortcut(NavShortcuts.focusTerminal)
             .disabled(!model.canFocusTerminal)
-          Button("Message Claude") { model.revealMessageField() }
-            .keyboardShortcut(NavShortcuts.messageField)
-            .disabled(model.messageFieldTarget == nil)
         }
         .disabled(model.presentingSheet)
+      }
+      CommandMenu("Session") {
+        let acknowledgeTarget = model.acknowledgeTarget
+        Button("Message Claude") { model.revealMessageField() }
+          .keyboardShortcut(NavShortcuts.messageField)
+          .disabled(model.presentingSheet || model.messageFieldTarget == nil)
         Divider()
         // The items act on `selection`, which the detail pane does not show during a multi-selection.
         Group {
@@ -131,12 +142,16 @@ struct SwitchboardApp: App {
     } label: {
       MenuBarLabel().environmentObject(model)
     }
+
+    Settings {
+      SettingsView().environmentObject(model)
+    }
   }
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
   func applicationDidFinishLaunching(_ notification: Notification) {
-    if BackgroundLaunch.applies(to: ProcessInfo.processInfo.environment) {
+    if BackgroundLaunch.isRunning {
       BackgroundLaunch.start()
     } else {
       // A build-folder executable has no Info.plist, so it starts as a
@@ -182,6 +197,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 struct MenuBarLabel: View {
   @EnvironmentObject var model: BoardModel
   @Environment(\.openWindow) private var openWindow
+  @Environment(\.openSettings) private var openSettings
 
   var body: some View {
     let count = model.needsUser.count
@@ -198,6 +214,11 @@ struct MenuBarLabel: View {
     .onAppear {
       // Before the attach, because a held URL can open the window.
       model.showWindow = { openWindow(id: "main") }
+      model.showSettings = {
+        openSettings()
+        // An app that isn't frontmost would open Settings behind the window that has focus.
+        if !BackgroundLaunch.isRunning { NSApp.activate(ignoringOtherApps: true) }
+      }
       LinkInbox.shared.attach(model.openExternalLink)
     }
   }
@@ -222,7 +243,7 @@ struct MenuBarContent: View {
     }
     Divider()
     Button("Open Switchboard") { show() }
-    Button("Quit") { NSApp.terminate(nil) }
+    Button("Quit Switchboard") { NSApp.terminate(nil) }
   }
 
   /// A menu item names the session and its Inbox line, cut at `Triage.titleLength`, because a rule title can reach
@@ -234,5 +255,17 @@ struct MenuBarContent: View {
   private func show() {
     openWindow(id: "main")
     NSApp.activate(ignoringOtherApps: true)
+  }
+}
+
+extension View {
+  /// Holding ⌥ shows "Open Operator Transcript" in place of this menu item. macOS 14 has no alternate items, so the
+  /// Loops view's Transcript button is the only way to the transcript there.
+  @ViewBuilder func operatorTranscriptAlternate(_ open: @escaping () -> Void) -> some View {
+    if #available(macOS 15, *) {
+      modifierKeyAlternate(.option) { Button("Open Operator Transcript", action: open) }
+    } else {
+      self
+    }
   }
 }

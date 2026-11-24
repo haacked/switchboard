@@ -76,7 +76,8 @@ public struct ActionStatus: Codable, Equatable, Sendable {
     case running
     /// sbd checks again at `retryAt`, or sooner when the subject's state changes.
     case held
-    /// The holder got `reason` as a question. Only an approval, a clear, or an unmet outcome moves it on.
+    /// The holder got `reason` as a question, or the reply gate judge asked the user. Only an approval, a clear, an
+    /// unmet outcome, or, after the judge asked, a change of the subject's state moves it on.
     case awaitingJudgment = "awaiting-judgment"
   }
 
@@ -93,18 +94,30 @@ public struct ActionStatus: Codable, Equatable, Sendable {
   public var approval: MergeGuard.Approval?
   /// The hold message that sbd last sent the subject, keyed by what it was about, such as the head and the base tip.
   public var messageKey: String?
+  /// The PR head and the reply digest that the reply gate judge last answered. sbd calls the judge once per pair.
+  public var judged: MergeGuard.Approval?
 
   public init(kind: Kind, since: Int64) {
     self.kind = kind
     self.since = since
   }
 
-  /// Whether a met outcome starts the action again. Only a hold whose retry time came, or whose subject's state
-  /// changed since, does.
+  /// Whether a met outcome starts the action again. A hold whose retry time came, or whose subject's state changed
+  /// since, does. A question does only when it stored the subject's state, as the judge's `ask` does, and that
+  /// state changed since. A question to the holder stores none.
   public func retries(now: Int64, subjectSince: Int64?) -> Bool {
-    guard kind == .held else { return false }
-    return (retryAt ?? 0) <= now || (subjectSince != nil && subjectSince != self.subjectSince)
+    let changed = subjectSince != nil && subjectSince != self.subjectSince
+    switch kind {
+    case .running: return false
+    case .held: return (retryAt ?? 0) <= now || changed
+    case .awaitingJudgment: return parkedByJudge && changed
+    }
   }
+
+  /// Whether the judge's `ask` parked the action, so the holder's conversation never saw a question. A question to
+  /// the holder stores no `subjectSince`. A question stored before the judge existed can keep the `subjectSince` of
+  /// an earlier hold, but it has no `judged`.
+  public var parkedByJudge: Bool { kind == .awaitingJudgment && judged != nil && subjectSince != nil }
 }
 
 /// Decides whether sbd merges the subject's PR for a `merge` action. It acts only when it can show that the commit
@@ -442,8 +455,10 @@ public struct OperatorSettings: Codable, Equatable, Sendable {
   public var holdRetrySeconds = 120
   /// How long an action may stay held for one reason before sbd asks for judgment.
   public var holdLimitSeconds = 21600
-  /// The model that answers judgment calls.
-  public var judgeModel = "sonnet"
+  /// The model of the operator's claude and of every judge call.
+  public var model = OperatorSettings.defaultModel
+  /// How long a top-up's pick may run before sbd sends the schedule's prompt instead.
+  public var topupTimeoutSeconds = 120
   /// The turns after which sbd starts a fresh operator conversation. 0 turns the turn limit off.
   public var maxTurns = 20
   /// The age, in seconds, after which sbd starts a fresh operator conversation. 0 turns the age limit off.
@@ -451,9 +466,15 @@ public struct OperatorSettings: Codable, Equatable, Sendable {
   /// The auto-compact window of the operator's claude, as `ManagerSettings.autoCompactWindow` describes it.
   public var autoCompactWindow = AutoCompact.defaultWindow
 
+  /// The model that the operator and the judges run unless config.json sets one.
+  public static let defaultModel = "sonnet"
+
   public init(mergeRepos: [String] = []) {
     self.mergeRepos = mergeRepos
   }
+
+  /// The key that `model` replaced. A config.json that has it and no `model` keeps the model it chose.
+  private enum LegacyKeys: String, CodingKey { case judgeModel }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -461,7 +482,11 @@ public struct OperatorSettings: Codable, Equatable, Sendable {
     mergeRepos = try c.decodeIfPresent([String].self, forKey: .mergeRepos) ?? d.mergeRepos
     holdRetrySeconds = try c.decodeIfPresent(Int.self, forKey: .holdRetrySeconds) ?? d.holdRetrySeconds
     holdLimitSeconds = try c.decodeIfPresent(Int.self, forKey: .holdLimitSeconds) ?? d.holdLimitSeconds
-    judgeModel = try c.decodeIfPresent(String.self, forKey: .judgeModel) ?? d.judgeModel
+    let legacy = try decoder.container(keyedBy: LegacyKeys.self)
+    model =
+      try c.decodeIfPresent(String.self, forKey: .model)
+      ?? legacy.decodeIfPresent(String.self, forKey: .judgeModel) ?? d.model
+    topupTimeoutSeconds = try c.decodeIfPresent(Int.self, forKey: .topupTimeoutSeconds) ?? d.topupTimeoutSeconds
     maxTurns = try c.decodeIfPresent(Int.self, forKey: .maxTurns) ?? d.maxTurns
     resetEverySeconds = try c.decodeIfPresent(Int.self, forKey: .resetEverySeconds) ?? d.resetEverySeconds
     autoCompactWindow = try c.decodeIfPresent(Int.self, forKey: .autoCompactWindow) ?? d.autoCompactWindow

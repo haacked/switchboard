@@ -1200,13 +1200,15 @@ private func withId(_ wait: Wait, _ id: String) -> Wait {
     #expect(item.details.overdueWaits.isEmpty)
   }
 
-  /// The operator's wait item comes from `operatorItem`, which builds it with `ruleItem`.
-  @Test func theOperatorsWaitItemCarriesTheOverdueWaits() throws {
+  /// An overdue wait that sbd could not route stays on the operator as a held item, which names the wait.
+  @Test func theOperatorsHeldWaitItemCarriesTheOverdueWaits() throws {
     let s = operatorSession(waits: [ci])
-    let v = Attention.evaluate(s, idle, now: 2 * hourMs)
-    try #require(v.byWaitRule, "\(v.state) \(v.reason)")
+    var f = idle
+    f.operatorItems = OperatorItems(heldWaits: [ci])
+    let v = Attention.evaluate(s, f, now: 2 * hourMs)
+    try #require(v.fromOperator, "\(v.state) \(v.reason)")
 
-    let item = try #require(Triage.item(idle, v, kind: .operator))
+    let item = try #require(Triage.item(f, v, kind: .operator))
 
     #expect(item.details.overdueWaits == ["a"])
   }

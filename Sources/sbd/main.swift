@@ -4,7 +4,7 @@ import SwitchboardService
 
 // sbd: the Switchboard service. It keeps session state in $SB_HOME, runs the
 // terminals, takes hook events from `sb hook`, and stops idle sessions.
-// Usage: sbd [--home <folder>]
+// Usage: sbd [--home <folder>] [--check-prompts]
 
 func fail(_ message: String) -> Never {
   FileHandle.standardError.write(Data("sbd: \(message)\n".utf8))
@@ -19,9 +19,16 @@ while let arg = args.popFirst() {
   case "--version":
     print("sbd \(Version.text)")
     exit(0)
-  default: fail("unknown argument \(arg). Usage: sbd [--home <folder>]")
+  case "--check-prompts":
+    // bin/bundle runs this on the finished app, so a bundle that lacks its prompts fails the build.
+    do { print("prompts ok: \(try Prompts.load().directory.path)") } catch { fail("\(error)") }
+    exit(0)
+  default: fail("unknown argument \(arg). Usage: sbd [--home <folder>] [--check-prompts]")
   }
 }
+
+// A missing or broken prompt file stops sbd here, before it takes the lock or serves a client.
+do { try Prompts.load() } catch { fail("\(error). Reinstall Switchboard with bin/install.") }
 
 let home = Home(path: homePath)
 do { try home.create() } catch { fail("can't create \(home.path): \(error)") }

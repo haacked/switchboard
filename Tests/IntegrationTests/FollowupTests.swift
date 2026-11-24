@@ -102,7 +102,7 @@ final class Outcome<T>: @unchecked Sendable {
     #expect(
       sbd.stubArgs()
         == [
-          "--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings(f.id)) -- Fix the cache. It reads twice."
+          "--session-id \(f.claudeSessionId) --settings \(sbd.home.claudeSettings(f.id)) --model opus -- Fix the cache. It reads twice."
         ]
     )
     #expect(try sbd.events(f.id).prefix(3).map(\.kind) == ["followup", "followup-started", "started"])

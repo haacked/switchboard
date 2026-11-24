@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import SwitchboardCore
 import Testing
 
@@ -186,5 +187,33 @@ import Testing
 
     #expect(sent.op == "followup-rm")
     #expect(sent.args == ["session": "f1", "resolve": ["n3"]])
+  }
+}
+
+@MainActor
+@Suite struct NotesSheetClosing {
+  @Test func theSheetClosesWhenItsSessionIsGone() async {
+    let model = offlineModel()
+    model.editingNotes = "gone"
+    let sheet = NotesSheet(id: "gone") { model.editingNotes = nil }.environmentObject(model)
+    let window = NSWindow(
+      contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentView = NSHostingView(rootView: sheet)
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    await settle { model.editingNotes == nil }
+
+    #expect(model.editingNotes == nil)
+    withExtendedLifetime(window) {}
+  }
+
+  @Test func aLongListScrollsInsideABoundedSheet() {
+    let model = offlineModel()
+    let todos = (0..<100).map { todoFixture("n\($0)", "to-do number \($0)") }
+    model.apply(.success([notedSession(todos)]), followups: nil)
+    let host = NSHostingView(rootView: NotesSheet(id: "s1") {}.environmentObject(model))
+
+    #expect(host.fittingSize.height < NotesSheet.maxListHeight + 150)
   }
 }

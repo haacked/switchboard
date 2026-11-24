@@ -7,36 +7,53 @@ struct LoopsView: View {
 
   var body: some View {
     // A loop turns overdue with the time alone, while sbd's `ls` answer stays the same.
-    TimelineView(.everyMinute) { _ in
+    TimelineView(.everyMinute) { context in
       let now = nowMs()
-      let rows = model.loopRows(now: now)
-      if rows.isEmpty {
-        let hidden = model.hiddenLoopCount
-        ContentUnavailableView {
-          Label("No loops", systemImage: MainView.loops.symbol)
-        } description: {
-          if hidden > 0 {
-            Text("The filter hides \(hidden) loop\(hidden == 1 ? "" : "s"). They keep running.")
-          } else {
-            Text("A loop sends a prompt to a session on an interval. New Loop… or `sb schedule` adds one.")
+      VStack(spacing: 0) {
+        loops(now: now)
+        Divider()
+        BackgroundActivitySection(now: now)
+          .task(id: ActivityLoad(tick: context.date, operatorID: model.operatorSession?.id)) {
+            model.loadBackgroundActivity()
           }
-        } actions: {
-          if hidden > 0 { Button("Show All") { model.showAll() } }
-          NewLoopButton()
+      }
+    }
+  }
+
+  /// When the activity list reads the operator's events again: on each minute, and when the operator first appears.
+  private struct ActivityLoad: Equatable {
+    var tick: Date
+    var operatorID: String?
+  }
+
+  @ViewBuilder private func loops(now: Int64) -> some View {
+    let rows = model.loopRows(now: now)
+    if rows.isEmpty {
+      let hidden = model.hiddenLoopCount
+      ContentUnavailableView {
+        Label("No loops", systemImage: MainView.loops.symbol)
+      } description: {
+        if hidden > 0 {
+          Text("The filter hides \(hidden) loop\(hidden == 1 ? "" : "s"). They keep running.")
+        } else {
+          Text("A loop sends a prompt to a session on an interval. New Loop… or `sb schedule` adds one.")
         }
-      } else {
-        ListDetailSplit {
-          VStack(spacing: 0) {
-            LoopListHeader()
-            Divider()
-            LoopRows(rows: rows, now: now)
-          }
-        } detail: {
-          if let row = model.currentLoop(in: rows) {
-            // The pane focuses the loop it shows. A pause that moves the loop in the order then keeps it here.
-            LoopDetail(row: row, now: now).id(row.id)
-              .onAppear { if model.loopFocus != row.id { model.loopFocus = row.id } }
-          }
+      } actions: {
+        if hidden > 0 { Button("Show All") { model.showAll() } }
+        NewLoopButton()
+      }
+    } else {
+      ListDetailSplit {
+        VStack(spacing: 0) {
+          LoopListHeader()
+          Divider()
+          LoopRows(rows: rows, now: now)
+        }
+      } detail: {
+        if let row = model.currentLoop(in: rows) {
+          // The pane focuses the loop it shows. A pause that moves the loop in the order then keeps it here.
+          LoopDetail(row: row, now: now).id(row.id)
+            .onAppear { if model.loopFocus != row.id { model.loopFocus = row.id } }
         }
       }
     }
@@ -82,7 +99,8 @@ private struct LoopListHeader: View {
       Spacer(minLength: 0)
       NewLoopButton().fixedSize()
     }
-    .padding(8)
+    .padding(.horizontal, Design.listInset)
+    .padding(.vertical, 8)
   }
 }
 
@@ -90,6 +108,7 @@ private struct LoopListHeader: View {
 /// session.
 private struct LoopRows: View {
   @EnvironmentObject var model: BoardModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focused: Bool
   let rows: [LoopRow]
   let now: Int64
@@ -109,10 +128,10 @@ private struct LoopRows: View {
       .listKeys(.loops, $focused, model: model) {
         model.moveLoop(by: $0, wrap: $1)
       } open: {
-        if let row = model.currentLoop { model.showInSidebar(row.session) }
+        if let row = model.currentLoop { model.showLoopSession(row.session) }
       }
       .onChange(of: model.loopJumps) {
-        if let id = model.currentLoop?.id { withAnimation { proxy.scrollTo(id) } }
+        if let id = model.currentLoop?.id { proxy.scrollTo(id, reduceMotion: reduceMotion) }
       }
     }
   }
@@ -135,17 +154,18 @@ private struct LoopListRow: View {
   }
 }
 
-/// The loop's session name, and its host when it has one, as a link that selects the session.
+/// The loop's session name, and its host when it has one, as a link that selects the session. The operator's link
+/// opens its transcript.
 private struct LoopSessionLink: View {
   @EnvironmentObject var model: BoardModel
   let row: LoopRow
 
   var body: some View {
-    Button(row.session.nameWithHost) { model.showInSidebar(row.session) }
+    Button(row.session.nameWithHost) { model.showLoopSession(row.session) }
       .buttonStyle(.link)
       .font(.caption)
       .lineLimit(1)
-      .help("Open \(row.session.name)")
+      .help(row.session.kind == .operator ? "Open the operator's transcript" : "Open \(row.session.name)")
       .accessibilityLabel("\(row.session.nameWithHost), session of loop: \(oneLine(row.schedule.prompt))")
   }
 }
@@ -183,5 +203,74 @@ private struct LoopDetail: View {
       }
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+  }
+}
+
+/// The operator's work under the loops, newest first, with a button that opens its transcript. It has a fixed
+/// height, so the loops keep most of the pane.
+private struct BackgroundActivitySection: View {
+  @EnvironmentObject var model: BoardModel
+  let now: Int64
+
+  static let height: CGFloat = 180
+
+  var body: some View {
+    let entries = model.backgroundActivity
+    VStack(alignment: .leading, spacing: 0) {
+      HStack(spacing: 6) {
+        ListSectionHeader(title: "Background Activity", count: entries.count)
+        Spacer(minLength: 0)
+        Button("Transcript") { model.openOperator() }
+          .fixedSize()
+          .help("Open the operator's transcript")
+          .padding(.trailing, 12)
+      }
+      if entries.isEmpty {
+        Text("No background activity yet. Waits that your conversations hand off show here when they resolve.")
+          .font(.caption).foregroundStyle(.secondary)
+          .padding(.horizontal, 12)
+      } else {
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 6) {
+            ForEach(entries) { BackgroundActivityRow(entry: $0, now: now) }
+          }
+          .padding(.horizontal, 12)
+          .padding(.bottom, 8)
+        }
+      }
+    }
+    .frame(maxWidth: .infinity, minHeight: Self.height, maxHeight: Self.height, alignment: .topLeading)
+  }
+}
+
+/// One activity entry: its time and text, and a link to the session that it is about while that session shows.
+private struct BackgroundActivityRow: View {
+  @EnvironmentObject var model: BoardModel
+  let entry: BackgroundActivity.Entry
+  let now: Int64
+
+  var body: some View {
+    let subject = entry.subject.flatMap { id in model.allSessions.first { $0.id == id && !$0.isBeingRemoved } }
+    // A session that the filter hides would not open, so its name is plain text.
+    let opens = subject.map { s in s.kind == .operator || model.sessions.contains { $0.id == s.id } } ?? false
+    HStack(alignment: .firstTextBaseline, spacing: 8) {
+      Text(verbatim: "\(ago(entry.t, now: now)) ago").font(.caption).foregroundStyle(.secondary)
+        .monospacedDigit()
+        .frame(width: 64, alignment: .trailing)
+      InlineText(plain: entry.text).font(.callout).lineLimit(3).textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+      if let subject, opens {
+        Button(subject.nameWithHost) { model.showLoopSession(subject) }
+          .buttonStyle(.link)
+          .font(.caption)
+          .lineLimit(1)
+          .frame(maxWidth: 200, alignment: .trailing)
+          .help("Open \(subject.name)")
+      } else if let subject {
+        Text(subject.nameWithHost).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+          .frame(maxWidth: 200, alignment: .trailing)
+          .help("The filter hides \(subject.name)")
+      }
+    }
   }
 }

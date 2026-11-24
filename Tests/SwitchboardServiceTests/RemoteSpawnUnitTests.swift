@@ -75,7 +75,8 @@ private struct Layout {
         "o/n": .string(macN), "solo/widgets": .string("\(root)/mac/widgets"),
         "x/nothere": .string("\(root)/mac/nothere"),
       ],
-      "repoRoots": [.string("\(root)/roots")], "claudeConfigDirs": [.string(account)],
+      "repoRoots": [.string("\(root)/roots")], "claudeConfigDirs": [.string(account)], "codexHomes": [],
+      "sessionNames": ["enabled": false],
     ]
   }
 

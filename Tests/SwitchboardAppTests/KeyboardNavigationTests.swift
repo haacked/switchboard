@@ -414,7 +414,7 @@ import Testing
       Press("m", [.command, .option]), Press("e"), Self.quickAsk,
     ]
 
-    /// Session > Filter by Org….
+    /// View > Filter Sessions….
     static let filterByOrg = Press("o", [.command, .shift])
 
     /// File > New Conversation. ⌘T is Move Focus to Terminal, so a new conversation takes ⌥⌘N.
@@ -424,7 +424,7 @@ import Testing
     /// Use Selection for Find.
     static let messageField = Press("e", [.command, .shift])
 
-    /// Session > Ask Switchboard…. ⌘K is Search Sessions, and the ask panel is the other field that floats over the
+    /// Go > Ask Switchboard…. ⌘K is Search Sessions, and the ask panel is the other field that floats over the
     /// window.
     static let quickAsk = Press("k", [.command, .shift])
 

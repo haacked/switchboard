@@ -120,6 +120,34 @@ struct NotesButton: View {
   }
 }
 
+/// The notes of session `id`, which a session row's context menu opens. The sheet reads the session from the model on
+/// every update. A note added here therefore shows at once. The sheet closes when the session goes away.
+struct NotesSheet: View {
+  @EnvironmentObject var model: BoardModel
+  let id: String
+  let close: () -> Void
+  /// The list scrolls past this height. A long list then never pushes the Done button off the sheet.
+  static let maxListHeight: CGFloat = 480
+
+  var body: some View {
+    if let session = model.summary(id) {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("Notes for \(model.sessionNames.name(id))").font(.headline).padding([.horizontal, .top], 12)
+        ScrollView { NotesPopover(session: session) }
+          .frame(maxHeight: Self.maxListHeight)
+          .fixedSize(horizontal: false, vertical: true)
+        HStack {
+          Spacer()
+          Button("Done", action: close).keyboardShortcut(.cancelAction)
+        }
+        .padding([.horizontal, .bottom], 12)
+      }
+    } else {
+      Color.clear.frame(width: 1, height: 1).onAppear(perform: close)
+    }
+  }
+}
+
 struct NotesPopover: View {
   let session: SessionSummary
 

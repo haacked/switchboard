@@ -2,8 +2,6 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  static let reviewTimeoutSeconds = 60.0
-
   /// The `review` request for a session that shows the review card. Without
   /// `reviewers`, it returns the suggested reviewers. With `reviewers`, it
   /// runs `gh pr edit --add-reviewer` and records the attempt. A failed
@@ -46,7 +44,7 @@ extension Service {
     defer { queue.sync { _ = requestingReview.remove(id) } }
     let error = ghError(
       ["pr", "edit", String(pr.number), "--repo", pr.repo, "--add-reviewer", reviewers.joined(separator: ",")],
-      timeout: Service.reviewTimeoutSeconds)
+      timeout: config.reviewTimeoutSeconds)
     return try queue.sync {
       guard entries[id] != nil else { throw APIError("\(id) was removed") }
       let attempt = ReviewRequestAttempt(
@@ -62,7 +60,7 @@ extension Service {
   private func suggestReviewers(_ pr: PullRequest) throws -> [ReviewerSuggestion] {
     let output = try runGh(
       ["api", "graphql", "-f", "id=\(pr.id)", "-f", "query=\(ReviewRequests.suggestionsQuery)"],
-      timeout: Service.reviewTimeoutSeconds)
+      timeout: config.reviewTimeoutSeconds)
     guard let json = JSON.parse(output) else { throw APIError("gh api graphql printed no JSON") }
     return try ReviewRequests.suggestions(from: json)
   }

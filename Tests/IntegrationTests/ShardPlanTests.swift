@@ -40,22 +40,46 @@ private func matches(_ filter: String, _ test: String) throws -> Bool {
 private let measure = "IntegrationTests.MeasureTests/m()"
 
 @Suite(.blocking(timeLimit: .seconds(60))) struct ShardPlanTests {
-  /// With weights 100 to 30 and four shards in all, each shard ends with 130.
-  @Test func twoPartsSplitTheSuitesByWeightAcrossTheShardsOfBothParts() throws {
+  /// With weights 100 to 30 and four shards in parts 1 and 2, each shard ends
+  /// with 130. Part 3 runs the other targets and MeasureTests.
+  @Test func threePartsSplitTheSuitesByWeightAcrossTheShardsOfTheFirstTwo() throws {
     let suites = ["FxATests", "FxBTests", "FxCTests", "FxDTests", "FxETests", "FxFTests", "FxGTests", "FxHTests"]
     let weights = Array(zip([100, 90, 80, 70, 60, 50, 40, 30], suites.map { "IntegrationTests.\($0)" }))
     let tests = suites.map { "IntegrationTests.\($0)/a()" } + ["SwitchboardCoreTests.FxUnitTests/u()", measure]
 
-    let r = try plan(["2", "2"], weights: weights, tests: tests)
+    let r = try plan(["2", "3"], weights: weights, tests: tests)
 
     #expect(r.status == 0, "\(r.stderr)")
     #expect(
       lines(r) == [
         PlanLine(part: 1, slot: 0, filter: filter("FxATests", "FxHTests")),
         PlanLine(part: 1, slot: 1, filter: filter("FxBTests", "FxGTests")),
-        PlanLine(part: 1, slot: 2, filter: "^(SwitchboardCoreTests\\.FxUnitTests)/"),
         PlanLine(part: 2, slot: 0, filter: filter("FxCTests", "FxFTests")),
         PlanLine(part: 2, slot: 1, filter: filter("FxDTests", "FxETests")),
+        PlanLine(part: 3, slot: 2, filter: "^(SwitchboardCoreTests\\.FxUnitTests)/"),
+        PlanLine(part: 3, slot: 3, filter: filter("MeasureTests")),
+      ])
+  }
+
+  /// No integration suite shares a machine with the other targets, so the
+  /// other targets' time limits never wait behind integration tests.
+  @Test func twoPartsRunEveryIntegrationSuiteInPartOneAndTheOtherTargetsInPartTwo() throws {
+    let tests = [
+      "IntegrationTests.FxATests/a()", "IntegrationTests.FxBTests/b()", "IntegrationTests.FxCTests/c()",
+      "SwitchboardCoreTests.FxU/u()", "SwitchboardServiceTests.FxS/s()", measure,
+    ]
+
+    let r = try plan(
+      ["2", "2"],
+      weights: [(30, "IntegrationTests.FxATests"), (20, "IntegrationTests.FxBTests"), (10, "IntegrationTests.FxCTests")],
+      tests: tests)
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(
+      lines(r) == [
+        PlanLine(part: 1, slot: 0, filter: filter("FxATests")),
+        PlanLine(part: 1, slot: 1, filter: filter("FxBTests", "FxCTests")),
+        PlanLine(part: 2, slot: 2, filter: "^(SwitchboardCoreTests\\.FxU|SwitchboardServiceTests\\.FxS)/"),
         PlanLine(part: 2, slot: 3, filter: filter("MeasureTests")),
       ])
   }

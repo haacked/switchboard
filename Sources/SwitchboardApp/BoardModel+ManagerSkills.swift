@@ -14,11 +14,12 @@ extension BoardModel {
   /// Sends the draft, unless the session is a Manager conversation or the operator and the draft starts with a
   /// command whose `slash-commands` row is labeled `work`. Then it sets the session's offer and keeps the draft.
   /// It reads `slash-commands` again first, because labels can land after the user typed `/`. A failed read
-  /// decides from the stored rows. Send stays disabled during the read.
-  func submitChecked(session: String, draft: MessageField.Draft) {
+  /// decides from the stored rows. Send stays disabled during the read. `then` runs once sbd accepts the send, and
+  /// never when the offer shows.
+  func submitChecked(session: String, draft: MessageField.Draft, then: (() -> Void)? = nil) {
     let text = draft.trimmed
     guard summary(session)?.kind.runsInManagerFolder == true, let skill = SkillCommand.name(inPrompt: text) else {
-      draft.submit(session, to: self)
+      draft.submit(session, to: self, then: then)
       return
     }
     guard sending.insert(session).inserted else { return }
@@ -31,7 +32,7 @@ extension BoardModel {
       if rows.contains(where: { $0.name == name && $0.label == .work }) {
         self.offer(WorkSkillOffer(skill: skill, text: text), for: session, draft: draft)
       } else {
-        draft.submit(session, to: self)
+        draft.submit(session, to: self, then: then)
       }
     }
   }
@@ -49,10 +50,10 @@ extension BoardModel {
     workSkillOffers[session] = nil
   }
 
-  /// Sends the draft past the gate once, and empties it once sbd accepts it.
+  /// Sends the draft past the gate once, and empties it and hides the field once sbd accepts it.
   func runHereAnyway(_ session: String, draft: MessageField.Draft) {
     dismissOffer(session)
-    draft.submit(session, to: self, runHere: true)
+    draft.submit(session, to: self, runHere: true) { self.hideMessageFieldIfEmpty(session, draft: draft) }
   }
 
   /// Opens New Session with the offer's text as the prompt, the conversation as the parent, and the repository

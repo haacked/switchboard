@@ -33,18 +33,31 @@ public struct OperatorReport: Codable, Equatable, Sendable {
 }
 
 extension SessionFacts {
-  /// Whether an `ack` now would close open reports. An ack doesn't close any reports while a prompt blocks the session.
+  /// The kind of the event that sbd records on the operator when it routes a report to another session.
+  public static let reportRoutedEvent = "report-routed"
+  /// The kind of the event that closes the operator's reports that its `reports` key names.
+  public static let reportClosedEvent = "report-closed"
+  /// The kind of the event that sbd records on the session that a report is routed to. Nothing folds it.
+  public static let operatorAskEvent = "operator-ask"
+
+  /// Whether an `ack` now would close open reports: an unrouted report is open, and no prompt blocks the session.
   public var ackClosesReports: Bool {
-    !openReports.isEmpty
-      && !Triage.hasBlockingPrompt(cards: cards, openPrompt: openPermission != nil || openQuestion != nil)
+    !unroutedReports.isEmpty && !hasBlockingPrompt
   }
 
-  /// Keeps the `needsYou` reports that are open. A message that the user wrote closes the reports recorded
-  /// before it. Only a `sent` event whose `by` is `you` closes them. A message from sbd or from a Claude Code
-  /// closes none. A `sent` that names no author closes none either. An `ack` closes them too, unless a
-  /// prompt blocks the session: the Inbox then shows that prompt, so the user did not see the reports.
-  /// The reports that an `ack` closes replace `acknowledgedReports`. An `unack` reopens them.
+  /// The open reports that no `report-routed` event gave an owner. Only these show on the operator's own item for
+  /// certain, so only these close with a generic `ack` on the operator.
+  var unroutedReports: [OperatorReport] { openReports.filter { reportOwners[$0.id] == nil } }
+
+  /// Keeps the `needsYou` reports that are open (Decision 40 in the notes repo's `plans/410-invisible-operator.md`).
+  /// A message that the user wrote closes the reports recorded before it: those that its `reports` key names, or
+  /// every one when it has no such key. Only a `sent` event whose `by` is `you` closes them. A message from sbd or
+  /// from a Claude Code closes none. A `sent` that names no author closes none either. A `report-closed` event closes
+  /// the reports that it names. An `ack` closes the unrouted reports, unless a prompt blocks the session: the Inbox
+  /// then shows that prompt, so the user did not see them. The reports that an `ack` closes replace
+  /// `acknowledgedReports`. An `unack` reopens them.
   mutating func applyReports(_ event: Event) {
+    if event.kind == "sent" { workFrom = event.data["handedFrom"]?.string }
     switch event.kind {
     case OperatorReport.event:
       guard let report = OperatorReport(event), report.needsYou else { return }
@@ -52,12 +65,24 @@ extension SessionFacts {
       acknowledgedReports = []
       // A report that repeats an acknowledged reason is a new item.
       acknowledgment = nil
+    case SessionFacts.reportRoutedEvent:
+      guard let report = event.data["report"]?.int.map(Int64.init), let owner = event.data["owner"]?.string else {
+        return
+      }
+      reportOwners[report] = owner
+    case SessionFacts.reportClosedEvent:
+      closeReports(event.data["reports"])
     case "sent" where event.data["by"]?.string == MessageAuthor.you.rawValue:
-      openReports = []
-      acknowledgedReports = []
+      // An empty or malformed `reports` key closes nothing, so it never closes every report.
+      if let reports = event.data["reports"] {
+        closeReports(reports)
+      } else {
+        openReports = []
+        acknowledgedReports = []
+      }
     case "ack" where ackClosesReports:
-      acknowledgedReports = openReports
-      openReports = []
+      acknowledgedReports = unroutedReports
+      openReports.removeAll { reportOwners[$0.id] == nil }
     case "ack":
       acknowledgedReports = []
     case "unack":
@@ -68,15 +93,16 @@ extension SessionFacts {
       break
     }
   }
+
+  /// Closes the open reports whose ids `ids` lists. It leaves `acknowledgedReports`, which holds only unrouted
+  /// reports that are already closed.
+  private mutating func closeReports(_ ids: JSON?) {
+    let closed = Set((ids?.array ?? []).compactMap { $0.int.map(Int64.init) })
+    openReports.removeAll { closed.contains($0.id) }
+  }
 }
 
 extension Attention {
-  /// Needs you while the operator has an open report, with the latest report's text as the reason.
-  static func reportVerdict(_ session: Session, _ facts: SessionFacts) -> Verdict? {
-    guard session.kind == .operator, !facts.openReports.isEmpty else { return nil }
-    return Verdict(state: .needsYou, reason: OperatorReport.reason(facts.openReports), kind: .question)
-  }
-
   /// The verdict that the app and `sb` show for a session of `kind`. It also marks the operator's verdict
   /// `acknowledged` while the operator has no item and an `unack` would reopen reports. The app then offers Undo
   /// Acknowledge, and `sb ack --undo` accepts it. This mark has no recheck time, because closed reports never
@@ -93,12 +119,12 @@ extension Attention {
 }
 
 extension Triage {
-  /// The operator's item: a blocking prompt's, then the open reports', then the wait rule's Needs you.
+  /// The operator's item: a blocking prompt's, then that of an ask or an overdue wait that sbd left on it, then a
+  /// rule item for an exit at the trust dialog or a `notify` outcome (Decision 43 in the notes repo's
+  /// `plans/410-invisible-operator.md`).
   static func operatorItem(_ facts: SessionFacts, _ verdict: Verdict) -> TriageItem? {
-    if let item = promptItem(facts, verdict) { return item }
-    guard AttentionState.inbox.contains(verdict.state) else { return nil }
-    if !facts.openReports.isEmpty { return reportItem(facts.openReports) }
-    guard verdict.byWaitRule else { return nil }
+    if let item = promptItem(facts, verdict) ?? operatorSourcedItem(facts, verdict) { return item }
+    guard verdict.state == .needsYou, verdict.byWaitRule || facts.exitedAtTrust else { return nil }
     var item = ruleItem(verdict)
     item.ref = Triage.ruleRef(item.title)
     return item
@@ -114,6 +140,6 @@ extension Triage {
       title: title(OperatorReport.reason(reports)), kind: .question,
       summary: (listed + (rest > 0 ? ["and \(rest) more"] : [])).joined(separator: "\n"),
       options: [TriageOption(label: "Reply", action: .reply, placeholder: "Your answer to the operator")],
-      source: .report, ref: "report:\(reports.last!.id)")
+      source: .report, ref: reportRef(reports.last!.id))
   }
 }

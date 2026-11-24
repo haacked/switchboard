@@ -779,7 +779,7 @@ private struct TailOnlyMachine: Machine {
     #expect(read.steps.suffix(2).compactMap(\.text) == ["Part one.", "Part two."])
   }
 
-  /// Every assistant message that the chat view shows is a text step, in the same order and with the same time, and
+  /// Every assistant message that `chat-log` reads is a text step, in the same order and with the same time, and
   /// no line that `messages` drops gives a step. Each assistant line holds one text block, because `messages` joins
   /// a line's blocks into one message.
   @Test func theTextStepsAreTheAssistantMessagesThatMessagesReads() throws {

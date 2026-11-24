@@ -90,6 +90,8 @@ public struct Home: Sendable {
 public struct Config: Codable, Equatable, Sendable {
   /// The claude command. A test points it at a stub.
   public var claude: String = "claude"
+  /// The codex command, which sbd runs for `codex login status`. A test points it at a stub.
+  public var codex: String = "codex"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
   /// The most claude processes that may run at once. Further starts queue.
@@ -99,8 +101,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var livePriority: [String] = []
   /// How often sbd checks its processes and stops idle sessions.
   public var tickSeconds: Double = 1
-  /// The model for new sessions, or nil for claude's default.
-  public var model: String?
+  /// The model that a new work session stores and starts on, unless its caller names one.
+  public var model = "opus"
   /// Where `sb new --branch` creates worktrees: <root>/<repo>/<branch>.
   public var worktreeRoot: String = "~/dev/worktrees"
   /// The tmux binary, or nil to look on PATH, then in Homebrew's and the
@@ -117,14 +119,22 @@ public struct Config: Codable, Equatable, Sendable {
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
   /// Lets the `clock` request move sbd's clock forward. While the home holds
-  /// `hold-paste`, each paste waits before it starts. While the home holds
-  /// `hold-delivered`, each paste waits before sbd records `delivered`. Only
-  /// tests set it.
+  /// `hold-paste`, each paste waits before it starts. A paste that starts
+  /// while the home holds `hold-delivered` waits until the file is gone before
+  /// sbd records `delivered`. Only tests set it.
   public var testClock = false
   /// Makes sbd append every call on this Mac's machine and site to `Home.machineLog`. Only tests set it.
   public var machineLog = false
   /// How long a request that needs a remote host waits for the host's link. Only tests change it.
   public var hostWaitSeconds: Double = 15
+  /// How long after claude's SessionStart sbd waits before it pastes a message. 1.5 s covers the redraws of
+  /// claude's prompt that Phase 0 measured. Only tests change it.
+  public var pasteSettleSeconds: Double = 1.5
+  /// How long a stop waits for claude to exit after SIGTERM. A pane stop then waits as long for the session's
+  /// processes. Only tests change it.
+  public var stopWaitSeconds: Double = 5
+  /// How long sbd waits for a gh call that requests a review or posts or lists a draft reply. Only tests change it.
+  public var reviewTimeoutSeconds: Double = 60
   /// The MCP servers that sbd runs once and shares with every session, by
   /// the name that sessions see.
   public var mcpServers: [String: MCPServer] = [:]
@@ -144,7 +154,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// The file that `followup import` reads when the request names none.
   public var followupsFile = "~/dev/haacked/notes/PostHog/Followups.md"
   /// Names of ignored files and folders that `sb cleanup` may delete besides
-  /// build output, such as `.env` or `.notes`.
+  /// build output and a top-level `.notes` folder, such as `.env`.
   public var cleanupDeletes: [String] = []
   /// The supacode command, which deletes a worktree that Supacode locked. A test points it at a stub.
   public var supacode = "supacode"
@@ -152,12 +162,20 @@ public struct Config: Codable, Equatable, Sendable {
   /// the session back with nothing stopped.
   public var removalDelaySeconds = 5
   public static let maxRemovalDelaySeconds = 86_400
+  /// The context size in tokens at which a Manager conversation's header suggests ending it. 0 turns that hint off.
+  public var conversationHintTokens = 120_000
+  public static let maxConversationHintTokens = 10_000_000
+  /// The longest wait that `pasteSettleSeconds`, `stopWaitSeconds`, and `reviewTimeoutSeconds` accept.
+  public static let maxWaitSeconds = 86_400.0
   /// Makes the removal job treat the trash as on another volume than every
   /// worktree. sbd reads it only with `testClock`.
   public var testTrashOtherVolume = false
   /// The Claude config folders whose sessions `sb import` lists, or nil for
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
+  /// The Codex homes that sbd lists as Codex accounts, or nil for each
+  /// ~/.codex and ~/.codex-* folder. An entry need not be named like ~/.codex-*.
+  public var codexHomes: [String]?
   public var github = GitHubSettings()
   public var depot = DepotSettings()
   public var trunk = TrunkSettings()
@@ -172,6 +190,7 @@ public struct Config: Codable, Equatable, Sendable {
   public var quickAsk = QuickAskSettings()
   public var `operator` = OperatorSettings()
   public var managerSkills = ManagerSkillSettings()
+  public var sessionNames = SessionNameSettings()
   public var manager = ManagerSettings()
   public var recheck = RecheckSettings()
   /// Where the Issues view reads issues from, the team, and the Start presets.
@@ -180,22 +199,56 @@ public struct Config: Codable, Equatable, Sendable {
   public init() {}
 
   enum CodingKeys: String, CodingKey {
-    case claude, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs,
+    case claude, codex, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell,
+      claudeArgs,
       autoMode, env
-    case testClock, machineLog, hostWaitSeconds, mcpServers, ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
-      cleanupDeletes, supacode, removalDelaySeconds
-    case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, planUpdates,
-      quickAsk, managerSkills
+    case testClock, machineLog, hostWaitSeconds, pasteSettleSeconds, stopWaitSeconds, reviewTimeoutSeconds, mcpServers,
+      ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
+      cleanupDeletes, supacode, removalDelaySeconds, conversationHintTokens
+    case claudeConfigDirs, codexHomes, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket,
+      planUpdates,
+      quickAsk, managerSkills, sessionNames
     case manager
     case issues, `operator`
     case recheck = "recheckSeconds"
     case testTrashOtherVolume
   }
 
+  /// A wait in seconds from config.json, or nil when the key is missing or null. sbd turns a wait into whole
+  /// milliseconds or nanoseconds, and a value outside `0...maxWaitSeconds` would trap there. Such a value, or one
+  /// that is not a number, logs a line and returns nil, because throwing would make sbd ignore all of config.json.
+  private static func wait(_ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys) throws -> Double? {
+    switch try c.decodeIfPresent(JSON.self, forKey: key) {
+    case nil, .null:
+      return nil
+    case .number(let seconds) where (0...maxWaitSeconds).contains(seconds):
+      return seconds
+    default:
+      logLine("skipping \(key.stringValue): its value must be a number of seconds from 0 to \(Int(maxWaitSeconds))")
+      return nil
+    }
+  }
+
+  /// The whole number under `key` when it is from 0 to `max`, or nil. A bad value logs and returns nil, so it keeps
+  /// the default. Throwing would make sbd ignore all of config.json.
+  private static func decodeBounded(
+    _ c: KeyedDecodingContainer<CodingKeys>, _ key: CodingKeys, upTo max: Int, unit: String
+  ) throws -> Int? {
+    switch try c.decodeIfPresent(JSON.self, forKey: key) {
+    case nil, .null:
+      return nil
+    case let value?:
+      if let n = value.int, (0...max).contains(n) { return n }
+      logLine("skipping \(key.stringValue): its value must be a whole number of \(unit) from 0 to \(max)")
+      return nil
+    }
+  }
+
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = Config()
     claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? d.claude
+    codex = try c.decodeIfPresent(String.self, forKey: .codex) ?? d.codex
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
     liveCap = try c.decodeIfPresent(Int.self, forKey: .liveCap) ?? d.liveCap
@@ -203,7 +256,7 @@ public struct Config: Codable, Equatable, Sendable {
     let priority = LivePriority.parse(try c.decodeIfPresent(JSON.self, forKey: .livePriority))
     livePriority = priority.entries
     for problem in priority.problems { logLine("skipping \(problem)") }
-    model = try c.decodeIfPresent(String.self, forKey: .model)
+    model = SessionModel.configModel(try c.decodeIfPresent(JSON.self, forKey: .model), key: "model") ?? d.model
     worktreeRoot = try c.decodeIfPresent(String.self, forKey: .worktreeRoot) ?? d.worktreeRoot
     tmux = try c.decodeIfPresent(String.self, forKey: .tmux)
     shell = try c.decodeIfPresent(String.self, forKey: .shell)
@@ -213,6 +266,9 @@ public struct Config: Codable, Equatable, Sendable {
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
     machineLog = try c.decodeIfPresent(Bool.self, forKey: .machineLog) ?? d.machineLog
     hostWaitSeconds = try c.decodeIfPresent(Double.self, forKey: .hostWaitSeconds) ?? d.hostWaitSeconds
+    pasteSettleSeconds = try Self.wait(c, .pasteSettleSeconds) ?? d.pasteSettleSeconds
+    stopWaitSeconds = try Self.wait(c, .stopWaitSeconds) ?? d.stopWaitSeconds
+    reviewTimeoutSeconds = try Self.wait(c, .reviewTimeoutSeconds) ?? d.reviewTimeoutSeconds
     // This skips a server that doesn't decode, such as a stdio one copied from
     // a Claude config. Throwing would make sbd ignore all of config.json.
     for (name, value) in try c.decodeIfPresent([String: JSON].self, forKey: .mcpServers) ?? [:] {
@@ -242,22 +298,16 @@ public struct Config: Codable, Equatable, Sendable {
     followupsFile = try c.decodeIfPresent(String.self, forKey: .followupsFile) ?? d.followupsFile
     cleanupDeletes = try c.decodeIfPresent([String].self, forKey: .cleanupDeletes) ?? d.cleanupDeletes
     supacode = try c.decodeIfPresent(String.self, forKey: .supacode) ?? d.supacode
-    // A bad value keeps the default. Throwing would make sbd ignore all of config.json.
-    switch try c.decodeIfPresent(JSON.self, forKey: .removalDelaySeconds) {
-    case nil, .null:
-      break
-    case let value?:
-      if let seconds = value.int, (0...Self.maxRemovalDelaySeconds).contains(seconds) {
-        removalDelaySeconds = seconds
-      } else {
-        logLine(
-          "skipping removalDelaySeconds: its value must be a whole number of seconds from 0 to "
-            + "\(Self.maxRemovalDelaySeconds)")
-      }
-    }
+    removalDelaySeconds =
+      try Self.decodeBounded(c, .removalDelaySeconds, upTo: Self.maxRemovalDelaySeconds, unit: "seconds")
+      ?? d.removalDelaySeconds
+    conversationHintTokens =
+      try Self.decodeBounded(c, .conversationHintTokens, upTo: Self.maxConversationHintTokens, unit: "tokens")
+      ?? d.conversationHintTokens
     testTrashOtherVolume =
       try c.decodeIfPresent(Bool.self, forKey: .testTrashOtherVolume) ?? d.testTrashOtherVolume
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
+    codexHomes = try c.decodeIfPresent([String].self, forKey: .codexHomes)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     depot = try c.decodeIfPresent(DepotSettings.self, forKey: .depot) ?? d.depot
     trunk = try c.decodeIfPresent(TrunkSettings.self, forKey: .trunk) ?? d.trunk
@@ -269,6 +319,7 @@ public struct Config: Codable, Equatable, Sendable {
     planUpdates = try c.decodeIfPresent(PlanUpdateSettings.self, forKey: .planUpdates) ?? d.planUpdates
     quickAsk = try c.decodeIfPresent(QuickAskSettings.self, forKey: .quickAsk) ?? d.quickAsk
     managerSkills = try c.decodeIfPresent(ManagerSkillSettings.self, forKey: .managerSkills) ?? d.managerSkills
+    sessionNames = try c.decodeIfPresent(SessionNameSettings.self, forKey: .sessionNames) ?? d.sessionNames
     manager = try c.decodeIfPresent(ManagerSettings.self, forKey: .manager) ?? d.manager
     recheck = try c.decodeIfPresent(RecheckSettings.self, forKey: .recheck) ?? d.recheck
     `operator` = try c.decodeIfPresent(OperatorSettings.self, forKey: .operator) ?? d.operator

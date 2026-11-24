@@ -50,23 +50,19 @@ public struct ClaudeAccount: Hashable, Sendable {
     return last.hasPrefix(".claude-") ? String(last.dropFirst(".claude-".count)) : last
   }
 
-  /// The account that `ref` names: a short name from `name`, or a folder.
-  /// Throws when no known account matches, or when the folder holds no
-  /// account.
-  public static func resolve(_ ref: String, among known: [ClaudeAccount]) throws -> ClaudeAccount {
-    if let match = known.first(where: { $0.name == ref }) { return match }
-    let account = ClaudeAccount(folder: ref)
-    guard account.holdsAccount else {
-      let names = known.map(\.name).joined(separator: ", ")
-      throw APIError(
-        "\(ref) is no Claude account (no .claude.json in \(account.folder)). Known accounts: \(names)")
-    }
-    return account
+  /// Whether the folder is named ~/.claude or ~/.claude-<something>.
+  public static func isNamedLikeClaude(_ folder: String) -> Bool {
+    let last = (normalize(folder) as NSString).lastPathComponent
+    return last == ".claude" || last.hasPrefix(".claude-")
   }
 
   /// The default account, then each ~/.claude-* folder that holds a .claude.json, by name.
   public static func discover(home: String = NSHomeDirectory()) -> [ClaudeAccount] {
-    let names = (try? FileManager.default.contentsOfDirectory(atPath: home)) ?? []
+    discover((try? FileManager.default.contentsOfDirectory(atPath: home)) ?? [], in: home)
+  }
+
+  /// As `discover(home:)`, but it takes the home folder's entries from `names`.
+  static func discover(_ names: [String], in home: String) -> [ClaudeAccount] {
     let others = names.filter { $0.hasPrefix(".claude-") }.sorted().map { ClaudeAccount(folder: "\(home)/\($0)") }
     return [ClaudeAccount(folder: "\(home)/.claude")] + others.filter(\.holdsAccount)
   }
@@ -297,6 +293,11 @@ public enum Transcript {
       where: machine.exists)
   }
 
+  /// Whether the transcript at `path` is the one of the claude conversation `conversation`.
+  public static func isFile(_ path: String, of conversation: String) -> Bool {
+    (path as NSString).lastPathComponent == "\(conversation).jsonl"
+  }
+
   /// Reads the transcript from the end, because transcripts reach 24 MB.
   public static func tail(_ path: String, on machine: any Machine) -> TranscriptTail {
     var tail = TranscriptTail()
@@ -304,14 +305,50 @@ public enum Transcript {
     return tail
   }
 
-  /// The main conversation's last `limit` messages that have text, oldest first.
-  public static func messages(_ path: String, limit: Int, on machine: any Machine) -> [ChatMessage] {
-    var messages: [ChatMessage] = []
-    eachLineFromEnd(path, on: machine) { line in
-      if let message = message(line) { messages.append(message) }
-      return messages.count >= limit
+  /// How far from the end of a transcript `messages` looks for a mark.
+  public static let markSearchBytes: UInt64 = 8 << 20
+
+  /// The main conversation's last `limit` messages that have text, oldest first. With `mark`, it also reads
+  /// back to the mark's start and sets `sent` on the marked message. That message is the one user message of the
+  /// main conversation that starts inside the mark and records the mark's text. When the mark holds no such
+  /// message, or more than one, nothing is marked.
+  /// When the walk passes `markSearchBytes` before it reaches the mark's start, nothing is marked. The answer is
+  /// the newest `limit` messages, or more when the marked message is older, back to and including it.
+  public static func messages(
+    _ path: String, limit: Int, mark: SentMark? = nil, on machine: any Machine
+  ) -> [ChatMessage] {
+    // `prefix` traps on a negative length, and a client can send any limit.
+    let limit = max(1, limit)
+    guard let end = machine.size(path) else { return [] }
+    var found: [(message: ChatMessage, offset: UInt64)] = []
+    var reached = mark == nil
+    var gaveUp = false
+    var stopped = false
+    let complete = eachLineFromEnd(path, before: end, on: machine) { line, offset in
+      if let message = message(line) { found.append((message, offset)) }
+      if let mark, !reached {
+        if offset < mark.from {
+          reached = true
+        } else if offset + markSearchBytes < end {
+          gaveUp = true
+        }
+      }
+      stopped = found.count >= limit && (reached || gaveUp)
+      return stopped
     }
-    return messages.reversed()
+    var messages = found.map(\.message)
+    // A walk that read to the start of the file read every line of the mark.
+    if let mark, !gaveUp, reached || (complete && !stopped) {
+      let before = mark.before ?? .max
+      let matches = found.indices.filter { i in
+        found[i].offset >= mark.from && found[i].offset < before && found[i].message.records(mark.text)
+      }
+      if matches.count == 1 {
+        messages[matches[0]].sent = mark.sent
+        return messages.prefix(max(limit, matches[0] + 1)).reversed()
+      }
+    }
+    return messages.prefix(limit).reversed()
   }
 
   /// Whether a user message of the main conversation that holds `text` starts
@@ -337,6 +374,14 @@ public enum Transcript {
   static func eachLineFromEnd(
     _ path: String, before end: UInt64? = nil, on machine: any Machine, _ body: (Data) -> Bool
   ) -> Bool {
+    eachLineFromEnd(path, before: end, on: machine) { line, _ in body(line) }
+  }
+
+  /// As `eachLineFromEnd` above, but `body` also gets the byte offset in the file where the line starts.
+  @discardableResult
+  static func eachLineFromEnd(
+    _ path: String, before end: UInt64? = nil, on machine: any Machine, _ body: (Data, UInt64) -> Bool
+  ) -> Bool {
     guard var offset = end ?? machine.size(path) else { return false }
     var size: UInt64 = 1 << 16
     // The start of the chunk after the current one, up to its first newline.
@@ -348,10 +393,11 @@ public enum Transcript {
       offset -= count
       size = min(size * 2, 1 << 22)
       guard let chunk = machine.read(path, from: offset, count: Int(count)) else { return false }
-      var lines = (chunk + rest).split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
+      let joined = chunk + rest
+      var lines = joined.split(separator: UInt8(ascii: "\n"), omittingEmptySubsequences: false)
       rest = offset > 0 ? Data(lines.removeFirst()) : Data()
       for line in lines.reversed() where !line.isEmpty {
-        if body(Data(line)) { return true }
+        if body(Data(line), offset + UInt64(line.startIndex - joined.startIndex)) { return true }
       }
     }
     return true
@@ -370,6 +416,22 @@ public enum Transcript {
     guard !text.isEmpty else { return false }
     tail.lastReply = text
     return true
+  }
+
+  /// The input context of the main conversation's latest API call since the last compaction, or nil when there
+  /// is none. Claude Code writes a synthetic assistant line for an API error, which no call produced.
+  public static func contextTokens(_ path: String, on machine: any Machine) -> Int? {
+    var tokens: Int?
+    eachLineFromEnd(path, on: machine) { data in
+      guard let line = TranscriptLine(data) else { return false }
+      if line.type == "system", line.subtype == "compact_boundary" { return true }
+      guard line.type == "assistant", line.isMainConversation, line.model != "<synthetic>",
+        let sum = line.contextTokens, sum > 0
+      else { return false }
+      tokens = sum
+      return true
+    }
+    return tokens
   }
 
   /// A user or assistant line of the main conversation that has text. A
@@ -406,6 +468,7 @@ struct TranscriptLine {
   }
 
   let type: String?
+  let subtype: String?
   let isSidechain: Bool
   /// A line of the main conversation that a chat shows. Sidechains hold
   /// subagents. A meta line is one that claude adds, such as a command's
@@ -416,15 +479,28 @@ struct TranscriptLine {
   /// The message's text and tool_use blocks in order. A string content is
   /// one text block. Other block types, such as thinking, are left out.
   let blocks: [Block]
+  let model: String?
+  /// The input tokens of the API call that wrote the line, or nil when the line has no usage. The nested
+  /// `iterations` and `cache_creation` repeat these numbers, so the sum leaves them out.
+  let contextTokens: Int?
 
   init?(_ line: Data) {
     guard let object = try? JSONCoding.decoder.decode(JSON.self, from: line) else { return nil }
     type = object["type"]?.string
+    subtype = object["subtype"]?.string
     isSidechain = object["isSidechain"]?.bool == true
     isMainConversation =
       !isSidechain
       && !["isMeta", "isCompactSummary", "isVisibleInTranscriptOnly"].contains { object[$0]?.bool == true }
     rawTimestamp = object["timestamp"]?.string
+    model = object["message"]?["model"]?.string
+    // A sum of Doubles turns a number too large for Int into nil instead of an overflow.
+    contextTokens = object["message"]?["usage"]?.object.flatMap { usage in
+      Int(
+        exactly: ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].reduce(0.0) {
+          $0 + (usage[$1]?.double ?? 0)
+        })
+    }
     let content = object["message"]?["content"]
     blocks =
       content?.string.map { [.text($0)] }

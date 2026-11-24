@@ -116,7 +116,7 @@ enum WaitingMessage: String, CaseIterable, Sendable, CustomTestStringConvertible
       return s
     case .pastedInFlight:
       let s = try sbd.liveIdle("busy")
-      // The send queues when it comes before claude is ready for a paste, and the paste follows.
+      // The send pastes at once, or queues until claude is ready for a paste. Either way, a paste follows.
       try sbd.sb("send", s.id, "lag held")
       try sbd.waitFor("the paste of the held message") { try !sbd.events(s.id, "pasting", text: "lag held").isEmpty }
       return s
@@ -290,6 +290,37 @@ enum WaitingMessage: String, CaseIterable, Sendable, CustomTestStringConvertible
       if form.contains("--session") { #expect(r.status != 0, "\(form)") }
     }
 
+    let kept = try sbd.get(s.id)
+    #expect(kept.claudePid == pid)
+    #expect(kept.account == sbd.account("A"))
+    #expect(try sbd.events(s.id).allSatisfy { $0.kind != "account-moved" })
+  }
+
+  /// sbd restarts before claude submits its launch prompt. The restarted sbd reads the launch from the log, so the
+  /// prompt still counts as on its way. A move with `--stop` refuses and leaves claude running, because stopping
+  /// claude would drop the prompt.
+  @Test(arguments: ConversationEndTests.HeldLaunch.allCases)
+  func aLaunchPromptInFlightRefusesTheMoveAfterARestart(_ held: ConversationEndTests.HeldLaunch) throws {
+    let sbd = try instance()
+    let s = try AccountTests().stoppedSession(sbd)
+    let mark = try sbd.lastEventId(s.id)
+    held.hold(sbd)
+    try #require(try delivery(sbd.sb("send", "--json", s.id, "launch prompt")) == "resumed")
+    try held.waitForTheHold(sbd, s.id, after: mark)
+    let pid = try waitForClaudePid(sbd, s.id)
+    sbd.killSbd()
+    try sbd.startSbd()
+    _ = try waitForClaudePid(sbd, s.id)
+
+    let plan = try move(sbd, ["--stop", "--dry-run", "--session", s.id])
+    let r = try move(sbd, ["--stop", "--session", s.id])
+
+    #expect(plan.status != 0, "\(plan.result)")
+    #expect(plan.result.moved.isEmpty, "\(plan.result)")
+    let reason = plan.result.blocked.first { $0.session == s.id }?.reason ?? ""
+    #expect(reason.contains("a message is on its way"), "\(reason)")
+    #expect(r.status != 0, "\(r.result)")
+    #expect(!r.result.moved.contains(s.id), "\(r.result)")
     let kept = try sbd.get(s.id)
     #expect(kept.claudePid == pid)
     #expect(kept.account == sbd.account("A"))

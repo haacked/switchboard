@@ -238,6 +238,51 @@ private let unquotable = ["\"", "\\", "\n", "\u{1}", "\u{1B}", "\u{7F}"]
     }
   }
 
+  @Test(.timeLimit(.minutes(1)))
+  func theProfileAllowsReadingThePromptsFolderOnlyWhenOneIsGiven() throws {
+    try withProfileFolder { root, sb, socket in
+      let prompts = "\(root)/prompts"
+      try FileManager.default.createDirectory(atPath: prompts, withIntermediateDirectories: true)
+
+      let with = try HostCLI.profile(sb: sb, socket: socket, promptsFolder: prompts)
+      let without = try HostCLI.profile(sb: sb, socket: socket)
+
+      #expect(with.contains("(allow file-read* (subpath \"\(real(prompts))\"))"), "\(with)")
+      #expect(!without.contains("prompts"), "\(without)")
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aPromptsFolderThatHoldsTheHostsSocketIsRefused() throws {
+    try withProfileFolder { root, sb, socket in
+      #expect {
+        try HostCLI.profile(sb: sb, socket: socket, promptsFolder: root)
+      } throws: { error in
+        "\(error)".contains("prompts folder")
+      }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func theEnvironmentNamesThePromptsFolderByItsRealPath() throws {
+    try withProfileFolder { root, _, _ in
+      let target = "\(root)/real-prompts"
+      try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+      try FileManager.default.createSymbolicLink(atPath: "\(root)/linked-prompts", withDestinationPath: target)
+
+      let env = HostCLI.environment(
+        hostHome: "/h", host: "mini", cwd: "/c", session: nil, claudecode: nil, promptsFolder: "\(root)/linked-prompts")
+
+      #expect(env["SB_PROMPTS_DIR"] == real(target), "\(env)")
+    }
+  }
+
+  @Test func theEnvironmentCarriesThePromptsFolder() {
+    let env = HostCLI.environment(
+      hostHome: "/h", host: "mini", cwd: "/c", session: nil, claudecode: nil, promptsFolder: "/p")
+    #expect(env["SB_PROMPTS_DIR"] == "/p")
+  }
+
   /// /tmp is a link to /private/tmp. A rule that names a path through a link matches nothing.
   @Test(.timeLimit(.minutes(1)))
   func theProfileNamesTheRealPathsOfSbAndOfTheSocket() throws {

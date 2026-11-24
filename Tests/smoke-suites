@@ -1,0 +1,6 @@
+# The IntegrationTests suites that a local bin/test runs when it cannot tell
+# which integration tests a change affects. CI runs every suite on each push.
+# Keep the list short: each suite here adds to every such local run.
+IntegrationTests.StubTests
+IntegrationTests.StartupTests
+IntegrationTests.EntryPointTests

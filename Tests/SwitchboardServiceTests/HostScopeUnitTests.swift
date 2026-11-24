@@ -47,7 +47,7 @@ private func withSessions(
   _ body: (Service) throws -> Void
 ) throws {
   // A request that a missing guard lets through runs no claude or tmux on this Mac.
-  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
+  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true", "sessionNames": ["enabled": false]]
   try withHostService(hosts: hosts, config: config, sbPath: sbPath) { service, _ in
     service.queue.sync {
       service.hostEventWindowMs = windowMs
@@ -390,7 +390,7 @@ private func withReadySessions(_ body: (Service, BoxFacts, _ roots: [String]) th
   let root = try makeShortTempFolder()
   defer { try? FileManager.default.removeItem(atPath: root) }
   try makeCheckout("\(root)/n")
-  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true"]
+  let config: [String: JSON] = ["claude": "/usr/bin/true", "tmux": "/usr/bin/true", "sessionNames": ["enabled": false]]
   try withReadyService(host: ["repos": ["o/n": .string("\(root)/n")]], config: config) { bench, service, facts in
     let cwd = "\(facts.home)/work"
     try FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
@@ -814,6 +814,33 @@ extension Service {
   }
 }
 
+/// The verdict and the item that an ask about a decision saves while the unlisted PR's rule gives the session's item.
+private let heldReason = "Vault sentinel title (#4242) needs your decisions"
+private let heldSummary = "secret/vault pull/4242 asks two decisions"
+
+extension Service {
+  /// Records an ask about decision 2 of an open list, as `decision-ask` does. The list's decisions and the question
+  /// carry no PR text. Only the saved verdict and item do.
+  fileprivate func giveHeldAsk(_ id: String) throws {
+    let decisions = [1, 2].map {
+      PendingDecision(
+        number: $0, header: "D\($0)", question: "Which?", options: [.init(label: "A"), .init(label: "B")])
+    }
+    let item = TriageItem(
+      title: "Vault sentinel title", kind: .decision, summary: heldSummary, decisions: decisions, source: .rule,
+      ref: "rule:held")
+    let ask = DecisionAsk(
+      ref: "rule:held", number: 2, askId: "q1", text: "Why B?", message: "Question about decision 2",
+      verdict: .init(state: .needsYou, reason: heldReason), item: item)
+    let opened: JSON = ["decisions": try JSON(encoding: decisions), "ref": "rule:held"]
+    let asked = try JSON(encoding: ask)
+    queue.sync {
+      _ = record(id, "decisions_opened", opened)
+      _ = record(id, "decision_asked", asked)
+    }
+  }
+}
+
 private func text(_ answer: Response) -> String {
   (answer.result?.text ?? "") + (answer.error ?? "")
 }
@@ -938,6 +965,40 @@ private func text(_ answer: Response) -> String {
     }
   }
 
+  // MARK: The hold of a question about a decision
+
+  /// The saved verdict and item hold the unlisted PR's text. The host gets the session's verdict and item without
+  /// the hold, as it gets them without the PR.
+  @Test(.timeLimit(.minutes(1)), arguments: ownRequests)
+  func noAnswerToTheHostCarriesTheHeldVerdictOrItemOfAnUnlistedPR(op: String, args: [String: JSON]) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      try service.giveHeldAsk("m1")
+      let onMac = service.handle(Request(op: "get", args: ["session": "m1"]))
+      try #require(onMac.result?["reason"] == .string(heldReason), "\(text(onMac))")
+      try #require(onMac.result?["triage"]?["summary"] == .string(heldSummary), "\(text(onMac))")
+
+      let answer = service.handle(Request(op: op, args: .object(args)), origin: .remote("mini"))
+
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "\(op) answered \(mark)") }
+    }
+  }
+
+  @Test(.timeLimit(.minutes(1)), arguments: [false, true])
+  func eventsToTheHostLoseTheSnapshotsOfAnAskAboutAnUnlistedPR(full: Bool) throws {
+    try withSessions(hosts: listedHosts) { service in
+      try service.givePR("m1", listed: false)
+      try service.giveHeldAsk("m1")
+
+      let answer = service.handle(
+        Request(op: "events", args: ["session": "m1", "full": .bool(full)]), origin: .remote("mini"))
+
+      let asked = try #require(answer.result?.array?.first { $0["kind"] == "decision_asked" }, "\(text(answer))")
+      #expect(asked["data"] == .object([:]))
+      for mark in unlistedMarks { #expect(!text(answer).contains(mark), "events answered \(mark)") }
+    }
+  }
+
   // MARK: Waits
 
   @Test(.timeLimit(.minutes(1)), arguments: ["ci", "review", "approval", "merge", "queue"])
@@ -975,8 +1036,8 @@ private func text(_ answer: Response) -> String {
         let session = service.entries["m1"]!.session
         let site = service.site(for: session)
         let checkout = service.checkout(session) ?? session.cwd
-        if session.repo == nil { service.checkouts[SitePath(session.cwd, at: site)] = (checkout, nowMs()) }
-        service.repositories[SitePath(checkout, at: site)] = ("Secret/Listed", nowMs())
+        if session.repo == nil { service.checkouts[SitePath(session.cwd, at: site)] = (checkout, nowMs(), false) }
+        service.repositories[SitePath(checkout, at: site)] = ("Secret/Listed", nowMs(), false)
         return service.showsGitHub("m1", to: .remote("mini"))
       }
       #expect(originCounts, "the origin remote should name the listed repo")
@@ -1032,11 +1093,11 @@ private func text(_ answer: Response) -> String {
     }
   }
 
-  // MARK: Notices to a parent on the host
+  // MARK: The digest of a parent on the host
 
   /// mini's `m1` started `m2`, whose PR is in an unlisted repo, and `m3`, whose PR is in a listed one.
   @Test(.timeLimit(.minutes(1)))
-  func aParentOnTheHostHearsOnlyOfItsChildrensListedPRs() throws {
+  func aParentOnTheHostSeesOnlyItsChildrensListedPRsInItsDigest() throws {
     try withSessions(hosts: listedHosts) { service in
       service.queue.sync {
         for id in ["m2", "m3"] {
@@ -1048,17 +1109,33 @@ private func text(_ answer: Response) -> String {
       try service.givePR("m2", listed: false)
       try service.givePR("m3", listed: true)
 
-      let unsent = service.queue.sync { () -> [String] in
-        service.notifyParents(now: nowMs())
-        return (service.parentNotices.unsent["m1"] ?? []).map(\.text)
-      }
-      let sent = try service.logged().filter { $0.session == "m1" && $0.kind == "sent" }.compactMap {
-        $0.data["text"]?.string
-      }
-      let heard = (sent + unsent).joined(separator: "\n")
+      let heard = service.queue.sync { service.digest("m1", now: nowMs()) ?? "" }
 
-      #expect(heard.contains("m3 (m3) opened PR #77"), "\(heard)")
+      #expect(heard.contains("m3 (m3): opened PR #77"), "\(heard)")
       for mark in unlistedMarks { #expect(!heard.contains(mark), "\(heard)") }
+    }
+  }
+
+  /// A host's hook answer never reaches claude, so a stamped prompt must leave the child's change unheard for the
+  /// next prompt that does reach the parent.
+  @Test(.timeLimit(.minutes(1)))
+  func aStampedPromptOfAParentOnTheHostLeavesItsChildrensChangesUnheard() throws {
+    try withSessions(hosts: listedHosts) { service in
+      service.queue.sync {
+        var child = session("m3", host: "mini")
+        child.parent = "m1"
+        service.entries["m3"] = Service.Entry(session: child)
+      }
+      try service.givePR("m3", listed: true)
+      let stamp = HostEventStamp(
+        id: try #require(HostEventID("00000001700000000000-4242-0001")), host: "mini", t: 2_000)
+      let args: JSON = ["session": "m1", "payload": ["hook_event_name": "UserPromptSubmit", "prompt": "next"]]
+
+      let answered = try service.queue.sync { try service.hook(args, stamp: stamp) }
+
+      #expect(answered?.answer == [:], "\(String(describing: answered?.answer.text))")
+      let heard = service.queue.sync { service.digest("m1", now: nowMs()) ?? "" }
+      #expect(heard.contains("m3 (m3): opened PR #77"), "\(heard)")
     }
   }
 
@@ -1086,15 +1163,9 @@ private func text(_ answer: Response) -> String {
       try give(78)
       service.queue.sync { service.seedParentMarks(now: nowMs()) }
       try give(77)
-      let heard = service.queue.sync { () -> [String] in
-        service.notifyParents(now: nowMs())
-        return (service.parentNotices.unsent["m1"] ?? []).map(\.text)
-      }
-      let sent = try service.logged().filter { $0.session == "m1" && $0.kind == "sent" }.compactMap {
-        $0.data["text"]?.string
-      }
+      let heard = service.queue.sync { service.digest("m1", now: nowMs()) ?? "" }
 
-      #expect(!(sent + heard).joined(separator: "\n").contains("opened PR #77"), "\(sent + heard)")
+      #expect(!heard.contains("opened PR #77"), "\(heard)")
     }
   }
 
@@ -1178,7 +1249,7 @@ private func cliOutput(_ answer: Response) throws -> (status: Int?, stdout: Data
       // ends. A read far in the future keeps the shared clock, which other tests advance, from starting one.
       service.queue.sync {
         let m1 = service.entries["m1"]!.session
-        service.checkouts[SitePath(m1.cwd, at: service.site(for: m1))] = (nil, Int64.max / 2)
+        service.checkouts[SitePath(m1.cwd, at: service.site(for: m1))] = (nil, Int64.max / 2, false)
       }
 
       let raw = service.handle(Request(op: "get", args: ["session": "m1"]), origin: .remote("mini"))

@@ -31,7 +31,7 @@ extension Service {
   /// state. Only one from before read state lacks it. `create` records a read
   /// of 0 for each new one, so a restart keeps a new chat's unread replies.
   func migrateReadState() {
-    for (id, e) in entries where e.session.kind.showsAsChat && e.facts.repliesRead == nil {
+    for (id, e) in entries where e.session.kind.isConversation && e.facts.repliesRead == nil {
       recordRead(id, e.facts.replies)
     }
   }
@@ -49,6 +49,19 @@ extension Service {
       record(id, pinned ? "pinned" : "unpinned")
     }
     return try JSON(encoding: summary(id))
+  }
+
+  /// Sets the summary fields that only a Manager conversation has. `summary`
+  /// calls it after every other field is set.
+  func addConversationFields(to out: inout SessionSummary, _ e: Entry, _ facts: SessionFacts) {
+    let s = e.session
+    out.pinned = s.pinned
+    out.contextTokens = facts.contextTokens
+    out.endHint = endHint(e, facts)
+    let handed = handedOff(from: s.id, quiet: true)?.waits ?? []
+    out.handedWaits = handed.isEmpty ? nil : handed
+    // Last, because the archive rule reads the rest of the summary.
+    if Conversations.isArchived(out, now: nowMs()) { out.activity?.archived = true }
   }
 
   func recordRead(_ id: String, _ replies: Int) {

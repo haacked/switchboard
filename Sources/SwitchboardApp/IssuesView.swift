@@ -4,8 +4,6 @@ import SwitchboardCore
 /// The open GitHub issues from the configured sources, in buckets, with the selected issue on the right.
 struct IssuesView: View {
   @EnvironmentObject var model: BoardModel
-  /// The offered repositories the user unchecked, shared by the empty state's offer and the setup sheet's.
-  @State private var uncheckedRepos: Set<String> = []
 
   var body: some View {
     VStack(spacing: 0) {
@@ -16,9 +14,6 @@ struct IssuesView: View {
     .onAppear {
       model.refreshIssues()
       if model.knownRepos == nil { model.loadRepos() }
-    }
-    .sheet(isPresented: $model.showingIssueSetup) {
-      IssueSetupView(uncheckedRepos: $uncheckedRepos).environmentObject(model)
     }
   }
 
@@ -33,9 +28,9 @@ struct IssuesView: View {
           let hasOffer = !model.offeredIssueRepos.isEmpty
           VStack(spacing: 12) {
             if hasOffer {
-              IssueRepoOffer(unchecked: $uncheckedRepos).frame(width: 360)
+              IssueRepoOffer(unchecked: $model.uncheckedIssueRepos).frame(width: 360)
             }
-            Button(hasOffer ? "Other Sources…" : "Add Sources…") { model.showingIssueSetup = true }
+            Button(hasOffer ? "Other Sources…" : "Add Sources…") { model.openSettings(.issues) }
           }
         }
       } else {
@@ -78,7 +73,7 @@ private struct IssueBanners: View {
       WarningBanner(
         list.sourceErrors.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }.joined(separator: " ")
       ) {
-        Button("Edit Sources…") { model.showingIssueSetup = true }
+        Button("Edit Sources…") { model.openSettings(.issues) }
       }
     }
   }
@@ -89,7 +84,7 @@ private func clock(_ ms: Int64) -> String {
   Date(timeIntervalSince1970: Double(ms) / 1000).formatted(date: .omitted, time: .shortened)
 }
 
-/// Mine, Team, and All, the sort and grouping menu, and the setup button.
+/// Mine, Team, and All, the sort and grouping menu, and the button that opens Settings ▸ Issues.
 private struct IssueListHeader: View {
   @EnvironmentObject var model: BoardModel
 
@@ -120,15 +115,16 @@ private struct IssueListHeader: View {
       )
       .accessibilityLabel("Sort and group")
       Button {
-        model.showingIssueSetup = true
+        model.openSettings(.issues)
       } label: {
         Image(systemName: "gearshape")
       }
       .buttonStyle(.borderless)
-      .help("Choose the sources, your team, and the start preset")
+      .help("Choose the sources, your team, and the start preset in Settings")
       .accessibilityLabel("Issue sources")
     }
-    .padding(8)
+    .padding(.horizontal, Design.listInset)
+    .padding(.vertical, 8)
   }
 }
 
@@ -136,6 +132,7 @@ private struct IssueListHeader: View {
 /// with the last preset.
 private struct IssueRows: View {
   @EnvironmentObject var model: BoardModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @FocusState private var focused: Bool
   let sections: [IssueSection]
 
@@ -171,7 +168,7 @@ private struct IssueRows: View {
         if let row = model.currentIssue { model.startIssue(row) }
       }
       .onChange(of: model.issueJumps) {
-        if let id = model.currentIssue?.id { withAnimation { proxy.scrollTo(id) } }
+        if let id = model.currentIssue?.id { proxy.scrollTo(id, reduceMotion: reduceMotion) }
       }
     }
   }
@@ -412,7 +409,8 @@ private struct IssueSkeleton: View {
       }
     }
     .redacted(reason: .placeholder)
-    .padding(16)
+    .padding(.horizontal, Design.listInset)
+    .padding(.vertical, 16)
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     .accessibilityLabel("Loading issues")
   }

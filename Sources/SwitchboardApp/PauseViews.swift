@@ -18,6 +18,21 @@ enum GroupPause {
   }
 }
 
+/// The Pause menu: Until Resumed, then the presets of the Snooze menu and Pick a Time…. A preset pauses the
+/// session until that time, and sbd then resumes it.
+struct PauseMenuItems: View {
+  @EnvironmentObject var model: BoardModel
+  let id: String
+
+  var body: some View {
+    Menu("Pause") {
+      Button("Until Resumed") { model.pause(id) }.help(PauseBanner.pauseHelp)
+      Divider()
+      TimePresetItems(pick: { model.pickingPauseTime = id }, choose: { model.pause(id, until: $0) })
+    }
+  }
+}
+
 /// "Paused" in a capsule, with who paused the session and why as its help.
 struct PausedBadge: View {
   let pause: Pause

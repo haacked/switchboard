@@ -100,6 +100,31 @@ extension BoardModel {
     loopJumps += 1
   }
 
+  /// Selects the session of a loop or of an activity entry. The operator has no sidebar row, so it opens its
+  /// transcript instead.
+  func showLoopSession(_ session: SessionSummary) {
+    if session.kind == .operator { openOperator() } else { showInSidebar(session) }
+  }
+
+  /// Reads the operator's newest activity events off the main thread. With no operator, the list empties.
+  func loadBackgroundActivity() {
+    guard let id = operatorSession?.id else {
+      if !backgroundActivity.isEmpty { backgroundActivity = [] }
+      return
+    }
+    let send = send
+    let args: [String: JSON] = [
+      "session": .string(id), "kinds": .array(BackgroundActivity.kinds.map(JSON.string)),
+      "limit": .number(Double(BackgroundActivity.limit)),
+    ]
+    Task { [weak self] in
+      let events = await Task.detached { try? JSONCoding.convert(send("events", args), to: [Event].self) }.value
+      guard let self, let events else { return }
+      let entries = BackgroundActivity.entries(events)
+      if backgroundActivity != entries { backgroundActivity = entries }
+    }
+  }
+
   private func allLoopRows(now: Int64) -> [LoopRow] {
     sessions.flatMap { session in
       let hold = session.scheduleHold

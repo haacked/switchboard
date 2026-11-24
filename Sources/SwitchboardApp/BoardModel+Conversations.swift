@@ -22,7 +22,7 @@ extension BoardModel {
   /// shows, or nil when nothing should be marked: the session is a work
   /// session, or no reply is unread.
   static func readThrough(_ s: SessionSummary) -> Int? {
-    guard s.kind.showsAsChat, let activity = s.activity, activity.unread > 0 else { return nil }
+    guard s.kind.isConversation, let activity = s.activity, activity.unread > 0 else { return nil }
     return activity.replies
   }
 

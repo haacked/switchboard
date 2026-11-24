@@ -11,6 +11,8 @@ final class BoardGeometry {
   /// rectangle ends, unless the card draws again first.
   private(set) var frames: [String: CGRect] = [:]
   var header: CGRect = .zero
+  /// The frame of each lane's header, by lane id. Its text fields and buttons take the clicks and drags there.
+  private(set) var laneHeaders: [String: CGRect] = [:]
   /// A view inside the Board's scroll view, which finds the scroll view.
   weak var anchor: NSView?
   /// Where the last event of a rectangle drag put the pointer, in window coordinates. The pointer rests there
@@ -29,6 +31,16 @@ final class BoardGeometry {
   }
 
   func keepFrames(_ ids: Set<String>) { frames = frames.filter { ids.contains($0.key) } }
+
+  func recordLaneHeader(_ lane: String, _ frame: CGRect) { laneHeaders[lane] = frame }
+
+  /// Removes the frame of a lane header view that went away. A second view can draw the same lane, and SwiftUI
+  /// may report its frame before the first view disappears. It removes the frame only when the departing view
+  /// wrote the stored frame.
+  func dropLaneHeader(_ lane: String, ifStill frame: CGRect?) {
+    guard let frame, laneHeaders[lane] == frame else { return }
+    laneHeaders[lane] = nil
+  }
 
   /// Stores the frame that a card view reports. It cancels a pending removal of that card's frame.
   func record(_ id: String, _ frame: CGRect) {
@@ -135,8 +147,7 @@ struct BoardMarqueeSelection: ViewModifier {
 
   private func onEmptySpace(_ point: CGPoint) -> Bool {
     BoardRect.startsSelection(
-      at: point, frames: geometry.frames, labelEdge: BoardView.boardPadding + BoardView.labelWidth,
-      header: geometry.header)
+      at: point, frames: geometry.frames, blocked: [geometry.header] + geometry.laneHeaders.values)
   }
 
   private func select() {
@@ -168,24 +179,28 @@ struct BoardScrollAnchor: NSViewRepresentable {
   func updateNSView(_ view: NSView, context: Context) { geometry.anchor = view }
 }
 
-/// Makes a card draggable onto a lane. A selected card drags the whole selection.
+/// Makes a card draggable onto a lane. A selected card drags the whole selection. Apply it to a Button's label,
+/// not to the Button, because SwiftUI starts no drag from a Button.
 struct CardDrag: ViewModifier {
   @EnvironmentObject var model: BoardModel
   let id: String
   let enabled: Bool
 
+  @ViewBuilder
   func body(content: Content) -> some View {
-    let ids = model.boardActionIDs(for: id)
-    if !enabled {
-      content
-    } else if ids.count > 1 {
-      content.draggable(BoardDrag.payload(ids)) {
-        Label("\(ids.count) sessions", systemImage: "square.stack")
-          .padding(8)
-          .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    if enabled {
+      let ids = model.boardActionIDs(for: id)
+      if ids.count > 1 {
+        content.draggable(BoardDrag.payload(ids)) {
+          Label("\(ids.count) sessions", systemImage: "square.stack")
+            .padding(8)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        }
+      } else {
+        content.draggable(id)
       }
     } else {
-      content.draggable(id)
+      content
     }
   }
 }

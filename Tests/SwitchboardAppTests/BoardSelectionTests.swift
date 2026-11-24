@@ -334,20 +334,26 @@ private func board(clicking clicks: [(String, BoardClick)]) -> BoardModel {
   }
 }
 
-/// Whether a drag or a click starts on empty Board space. A start on a card belongs to the card's drag, the
-/// label column holds text fields and buttons, and the pinned header holds the picker and the name field.
+/// Whether a drag or a click starts on empty Board space. A start on a card belongs to the card's drag. A lane
+/// header holds the lane's name and its controls. The pinned header holds the picker and the name field.
 @Suite struct BoardRectStart {
-  static let labelEdge: CGFloat = 180
   static let header = CGRect(x: 0, y: 0, width: 1200, height: 60)
   /// After a scroll, the pinned header sits at the top of the visible area, deep in the content.
   static let scrolledHeader = CGRect(x: 0, y: 1900, width: 1200, height: 60)
-  /// Lane 1 has `a` over `b` in one column and `c` in the next. Lane 2 has `d`. `e` is far down the Board.
+  /// Each lane's header spans the lane above its row of columns.
+  static let laneHeaders = [
+    CGRect(x: 16, y: 64, width: 1168, height: 28),
+    CGRect(x: 16, y: 300, width: 1168, height: 28),
+    CGRect(x: 16, y: 1960, width: 1168, height: 28),
+  ]
+  /// Lane 1 has `a` over `b` in its first column and `c` in the next. Lane 2 has an empty first column and `d` in
+  /// the next. `e` is far down the Board in lane 3.
   static let frames: [String: CGRect] = [
-    "a": CGRect(x: 200, y: 100, width: 180, height: 80),
-    "b": CGRect(x: 200, y: 190, width: 180, height: 80),
-    "c": CGRect(x: 400, y: 100, width: 180, height: 80),
-    "d": CGRect(x: 200, y: 400, width: 180, height: 80),
-    "e": CGRect(x: 400, y: 2000, width: 180, height: 80),
+    "a": CGRect(x: 16, y: 100, width: 180, height: 80),
+    "b": CGRect(x: 16, y: 190, width: 180, height: 80),
+    "c": CGRect(x: 208, y: 100, width: 180, height: 80),
+    "d": CGRect(x: 208, y: 340, width: 180, height: 80),
+    "e": CGRect(x: 208, y: 2000, width: 180, height: 80),
   ]
 
   struct Start: Sendable, CustomTestStringConvertible {
@@ -359,31 +365,48 @@ private func board(clicking clicks: [(String, BoardClick)]) -> BoardModel {
 
   @Test(
     arguments: [
-      Start(testDescription: "a card's body", point: CGPoint(x: 290, y: 140), starts: false),
-      Start(testDescription: "a card's PR link in its corner", point: CGPoint(x: 375, y: 175), starts: false),
-      Start(testDescription: "a card's top left corner", point: CGPoint(x: 200, y: 100), starts: false),
-      Start(testDescription: "between two cards in a column", point: CGPoint(x: 290, y: 185), starts: true),
-      Start(testDescription: "between two columns", point: CGPoint(x: 390, y: 140), starts: true),
-      Start(testDescription: "the gap between lanes", point: CGPoint(x: 290, y: 330), starts: true),
-      Start(testDescription: "the label column", point: CGPoint(x: 100, y: 140), starts: false),
-      Start(testDescription: "the label column's last point", point: CGPoint(x: 179, y: 330), starts: false),
-      Start(testDescription: "the label column's edge", point: CGPoint(x: 180, y: 330), starts: true),
-      Start(testDescription: "the header", point: CGPoint(x: 290, y: 30), starts: false),
-      Start(testDescription: "the header over the label column", point: CGPoint(x: 100, y: 30), starts: false),
+      Start(testDescription: "a card's body", point: CGPoint(x: 106, y: 140), starts: false),
+      Start(testDescription: "a card's PR link in its corner", point: CGPoint(x: 191, y: 175), starts: false),
+      Start(testDescription: "a card's top left corner", point: CGPoint(x: 16, y: 100), starts: false),
+      Start(testDescription: "a card in the second column", point: CGPoint(x: 290, y: 140), starts: false),
+      Start(testDescription: "between two cards in a column", point: CGPoint(x: 106, y: 185), starts: true),
+      Start(testDescription: "between two columns", point: CGPoint(x: 202, y: 140), starts: true),
+      Start(testDescription: "below the last card in a column", point: CGPoint(x: 290, y: 250), starts: true),
+      Start(testDescription: "the gap between lanes", point: CGPoint(x: 290, y: 285), starts: true),
+      Start(testDescription: "between a lane header and its cards", point: CGPoint(x: 290, y: 96), starts: true),
       Start(testDescription: "right of the last column", point: CGPoint(x: 900, y: 140), starts: true),
       Start(
-        testDescription: "a card after a scroll", point: CGPoint(x: 490, y: 2040), header: scrolledHeader,
+        testDescription: "the far left of a card row past the padding", point: CGPoint(x: 17, y: 380),
+        starts: true),
+      Start(
+        testDescription: "the left of a card row below a lane header", point: CGPoint(x: 100, y: 380), starts: true),
+      Start(testDescription: "a lane header's name", point: CGPoint(x: 40, y: 78), starts: false),
+      Start(testDescription: "a lane header's controls", point: CGPoint(x: 1100, y: 78), starts: false),
+      Start(testDescription: "a lane header's top left corner", point: CGPoint(x: 16, y: 64), starts: false),
+      Start(testDescription: "a lane header's bottom edge", point: CGPoint(x: 290, y: 92), starts: true),
+      Start(testDescription: "the second lane's header", point: CGPoint(x: 290, y: 314), starts: false),
+      Start(testDescription: "the header", point: CGPoint(x: 290, y: 30), starts: false),
+      Start(testDescription: "the header's left edge", point: CGPoint(x: 0, y: 30), starts: false),
+      Start(testDescription: "the header's bottom edge", point: CGPoint(x: 290, y: 60), starts: true),
+      Start(
+        testDescription: "a card after a scroll", point: CGPoint(x: 290, y: 2040), header: scrolledHeader,
         starts: false),
       Start(
-        testDescription: "under a card after a scroll", point: CGPoint(x: 490, y: 2100), header: scrolledHeader,
+        testDescription: "under a card after a scroll", point: CGPoint(x: 290, y: 2100), header: scrolledHeader,
         starts: true),
       Start(
         testDescription: "the header after a scroll", point: CGPoint(x: 900, y: 1930), header: scrolledHeader,
         starts: false),
+      Start(
+        testDescription: "a lane header deep in the content after a scroll", point: CGPoint(x: 290, y: 1974),
+        header: scrolledHeader, starts: false),
+      Start(
+        testDescription: "where the header was before a scroll", point: CGPoint(x: 900, y: 30),
+        header: scrolledHeader, starts: true),
     ])
   func aSelectionStartsOnlyOnEmptyBoardSpace(_ start: Start) {
     let starts = BoardRect.startsSelection(
-      at: start.point, frames: Self.frames, labelEdge: Self.labelEdge, header: start.header)
+      at: start.point, frames: Self.frames, blocked: [start.header] + Self.laneHeaders)
 
     #expect(starts == start.starts)
   }
@@ -701,5 +724,24 @@ private func board(clicking clicks: [(String, BoardClick)]) -> BoardModel {
     geometry.dropFrame("a", ifStill: nil)
 
     #expect(geometry.frames["a"] == Self.old)
+  }
+
+  @Test func aLaneHeaderThatGoesAwayLosesItsFrame() {
+    let geometry = BoardGeometry()
+    geometry.recordLaneHeader("lane", Self.old)
+
+    geometry.dropLaneHeader("lane", ifStill: Self.old)
+
+    #expect(geometry.laneHeaders["lane"] == nil)
+  }
+
+  /// A second view that draws the same lane can report its header frame before the first view goes away.
+  @Test func aLaneHeaderThatAnotherViewRedrewKeepsTheNewFrame() {
+    let geometry = BoardGeometry()
+    geometry.recordLaneHeader("lane", Self.new)
+
+    geometry.dropLaneHeader("lane", ifStill: Self.old)
+
+    #expect(geometry.laneHeaders["lane"] == Self.new)
   }
 }

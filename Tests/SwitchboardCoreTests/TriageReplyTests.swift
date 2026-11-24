@@ -569,10 +569,12 @@ private let decision = PendingDecision(
   }
 
   @Test func theOperatorsReportItemGetsNoQuestion() throws {
-    let f = facts([
-      opPrompt(1, "hello"), stop(2, 2, try replyFixture("rule-hides-question")),
-      opReport(3, "Should I pause the rollout?"),
-    ])
+    let f = opRouted(
+      operatorSession(),
+      facts([
+        opPrompt(1, "hello"), stop(2, 2, try replyFixture("rule-hides-question")),
+        opReport(3, "Should I pause the rollout?"),
+      ]))
     let v = opVerdict(operatorSession(), f)
 
     let built = try #require(Triage.item(f, v, kind: .operator))
@@ -582,17 +584,18 @@ private let decision = PendingDecision(
     #expect(built.options.map(\.action) == [.reply])
   }
 
-  /// The operator's wait item is a rule item, but the operator's Inbox takes no reply questions.
-  @Test func theOperatorsWaitItemGetsNoQuestion() throws {
-    let f = facts([opPrompt(1, "hello"), stop(2, 2, try replyFixture("rule-hides-question"))])
-    let v = opVerdict(operatorSession(waits: [overdueWait]), f)
-    try #require(v.byWaitRule, "\(v.state) \(v.reason)")
+  /// An overdue wait that sbd could not route gives the operator a held item, which takes no reply question.
+  @Test func theOperatorsHeldWaitItemGetsNoQuestion() throws {
+    let s = operatorSession(waits: [overdueWait])
+    let f = opRouted(s, facts([opPrompt(1, "hello"), stop(2, 2, try replyFixture("rule-hides-question"))]))
+    let v = opVerdict(s, f)
+    try #require(v.fromOperator, "\(v.state) \(v.reason)")
 
     let built = try #require(Triage.item(f, v, kind: .operator))
 
-    try #require(built.source == .rule)
+    try #require(built.source == .report)
     #expect(!hasAsk(built))
-    #expect(built.options == v.options)
+    #expect(built.options.isEmpty)
   }
 
   @Test func aFailedRemovalGetsNoQuestion() throws {

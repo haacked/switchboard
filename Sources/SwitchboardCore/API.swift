@@ -180,7 +180,7 @@ extension AccountMove {
     """
 }
 
-/// One Claude account, as `accounts` reports it.
+/// One account, as `accounts` reports it.
 public struct AccountInfo: Codable, Equatable, Sendable, Identifiable {
   public var name: String
   public var folder: String
@@ -188,13 +188,25 @@ public struct AccountInfo: Codable, Equatable, Sendable, Identifiable {
   public var active: Bool
   /// How many sessions run under the account.
   public var sessions: Int
+  /// The agent that the account's sessions run. An sbd that lists only Claude accounts leaves it out.
+  public var agent: Agent
   public var id: String { folder }
 
-  public init(name: String, folder: String, active: Bool, sessions: Int) {
+  public init(name: String, folder: String, active: Bool, sessions: Int, agent: Agent = .claude) {
     self.name = name
     self.folder = folder
     self.active = active
     self.sessions = sessions
+    self.agent = agent
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    name = try c.decode(String.self, forKey: .name)
+    folder = try c.decode(String.self, forKey: .folder)
+    active = try c.decode(Bool.self, forKey: .active)
+    sessions = try c.decode(Int.self, forKey: .sessions)
+    agent = try c.decodeIfPresent(Agent.self, forKey: .agent) ?? .claude
   }
 }
 

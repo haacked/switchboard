@@ -324,56 +324,8 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
     #expect(model.history.current == model.location)
   }
 
-  @Test func theTerminalToggleOnAChatAddsAnEntry() {
-    let model = appliedModel([needsItem("a"), chatItem("c", group: "g1")])
-    model.selection = "c"
-    let before = model.history.entries.count
-
-    model.showingTerminal = true
-
-    #expect(model.history.entries.count == before + 1)
-    #expect(model.history.current == at(.session("c"), terminal: true))
-    #expect(model.history.current == model.location)
-  }
-
-  @Test func backRestoresAChatsPreviousTerminalFlag() {
-    let model = appliedModel([needsItem("a"), chatItem("c", group: "g1")])
-    model.selection = "c"
-    model.showingTerminal = true
-
-    model.goBack()
-
-    #expect(model.selection == "c")
-    #expect(!model.showingTerminal)
-    #expect(model.history.current == model.location)
-  }
-
-  @Test func theTerminalToggleOnAManagerAddsAnEntry() {
-    let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
-    model.selection = "m"
-    let before = model.history.entries.count
-
-    model.showingTerminal = true
-
-    #expect(model.history.entries.count == before + 1)
-    #expect(model.history.current == at(.session("m"), terminal: true))
-    #expect(model.history.current == model.location)
-  }
-
-  @Test func backRestoresAManagersPreviousTerminalFlag() {
-    let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
-    model.selection = "m"
-    model.showingTerminal = true
-
-    model.goBack()
-
-    #expect(model.selection == "m")
-    #expect(!model.showingTerminal)
-    #expect(model.history.current == model.location)
-  }
-
-  /// The flag changes while the work session shows, so only the Manager's entry can turn it back on.
-  @Test func forwardFromAWorkSessionToAManagerRestoresTheManagersTerminalFlag() throws {
+  /// A Manager's own view always shows its terminal, so Forward to it leaves the Inbox's toggle as it was.
+  @Test func forwardFromAWorkSessionToAManagerLeavesTheTerminalFlag() throws {
     let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
     model.selection = "a"
     model.showingTerminal = true
@@ -385,13 +337,12 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
     model.goForward()
 
     #expect(model.selection == "m")
-    #expect(model.showingTerminal)
-    #expect(model.history.current == at(.session("m"), terminal: true))
+    #expect(!model.showingTerminal)
+    #expect(model.history.current == at(.session("m")))
     #expect(model.history.current == model.location)
   }
 
-  /// The flag changes while the work session shows, so only the Manager's entry can turn it back off.
-  @Test func backFromAWorkSessionToAManagerRestoresTheManagersTerminalFlagOff() {
+  @Test func backFromAWorkSessionToAManagerLeavesTheTerminalFlag() {
     let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
     model.selection = "m"
     model.selection = "a"
@@ -400,8 +351,72 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
     model.goBack()
 
     #expect(model.selection == "m")
-    #expect(!model.showingTerminal)
+    #expect(model.showingTerminal)
     #expect(model.history.current == at(.session("m")))
+    #expect(model.history.current == model.location)
+  }
+
+  // MARK: A session place never records the terminal flag
+
+  @Test(arguments: ["a", "c", "m", "op"])
+  func aSessionPlaceAlwaysRecordsTerminalFalse(_ session: String) {
+    let model = appliedModel(everyKind)
+    model.showingTerminal = true
+
+    model.selection = session
+
+    #expect(model.history.current == at(.session(session)))
+    #expect(model.location == at(.session(session)))
+  }
+
+  /// The toggle belongs to the Inbox, so turning it on while a conversation shows changes no place.
+  @Test(arguments: ["c", "m", "op"])
+  func theTerminalToggleOnAConversationAddsNoEntry(_ session: String) {
+    let model = appliedModel(everyKind)
+    model.selection = session
+    let before = model.history
+
+    model.showingTerminal = true
+
+    #expect(model.history == before)
+  }
+
+  /// No navigation records a session place with `terminal: true`, so the entry is built by hand.
+  @Test(arguments: ["a", "c", "m", "op"])
+  func anEntryForASessionWithTerminalTrueResolvesToTerminalFalse(_ session: String) {
+    let model = appliedModel(everyKind)
+
+    #expect(model.resolver()(at(.session(session), terminal: true)) == at(.session(session)))
+  }
+
+  @Test func anInboxEntryKeepsItsTerminalFlag() throws {
+    let model = appliedModel(everyKind)
+    let item = try #require(model.triage.first?.id)
+
+    #expect(model.resolver()(at(.inbox(item), terminal: true)) == at(.inbox(item), terminal: true))
+  }
+
+  /// Back to a session entry built with `terminal: true` selects the session, leaves the Inbox's toggle as it
+  /// was, and keeps the entry.
+  @Test(arguments: ["c", "m", "op"], [false, true])
+  func backToASessionEntryWithTerminalTrueLeavesTheToggleAndKeepsTheEntry(_ session: String, _ toggle: Bool)
+    throws
+  {
+    let model = appliedModel(everyKind)
+    model.selection = "a"
+    model.showingTerminal = toggle
+    var history = NavHistory(start: at(.inbox(nil)))
+    history.push(at(.session(session), terminal: true), resolve: { $0 })
+    history.push(at(.session("a")), resolve: { $0 })
+    model.history = history
+    try #require(model.canGoBack)
+
+    model.goBack()
+
+    #expect(model.selection == session)
+    #expect(model.showingTerminal == toggle)
+    #expect(model.history.entries.count == 3)
+    #expect(model.history.current == at(.session(session)))
     #expect(model.history.current == model.location)
   }
 
@@ -754,7 +769,7 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
   enum HistoryShape: String, CaseIterable, Sendable {
     case launch, cursorAtTheEnd, cursorInTheMiddle, removedBehind, removedAhead, equalBehindAfterASession,
       equalBehindWithNothingElse, aXaWithXRemoved, filterHiddenBehind, filterShowsItAgain, removedInboxItemBehind,
-      chatTerminalBehind, managerTerminalBehind, removedManagerTerminalBehind, unlistedSelection
+      unlistedSelection
 
     var canGoBack: Bool {
       switch self {
@@ -854,24 +869,6 @@ private func selectBetween(_ model: BoardModel, _ first: String, _ middle: Strin
         model.inboxFocus = triage[1]
         model.selection = triage[2]
         model.apply(.success(sessions(triage.filter { $0 != triage[1] })), followups: nil)
-        return model
-      case .chatTerminalBehind:
-        let model = appliedModel([needsItem("a"), chatItem("c", group: "g1")])
-        model.selection = "c"
-        model.showingTerminal = true
-        return model
-      case .managerTerminalBehind:
-        let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
-        model.selection = "m"
-        model.showingTerminal = true
-        return model
-      case .removedManagerTerminalBehind:
-        // Back from a skips both of the removed Manager's entries and lands on the launch entry.
-        let model = appliedModel([needsItem("a"), needsItem("m", manager: true)])
-        model.selection = "m"
-        model.showingTerminal = true
-        model.selection = "a"
-        model.apply(.success([needsItem("a")]), followups: nil)
         return model
       case .unlistedSelection:
         let model = threeSessions()

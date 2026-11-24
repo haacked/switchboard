@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 import SwitchboardCore
 import Testing
 import os
@@ -50,14 +50,25 @@ import os
     #expect(AccountMenu.help(failed).hasPrefix("automation, usage read failed. "))
   }
 
-  @Test func onlyASpentLimitOrAFailedReadNeedsTheUser() {
+  @Test func onlyASpentLimitOrAFailedReadWarns() {
     let spent = [UsageLimit(kind: "session", label: "Session (5h)", percent: 100, resetsAt: nil)]
-    #expect(!AccountMenu.needsYou(nil))
-    #expect(!AccountMenu.needsYou(row(nil)))
-    #expect(!AccountMenu.needsYou(row(AccountUsage(name: "a", folder: "/a"))))
-    #expect(!AccountMenu.needsYou(row(AccountUsage(name: "a", folder: "/a", limits: limits))))
-    #expect(AccountMenu.needsYou(row(AccountUsage(name: "a", folder: "/a", limits: spent))))
-    #expect(AccountMenu.needsYou(row(AccountUsage(name: "a", folder: "/a", error: "not signed in"))))
+    #expect(!AccountMenu.warns(nil))
+    #expect(!AccountMenu.warns(row(nil)))
+    #expect(!AccountMenu.warns(row(AccountUsage(name: "a", folder: "/a"))))
+    #expect(!AccountMenu.warns(row(AccountUsage(name: "a", folder: "/a", limits: limits))))
+    #expect(AccountMenu.warns(row(AccountUsage(name: "a", folder: "/a", limits: spent))))
+    #expect(AccountMenu.warns(row(AccountUsage(name: "a", folder: "/a", error: "not signed in"))))
+  }
+
+  @Test func theWarningIsNotTheNeedsYouColor() {
+    #expect(AccountMenu.warningColor != AttentionState.needsYou.color)
+  }
+
+  /// A misspelled symbol name draws an empty toolbar item.
+  @Test func bothToolbarSymbolsExist() {
+    for name in [AccountMenu.symbol, AccountMenu.warningSymbol] {
+      #expect(NSImage(systemSymbolName: name, accessibilityDescription: nil) != nil, "\(name)")
+    }
   }
 
   @Test func aLimitRowNamesTheResetTimeWhenThereIsOne() {
@@ -149,6 +160,15 @@ import os
 
     #expect(!prompts.canChoose)
     #expect(prompts.disabledReason == "New sessions can't use it until it signs in.")
+  }
+
+  @Test func aCodexAccountCannotBeChosenAndSaysWhy() {
+    let codex = AccountInfo(name: "codex-work", folder: "/c", active: false, sessions: 0, agent: .codex)
+
+    let row = AccountMenu.rows(accounts: accounts + [codex], usage: [])[3]
+
+    #expect(!row.canChoose)
+    #expect(row.disabledReason?.contains(Agent.onlyClaudeRunsSessions) == true)
   }
 
   @Test func aSignedOutActiveAccountStaysCheckedAndSaysWhy() {
@@ -337,6 +357,18 @@ final class OpLog: Sendable {
 
     model.usage = []
     model.accounts[1].sessions = 0
+    #expect(model.moveTarget == nil)
+  }
+
+  /// Sessions on a Codex account never move to a Claude account, so they offer no move.
+  @Test func sessionsOnACodexAccountOfferNoMove() {
+    let model = offlineModel()
+    model.accounts = [
+      AccountInfo(name: "a", folder: "/a", active: true, sessions: 0),
+      AccountInfo(name: "codex", folder: "/c", active: false, sessions: 2, agent: .codex),
+    ]
+
+    #expect(model.sessionAccounts.map(\.folder) == ["/a"])
     #expect(model.moveTarget == nil)
   }
 }

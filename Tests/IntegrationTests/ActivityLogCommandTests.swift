@@ -143,20 +143,6 @@ extension Instance {
     #expect(try sbd.triggers(s.id) == ["open"])
   }
 
-  @Test func aNoticeToAParentIsNotByTheUser() throws {
-    let sbd = try Instance()
-    let parent = try stoppedSession(sbd)
-    try sbd.sb("activity", "on")
-    let child = try sbd.client.call(
-      "new", ["path": .string(sbd.work), "prompt": "hello", "parent": .string(parent.id)], as: SessionSummary.self)
-    try sbd.waitFor(child.id, "the child's reply") { $0.lastReply == "Done: hello" }
-
-    let notice = try sbd.waitForResumes(.notice)
-
-    #expect(!notice.userCaused)
-    #expect(try sbd.triggers(parent.id).last == "notice")
-  }
-
   func postSessionStart(_ sbd: Instance, _ id: String, claudeSessionId: String, source: String) throws {
     _ = try sbd.client.call(
       "hook",

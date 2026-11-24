@@ -20,6 +20,7 @@ enum PlannedScope {
 
   private static let sessionOnly = Row(keys: ["session"], refs: ["session"])
   private static let noteKeys: Set<String> = ["session", "text", "by", "kind", "note"]
+  private static let linkKeys: Set<String> = ["session", "url", "title", "link", "by", "caller"]
   private static let waitKeys: Set<String> = [
     "session", "kind", "target", "who", "environment", "service", "state", "until", "since", "note", "then", "by",
     "needsYou", "wait", "outcome", "caller",
@@ -41,6 +42,8 @@ enum PlannedScope {
     "note": Row(keys: noteKeys, refs: ["session"]),
     "remove-note": Row(keys: noteKeys, refs: ["session"]),
     "resolve-note": Row(keys: noteKeys, refs: ["session"]),
+    "link-add": Row(keys: linkKeys, refs: ["session", "caller"]),
+    "link-rm": Row(keys: linkKeys, refs: ["session", "caller"]),
     "wait": Row(keys: waitKeys, refs: ["session"], waitTarget: true),
     "clear-wait": Row(keys: waitKeys, refs: ["session"]),
     "resolve-wait": Row(keys: waitKeys, refs: ["session"]),
@@ -72,7 +75,8 @@ enum PlannedScope {
     "group-note", "group-describe", "group-link-add", "group-link-rm", "group-account", "group-suggest", "manager",
     "manager-ls", "manager-mcp",
     "manager-skills", "chat",
-    "chat-log", "slash-commands", "removed-ls", "manager-pin", "manager-model", "item-context", "manager-mcp-request",
+    "chat-log", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "manager-model",
+    "item-context", "manager-mcp-request",
     "operator", "operator-report", "operator-reports", "quick-ask", "ref-details", "pause", "snooze", "unsnooze",
     "highlight", "parent", "schedule", "wait-approve",
     "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "rm-plan", "rm-queue",
@@ -80,10 +84,13 @@ enum PlannedScope {
     "removal-notices", "removal-notice-dismiss", "import", "importable", "accounts",
     "account-use",
     "account-move",
+    "account-add",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "autocontinue", "snapshots", "poll", "repos", "repo-add", "clock",
+    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
+    "decision-ask",
     "plan-attach", "plan-update", "plan-propose", "plan-apply", "plan-artifact-read", "plan-artifact-rewrite",
     "plan-artifact-apply", "plan-artifact-reject", "plan-artifact-report", "plan-followup", "plan-ls", "plan-get",
     "plan-detach", "plan-auto", "plan-proposals", "plan-reject", "followup-add", "followup-ls", "followup-start",
@@ -235,6 +242,18 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     #expect(Set(HostScope.rules.keys).isDisjoint(with: HostScope.refused.keys))
   }
 
+  /// `manager-end` stops the conversation's claude, so a host's client could be inside the session it stops.
+  @Test func managerEndIsRefusedForTheReasonThatRmIs() {
+    #expect(HostScope.refused["manager-end"] != nil)
+    #expect(HostScope.refused["manager-end"] == HostScope.refused["rm"])
+  }
+
+  /// `manager-hint` reads and dismisses a conversation's hint on this Mac, as `manager-ls` reads its conversations.
+  @Test func managerHintIsRefusedForTheReasonThatManagerLsIs() {
+    #expect(HostScope.refused["manager-hint"] != nil)
+    #expect(HostScope.refused["manager-hint"] == HostScope.refused["manager-ls"])
+  }
+
   // MARK: The keys
 
   /// A request that names only mini's sessions by their ids passes unchanged, with every key of its row.
@@ -258,11 +277,14 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     #expect(refused, "\(why)")
   }
 
-  /// The keys that Risk 1 names, and keys that differ from a row's key only in their spelling.
+  /// The keys that Risk 1 names, and keys that differ from a row's key only in their spelling. A host may not send
+  /// `reports`, because it would close the Operator's reports.
   @Test(arguments: [
-    ("send", "images"), ("new", "account"), ("new", "group"), ("get", "host"), ("spawn", "account"),
-    ("spawn", "group"), ("spawn", "followup"), ("spawn", "after"), ("ping", "session"), ("ls", "session"),
-    ("wait", "on"), ("get", "Session"), ("send", "session "), ("events", "follow"), ("answer", "always "),
+    ("send", "images"), ("send", "reports"), ("new", "account"), ("new", "group"), ("get", "host"),
+    ("spawn", "account"), ("spawn", "group"), ("spawn", "followup"), ("spawn", "after"), ("ping", "session"),
+    ("ls", "session"), ("wait", "on"), ("get", "Session"), ("send", "session "), ("events", "follow"),
+    ("answer", "always "), ("link-add", "from"), ("link-add", "insideClaude"), ("link-rm", "group"),
+    ("link-rm", "Link"),
   ])
   func aKeyThatTheOpDoesNotReadIsRefused(op: String, key: String) {
     var args = PlannedScope.baseArgs(op)

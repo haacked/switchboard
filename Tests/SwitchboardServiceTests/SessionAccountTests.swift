@@ -22,3 +22,14 @@ import Testing
     #expect(SessionAccount.host("mini") != .local(ClaudeAccount(folder: "mini:~/.claude")))
   }
 }
+
+/// Risk 1: the host label reaches `headlessEnv` and quota lookups, which treat a Codex folder as no Claude
+/// account. The label names the host's ~/.claude, so it never reads as a Codex folder, whatever the host's name.
+@Suite struct SessionAccountHostLabel {
+  @Test(.timeLimit(.minutes(1)), arguments: ["mini", "codex", ".codex", ".codex-x", "codex-work"])
+  func aHostLabelIsNeverACodexFolder(_ host: String) throws {
+    try withService { service, _ in
+      #expect(service.queue.sync { service.codexName(SessionAccount.host(host).key) } == nil)
+    }
+  }
+}

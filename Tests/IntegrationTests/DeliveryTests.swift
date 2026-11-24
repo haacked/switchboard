@@ -254,7 +254,9 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     case .delivered:
       try sbd.sb("decide", s.id, "--submit")
       try sbd.waitFor(s.id, "the reply to the decisions") { $0.lastReply?.hasPrefix("Done: My decisions") == true }
-      try #require(try !sbd.events(s.id, "delivered", text: try sbd.submittedMessage(s.id)).isEmpty)
+      // claude can finish the turn before the paste records `delivered`.
+      let message = try sbd.submittedMessage(s.id)
+      try sbd.waitFor("the decisions' delivered") { try !sbd.events(s.id, "delivered", text: message).isEmpty }
     }
   }
 }
@@ -271,14 +273,18 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
 
     var description: String { rawValue }
 
+    /// The config.json keys of the sbd for this path. A direct paste waits out sbd's production wait after
+    /// SessionStart.
+    var config: [String: JSON] { self == .direct ? Instance.productionPasteSettle : [:] }
+
     /// A session in the state that sends the message down this path.
     func session(_ sbd: Instance) throws -> SessionSummary {
       switch self {
       case .direct:
-        // sbd pastes at once only 1.5 s after SessionStart.
+        // sbd pastes at once only after SessionStart is `productionPasteSettleMs` old.
         let s = try sbd.endedSession()
         let start = try #require(try sbd.events(s.id).last { $0.kind == "SessionStart" }?.t)
-        try sbd.waitFor("claude's prompt to settle") { try sbd.now() - start >= 1600 }
+        try sbd.waitFor("claude's prompt to settle") { try sbd.now() - start >= Instance.productionPasteSettleMs + 100 }
         return s
       case .queued:
         let s = try sbd.new(prompt: "slow 4")
@@ -298,7 +304,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// again on its own, without waiting for a hook.
   @Test(arguments: Path.allCases)
   func aSendKilledBeforeItsPasteReachesTheSessionOnce(_ path: Path) throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: path.config)
     let s = try path.session(sbd)
     sbd.hold("hold-paste")
     let text = "sent before the kill"
@@ -338,9 +344,24 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     #expect(sbd.settledStubInputCount(text) == 1)
   }
 
+  /// The gate appears after sbd recorded `pasting` and while the paste is
+  /// still in the terminal. sbd read the gate before it recorded `pasting`, so
+  /// it records `delivered` while the gate exists.
+  @Test func aPasteThatStartedBeforeHoldDeliveredPassesIt() throws {
+    let sbd = try Instance(config: Path.direct.config)
+    let s = try Path.direct.session(sbd)
+    let text = "started before the gate"
+
+    try sbd.sb("send", s.id, text)
+    try sbd.waitFor("pasting") { try sbd.events(s.id, "pasting", text: text).count == 1 }
+    sbd.hold("hold-delivered")
+
+    try sbd.waitFor("delivered while the gate exists") { try !sbd.events(s.id, "delivered", text: text).isEmpty }
+  }
+
   /// sbd can't store the `sent` event, so it refuses the send and pastes nothing.
   @Test func aSendThatCantStoreItsSentEventPastesNothing() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let s = try Path.direct.session(sbd)
     let text = "sent while the log is locked"
 
@@ -354,7 +375,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// A stopped claude would start with the message as its prompt. sbd can't
   /// store the `sent` event, so it refuses the send and starts nothing.
   @Test func aSendToAStoppedClaudeThatCantStoreItsSentEventStartsNothing() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let s = try Path.direct.session(sbd)
     try sbd.stopClaude(s.id)
     let launches = sbd.stubArgs().count
@@ -372,7 +393,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// lock holds, so it pastes nothing. It tries again until the lock goes,
   /// and then pastes the message once.
   @Test func aPasteWaitsUntilItsPastingEventIsStored() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let s = try Path.direct.session(sbd)
     sbd.hold("hold-paste")
     let text = "pasted after the lock"
@@ -393,13 +414,13 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// arrived. Only a line written after this send's `sent` event shows that
   /// this paste landed, and the stub's hold keeps that line from being written.
   @Test func anEarlierCopyOfTheTextInTheTranscriptDoesNotMarkALaterPasteDelivered() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let s = try Path.direct.session(sbd)
     let text = "the same words twice"
     try sbd.sb("send", s.id, text)
     try sbd.waitFor(s.id, "the first copy's reply") { $0.lastReply == "Done: \(text)" }
     try #require(sbd.transcriptContains(s, text))
-    let deliveredBefore = try sbd.events(s.id, "delivered", text: text).count
+    try sbd.waitFor("the first copy's delivered") { try sbd.events(s.id, "delivered", text: text).count == 1 }
     sbd.hold("hold-delivered")
     sbd.hold("hold")
     let before = sbd.completePastes()
@@ -412,7 +433,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
     try sbd.startSbd()
 
     try sbd.waitFor("delivery_unknown") { try sbd.events(s.id, "delivery_unknown", text: text).count == 1 }
-    #expect(try sbd.events(s.id, "delivered", text: text).count == deliveredBefore)
+    #expect(try sbd.events(s.id, "delivered", text: text).count == 1)
   }
 
   static let draft = "half a thought"
@@ -446,7 +467,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// A paste submits whatever the box holds, so sbd holds the message
   /// without an event until the user clears the draft.
   @Test func aDraftInThePromptBoxHoldsAPasteUntilItIsCleared() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let text = "sent behind a draft"
     let s = try sendBehindADraft(sbd, text)
 
@@ -461,7 +482,7 @@ enum ResendRefusal: String, CaseIterable, CustomStringConvertible {
   /// A held message has no `pasting` event, so the restarted sbd treats it
   /// as pending and still holds it behind the draft.
   @Test func aMessageHeldByADraftIsDeliveredOnceAfterARestart() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Path.direct.config)
     let text = "held across a restart"
     let s = try sendBehindADraft(sbd, text)
     usleep(1_500_000)

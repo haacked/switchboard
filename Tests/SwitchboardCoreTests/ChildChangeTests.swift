@@ -1,0 +1,164 @@
+import Testing
+
+@testable import SwitchboardCore
+
+/// The marks a parent records, starting from `.fresh`, as its child shows each PR number in turn.
+private func heard(_ prs: [Int?]) -> [ChildMark] {
+  var marks = [ChildMark.fresh]
+  for pr in prs { marks.append(marks.last!.updated(to: ChildMark(state: .working, pr: pr))) }
+  return marks
+}
+
+@Suite struct ChildChangeTests {
+  func lines(_ before: ChildMark, _ after: ChildMark, reason: String = "answer: which?", url: String? = nil)
+    -> [String]
+  {
+    ParentDigest.line(name: "fix", id: "s1", heard: before, now: after, reason: reason, prURL: url).map { [$0] } ?? []
+  }
+
+  @Test func saysWhenAChildNeedsYou() {
+    let result = lines(.fresh, ChildMark(state: .needsYou, pr: nil))
+    #expect(result == ["fix (s1): needs you in its own Inbox item (switchboard://session/s1): answer: which?"])
+  }
+
+  @Test func saysWhenAChildIsDone() {
+    #expect(lines(.fresh, ChildMark(state: .done, pr: nil)) == ["fix (s1): done"])
+  }
+
+  @Test func saysWhenAChildOpensAPR() {
+    let result = lines(.fresh, ChildMark(state: .working, pr: 7), url: "https://github.com/o/r/pull/7")
+    #expect(result == ["fix (s1): opened PR #7: https://github.com/o/r/pull/7"])
+  }
+
+  @Test func listsAPRBeforeTheStateItCaused() {
+    let result = lines(.fresh, ChildMark(state: .needsYou, pr: 7))
+    #expect(result.count == 1)
+    #expect(result[0].contains("opened PR #7; needs you"))
+  }
+
+  @Test func saysNothingForOtherChanges() {
+    #expect(lines(.fresh, ChildMark(state: .canContinue, pr: nil)).isEmpty)
+    #expect(lines(.fresh, ChildMark(state: .waiting, pr: nil)).isEmpty)
+    let needs = ChildMark(state: .needsYou, pr: 7)
+    #expect(lines(needs, needs).isEmpty)
+    #expect(lines(ChildMark(state: .working, pr: 7), ChildMark(state: .working, pr: 7)).isEmpty)
+  }
+
+  @Test func saysAgainWhenTheChildReturnsToNeedsYou() {
+    let needs = ChildMark(state: .needsYou, pr: nil)
+    #expect(lines(.fresh, needs).count == 1)
+    #expect(lines(needs, .fresh).isEmpty)
+    #expect(lines(.fresh, needs).count == 1)
+  }
+
+  @Test func saysAgainWhenADocketRowInNeedsYouNeedsSomethingElse() {
+    let failed = ChildMark(state: .needsYou, pr: nil, needs: "can't read docket")
+    let drafted = ChildMark(state: .needsYou, pr: nil, needs: "draft ready to submit")
+    #expect(
+      lines(failed, drafted, reason: "draft ready to submit") == [
+        "fix (s1): needs you in its own Inbox item (switchboard://session/s1): draft ready to submit"
+      ])
+    #expect(lines(drafted, drafted).isEmpty)
+    #expect(lines(drafted, ChildMark(state: .working, pr: nil)).isEmpty)
+  }
+
+  func announced(_ prs: [Int?]) -> [String] {
+    let marks = heard(prs)
+    return zip(marks, marks.dropFirst()).flatMap { lines($0, $1) }
+  }
+
+  @Test func saysNothingWhenAHeardPRDropsOutAndReturns() {
+    #expect(announced([26, nil, 26]) == ["fix (s1): opened PR #26"])
+  }
+
+  @Test func saysWhenAPRThatReturnsHasANewNumber() {
+    #expect(announced([26, nil, 28]) == ["fix (s1): opened PR #26", "fix (s1): opened PR #28"])
+  }
+
+  @Test func saysNothingWhenAnEarlierHeardNumberReturns() {
+    #expect(announced([26, 28, nil, 26]) == ["fix (s1): opened PR #26", "fix (s1): opened PR #28"])
+  }
+
+  @Test func keepsTheHeardNumbersWhenTheChildIsSeenAfresh() {
+    let marks = heard([26])
+    #expect(marks.last!.updated(to: .fresh).heardPRs == [26])
+  }
+}
+
+@Suite struct ParentDigestTests {
+  func line(_ heard: ChildMark, _ now: ChildMark, url: String? = nil) -> String? {
+    ParentDigest.line(name: "fix", id: "s1", heard: heard, now: now, reason: "answer: which?", prURL: url)
+  }
+
+  @Test func putsEveryChangeOfAChildOnOneLine() {
+    let result = line(.fresh, ChildMark(state: .needsYou, pr: 7), url: "https://github.com/o/r/pull/7")
+    #expect(
+      result
+        == "fix (s1): opened PR #7: https://github.com/o/r/pull/7; needs you in its own Inbox item (switchboard://session/s1): answer: which?"
+    )
+    #expect(line(.fresh, ChildMark(state: .done, pr: nil)) == "fix (s1): done")
+    #expect(line(.fresh, ChildMark(state: .readyToMerge, pr: nil)) == "fix (s1): answer: which?")
+  }
+
+  @Test func hasNoLineForAChildThatIsBackWhereItsParentLastHeard() {
+    let needs = ChildMark(state: .needsYou, pr: nil)
+    #expect(line(needs, needs) == nil)
+    #expect(line(.fresh, ChildMark(state: .canContinue, pr: nil)) == nil)
+  }
+
+  @Test func hasNoLineForAHeardPRThatDropsOutAndReturns() {
+    let back = heard([26, nil, 26])
+    #expect(line(back[1], back[2]) == nil)
+    #expect(line(back[2], back[3]) == nil)
+    let other = heard([26, nil, 28])
+    #expect(line(other[2], other[3]) == "fix (s1): opened PR #28")
+  }
+
+  func session(_ id: String, state: AttentionState) -> SessionSummary {
+    SessionSummary(
+      id: id, name: id, cwd: "/tmp", repo: nil, branch: nil, claudeSessionId: id, state: state, reason: "why \(id)",
+      since: 0, lastActivity: 0, live: true, claudePid: nil, attached: false, lastReply: nil, waits: [], notes: [])
+  }
+
+  @Test func theStartDigestListsEachSessionUnderItsState() {
+    let text = ParentDigest.startText([session("b", state: .working), session("a", state: .needsYou)], inbox: [])
+    #expect(
+      text == """
+        Switchboard: the sessions as this conversation starts.
+        \(AttentionState.needsYou.title):
+        - a (a): why a
+        \(AttentionState.working.title):
+        - b (b): why b
+        """)
+  }
+
+  @Test func theStartDigestOfAnEmptyBoardSaysSo() {
+    #expect(
+      ParentDigest.startText([], inbox: [])
+        == "Switchboard: the sessions as this conversation starts.\nThere are no other sessions.")
+  }
+
+  @Test func listsTheLinesThenTheCounts() {
+    let text = ParentDigest.text(["a (s1): done"], elsewhere: BoardCounts(needsYou: 2, readyToMerge: 1))
+    #expect(
+      text == """
+        Switchboard: what changed since your last turn.
+        Sessions you started:
+        - a (s1): done
+        Other sessions: 2 in Needs you, 1 in Ready to merge.
+        """)
+  }
+
+  @Test func countsTheLinesPastTheLimit() {
+    let text = ParentDigest.text((1...18).map { "s\($0): done" }, elsewhere: BoardCounts())
+    #expect(text.contains("- s15: done"))
+    #expect(!text.contains("- s16: done"))
+    #expect(text.contains("- and 3 more\n"))
+  }
+
+  @Test func answersTheHookWithTheTextAsAdditionalContext() {
+    let output = ParentDigest.hookOutput("t", event: "UserPromptSubmit")
+    #expect(output["hookSpecificOutput"]?["hookEventName"] == "UserPromptSubmit")
+    #expect(output["hookSpecificOutput"]?["additionalContext"] == "t")
+  }
+}

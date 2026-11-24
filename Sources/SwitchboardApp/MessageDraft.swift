@@ -26,16 +26,46 @@ extension MessageField {
     var trimmed: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     /// Sends the trimmed text and the images, and empties the field once sbd accepts them, unless the user
-    /// changed it meanwhile. `then` runs after that.
+    /// changed it meanwhile. `then` runs after that. On an Operator question's ref, it answers through the item's
+    /// Reply, so sbd sends the text to the Operator and not to the session's claude (Decision 49 in the notes repo's
+    /// `plans/410-invisible-operator.md`).
     @MainActor func submit(
       _ session: String, ref: String? = nil, to model: BoardModel, runHere: Bool = false, then: (() -> Void)? = nil
     ) {
       guard !isEmpty else { return }
+      if let ref, Self.answersOperator(ref: ref) {
+        answerOperator(session, ref: ref, to: model, then: then)
+        return
+      }
       let sent = trimmed
       let ids = images.map(\.id)
       model.send(session, sent, images: images.map { ($0.name, $0.data) }, ref: ref, runHere: runHere) {
         [weak self] in
         self?.clear(ifStill: sent, images: ids)
+        then?()
+      }
+    }
+
+    /// Whether a field that answers the item with `ref` sends to the Operator. Only an ask's ref does.
+    static func answersOperator(ref: String?) -> Bool { ref.map(Triage.isReportRef) == true }
+
+    /// Sends the text as the Reply of the session's item with `ref`. It never falls back to a message to the
+    /// session, so it sends nothing when the item has no Reply or the draft holds images.
+    @MainActor private func answerOperator(
+      _ session: String, ref: String, to model: BoardModel, then: (() -> Void)?
+    ) {
+      guard images.isEmpty else {
+        error = "An answer to background follow-through can't carry images."
+        return
+      }
+      let item = model.allSessions.first { $0.id == session }?.triage
+      guard item?.ref == ref, let index = item?.options.firstIndex(where: { $0.action == .reply }) else {
+        error = "This question is no longer open."
+        return
+      }
+      let sent = trimmed
+      model.choose(session, ref: ref, option: index + 1, action: .reply, text: sent) { [weak self] in
+        self?.clear(ifStill: sent)
         then?()
       }
     }

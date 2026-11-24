@@ -16,9 +16,15 @@ struct AccountRow: Identifiable, Equatable {
   var signedOut: Bool { usage?.signedOut == true }
   /// The account's name in a menu that moves sessions to it, which names a signed-out account as such.
   var choiceTitle: String { signedOut ? "\(account.name) (not signed in)" : account.name }
-  /// A click on the row makes the account the one for new sessions.
-  var canChoose: Bool { !account.active && !signedOut }
-  var disabledReason: String? { signedOut ? "New sessions can't use it until it signs in." : nil }
+  /// A click on the row makes the account the one for new sessions. Only an account whose agent runs sessions
+  /// can become that account.
+  var canChoose: Bool { account.agent.runsSessions && !account.active && !signedOut }
+  var disabledReason: String? {
+    guard account.agent.runsSessions else {
+      return "A \(account.agent.displayName) account. \(Agent.onlyClaudeRunsSessions)."
+    }
+    return signedOut ? "New sessions can't use it until it signs in." : nil
+  }
 }
 
 /// The toolbar item for the account that new sessions use. Its tooltip names
@@ -32,13 +38,13 @@ struct AccountMenu: View {
     if Self.shows(accounts: model.accounts, usage: model.usage) {
       let rows = Self.rows(accounts: model.accounts, usage: model.usage)
       let active = rows.first { $0.account.active }
-      let needsYou = Self.needsYou(active)
+      let warns = Self.warns(active)
       Button {
         model.showingAccounts.toggle()
       } label: {
         // The name and usage text would push New Session into the overflow at 1024 pt. The tooltip shows them.
-        Label("Account", systemImage: needsYou ? "exclamationmark.triangle" : "gauge.with.dots.needle.50percent")
-          .foregroundStyle(needsYou ? AttentionState.needsYou.color : .primary)
+        Label("Account", systemImage: warns ? Self.warningSymbol : Self.symbol)
+          .foregroundStyle(warns ? Self.warningColor : .primary)
       }
       .help(Self.help(active))
       .accessibilityValue(active == nil ? "" : Self.summary(active))
@@ -58,10 +64,15 @@ struct AccountMenu: View {
     !accounts.isEmpty && (!usage.isEmpty || accounts.count > 1)
   }
 
-  /// Whether the toolbar item shows the needs-you symbol and color: a limit is
+  static let symbol = "gauge.with.dots.needle.50percent"
+  static let warningSymbol = "exclamationmark.triangle.fill"
+  /// Yellow, not the Needs you orange, because orange means that a session needs the user.
+  static let warningColor = Color.yellow
+
+  /// Whether the toolbar item shows the warning symbol and color: a limit is
   /// spent, or the read failed with no earlier limits. An account that sbd has
   /// not read yet does not need the user.
-  static func needsYou(_ row: AccountRow?) -> Bool { status(row) != nil }
+  static func warns(_ row: AccountRow?) -> Bool { status(row) != nil }
 
   /// Why the account needs the user, or nil when it does not.
   static func status(_ row: AccountRow?) -> String? {
@@ -147,7 +158,7 @@ private struct AccountList: View {
     VStack(alignment: .leading, spacing: 6) {
       if let plan = model.movable, !plan.moved.isEmpty {
         let n = plan.moved.count
-        Button("Move \(n) Stopped Session\(n == 1 ? "" : "s") to \(ClaudeAccount(folder: plan.account).name)…") {
+        Button("Move \(n) Stopped Session\(n == 1 ? "" : "s") to \(Account.name(ofFolder: plan.account))…") {
           model.offerMove(plan)
         }
       }
@@ -200,6 +211,7 @@ private struct AccountBlock: View {
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(row.account.name).fontWeight(.semibold).foregroundStyle(row.signedOut ? .secondary : .primary)
+          Text(row.account.agent.displayName).foregroundStyle(.secondary)
           if let email = row.usage?.email { Text(email).foregroundStyle(.secondary) }
           if let sessions = row.sessionCount {
             Spacer(minLength: 6)
@@ -215,18 +227,27 @@ private struct AccountBlock: View {
     .padding(.vertical, 7)
   }
 
+  /// Puts the warning triangle in the warning color before the text. The text keeps the primary color because
+  /// yellow text is hard to read on a light popover.
+  private func warning(_ text: String) -> Text {
+    Text("\(Text(Image(systemName: AccountMenu.warningSymbol)).foregroundStyle(AccountMenu.warningColor)) \(text)")
+  }
+
   @ViewBuilder private var details: some View {
     let now = nowMs()
     VStack(alignment: .leading, spacing: 2) {
       if let usage = row.usage {
         ForEach(usage.limits, id: \.label) { limit in
-          Text(AccountMenu.limitRow(limit, now: now))
-            .foregroundStyle(limit.isSpent(now: now) ? AttentionState.needsYou.color : .secondary)
+          let text = AccountMenu.limitRow(limit, now: now)
+          if limit.isSpent(now: now) { warning(text) } else { Text(text).foregroundStyle(.secondary) }
         }
+        if let note = usage.noLimitsNote { Text(note).foregroundStyle(.secondary) }
+        if let reported = usage.reported(now: now) { Text(reported).foregroundStyle(.secondary) }
         if let error = usage.error {
-          Text("✗ \(error)")
-            .foregroundStyle(usage.failedWithoutLimits ? AttentionState.needsYou.color : .secondary)
-            .fixedSize(horizontal: false, vertical: true)
+          Group {
+            if usage.failedWithoutLimits { warning(error) } else { Text("✗ \(error)").foregroundStyle(.secondary) }
+          }
+          .fixedSize(horizontal: false, vertical: true)
         }
       } else {
         Text("No usage reading yet").foregroundStyle(.secondary)

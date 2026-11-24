@@ -168,11 +168,12 @@ extension Service {
   /// The turn runs as the group's chat: under its account and in its folder.
   /// Without a chat, it runs under the account that new sessions use, in
   /// the state folder.
-  private func planTurnAccount(_ plan: PlanDocument) -> (account: String, env: [String: String], folder: String) {
+  func planTurnAccount(_ plan: PlanDocument) -> (account: String, env: [String: String], folder: String) {
     if let group = plan.group, let chat = chatID(group) {
       let folder = home.chatFolder(group)
+      let account = headlessAccount(of: chat)
       return (
-        claudeAccount(of: chat).key, headlessEnv(session: chat, account: nil),
+        account.key, headlessEnv(session: chat, account: account.account),
         FileManager.default.fileExists(atPath: folder) ? folder : home.path
       )
     }

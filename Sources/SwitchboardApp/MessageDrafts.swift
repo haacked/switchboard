@@ -48,13 +48,36 @@ final class MessageDrafts {
     "decision:\(session)/\(ref)/\(decision)/other"
   }
 
-  /// The Other answer keys of every decision that the sessions show.
-  static func otherAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
+  /// The key of the unsent question in one decision's thread, keyed like `otherAnswerKey`.
+  static func askKey(session: String, ref: String, decision: Int) -> String {
+    "decision:\(session)/\(ref)/\(decision)/ask"
+  }
+
+  /// The draft keys of every decision that the sessions show.
+  static func decisionKeys(_ sessions: [SessionSummary]) -> Set<String> {
     Set(
       sessions.flatMap { s in
         s.shownDecisions.map { list in
-          list.decisions.map { otherAnswerKey(session: s.id, ref: list.ref, decision: $0.number) }
+          list.decisions.flatMap { d in
+            [
+              otherAnswerKey(session: s.id, ref: list.ref, decision: d.number),
+              askKey(session: s.id, ref: list.ref, decision: d.number),
+            ]
+          }
         } ?? []
+      })
+  }
+
+  /// The key of the unsent answer to the Operator's question on a session. It is apart from the session's own draft,
+  /// so text typed for the Operator never sends to the session's claude, and the reverse. The key names no report,
+  /// so a newer question on the same session keeps the text.
+  static func operatorAnswerKey(session: String) -> String { "operator-answer:\(session)" }
+
+  /// The Operator answer keys of every session whose item is an Operator question.
+  static func operatorAnswerKeys(_ sessions: [SessionSummary]) -> Set<String> {
+    Set(
+      sessions.filter { MessageField.Draft.answersOperator(ref: $0.triage?.ref) }.map {
+        operatorAnswerKey(session: $0.id)
       })
   }
 

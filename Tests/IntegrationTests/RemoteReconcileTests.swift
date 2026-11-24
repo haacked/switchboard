@@ -916,7 +916,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
   // MARK: Messages
 
   @Test func sendWhileTheLinkIsDownReturnsQueuedAndTheMessageIsDeliveredAfterTheReconnect() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.attemptHostWait)
     let s = try idle(sbd)
     let mark = try lastEvent(sbd, s.id)
     try drop(sbd, s, after: mark)
@@ -947,7 +947,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
 
   /// A queued message survives a restart of sbd as its `sent` event.
   @Test func aMessageQueuedWhileTheLinkIsDownIsDeliveredAfterSbdRestartsAndTheLinkReconnects() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.attemptHostWait)
     let s = try idle(sbd)
     let mark = try lastEvent(sbd, s.id)
     try drop(sbd, s, after: mark)
@@ -969,7 +969,7 @@ private let linkKinds: Set<String> = ["link_down", "link_up", "reconciled"]
   /// The session's claude had stopped, so the session is not frozen. Its queued message makes sbd want the host,
   /// and the reconcile launches the session with it.
   @Test func aMessageSentToAStoppedSessionWhileTheLinkIsDownResumesItsClaudeAfterTheReconnect() throws {
-    let sbd = try Instance.remote()
+    let sbd = try Instance.remote(config: Instance.attemptHostWait)
     let s = try idle(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "claude to stop on the box") { $0.claudePid == nil }

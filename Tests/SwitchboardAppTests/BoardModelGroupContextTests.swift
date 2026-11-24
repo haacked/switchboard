@@ -3,16 +3,14 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// Accepting a description that Claude wrote, and adding and removing a group's links.
+/// Accepting a description that Claude wrote, and adding a link to a group.
 @MainActor
 @Suite struct BoardModelGroupContext {
-  static let link = GroupLink(id: "l1", title: "RFC", url: "https://example.com/rfc", by: .you, t: 0)
-
-  func model(description: String? = nil, by: Author? = nil, links: [GroupLink]? = nil) -> (BoardModel, SentRequests) {
+  func model(description: String? = nil, by: Author? = nil) -> (BoardModel, SentRequests) {
     let (model, sent) = recordingModel()
     model.groups = [
       GroupSummary(
-        SessionGroup(id: "g1", name: "Flags", description: description, descriptionBy: by, created: 0, links: links),
+        SessionGroup(id: "g1", name: "Flags", description: description, descriptionBy: by, created: 0),
         sessions: [])
     ]
     return (model, sent)
@@ -173,19 +171,9 @@ import Testing
     let (model, sent) = model()
 
     model.addGroupLink(
-      "g1", url: "https://example.com/rfc", title: String(repeating: "a", count: GroupLink.titleLimit + 1))
+      "g1", url: "https://example.com/rfc", title: String(repeating: "a", count: ExternalLink.titleLimit + 1))
 
-    #expect(model.actionError?.contains("\(GroupLink.titleLimit)") == true)
+    #expect(model.actionError?.contains("\(ExternalLink.titleLimit)") == true)
     #expect(await requests(model, sent).isEmpty)
-  }
-
-  @Test func removeSendsTheLink() async {
-    let (model, sent) = model(links: [Self.link])
-
-    model.removeGroupLink("g1", link: "l1")
-
-    let got = await requests(model, sent)
-    #expect(got.map(\.op) == ["group-link-rm"])
-    #expect(got.first?.args == ["group": "g1", "link": "l1", "by": "you"])
   }
 }

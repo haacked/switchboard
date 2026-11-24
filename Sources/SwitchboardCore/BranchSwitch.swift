@@ -10,7 +10,7 @@ public enum BranchSwitch {
   /// made its feature branch had no PR before the checkout, so it gives nil.
   public static func startBranch(_ session: Session, _ facts: SessionFacts) -> String? {
     guard session.kind == .work, let start = session.branch, let live = facts.branch, live != start,
-      !facts.earlierPRNumbers.isEmpty
+      !facts.earlierPRNumbers.isEmpty || facts.refusedPR != nil
     else { return nil }
     return start
   }

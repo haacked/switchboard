@@ -68,18 +68,14 @@ extension BoardModel {
   func addGroupLink(_ id: String, url: String, title: String, added: (() -> Void)? = nil) {
     var args: [String: JSON] = ["group": .string(id), "by": .string(Author.you.rawValue)]
     do {
-      let clean = try GroupLink.cleanURL(url)
+      let clean = try ExternalLink.cleanURL(url)
       args["url"] = .string(clean)
       let title = title.trimmingCharacters(in: .whitespacesAndNewlines)
-      if !title.isEmpty { args["title"] = .string(try GroupLink.cleanTitle(title, url: clean)) }
+      if !title.isEmpty { args["title"] = .string(try ExternalLink.cleanTitle(title, url: clean)) }
     } catch {
       actionError = "\(error)"
       return
     }
     perform("group-link-add", args, then: { _ in added?() })
-  }
-
-  func removeGroupLink(_ id: String, link: String) {
-    perform("group-link-rm", ["group": .string(id), "link": .string(link), "by": .string(Author.you.rawValue)])
   }
 }

@@ -132,6 +132,33 @@ extension Session {
     guard let until = pause?.until else { return waits ?? [] }
     return (waits ?? []) + [until]
   }
+
+  /// The items that ending the session as a Manager conversation drops.
+  public var ownItems: [OwnItem] { OwnItem.list(waits: waits ?? [], pause: pause, schedules: schedules ?? []) }
+}
+
+extension SessionSummary {
+  /// The items that ending the conversation drops.
+  public var ownItems: [OwnItem] { OwnItem.list(waits: waits, pause: pause, schedules: schedules ?? []) }
+}
+
+/// One of a Manager conversation's own waits, its pause condition, or one of its schedules. Ending the
+/// conversation drops it, so sbd refuses the end until the request names its id.
+public struct OwnItem: Equatable, Sendable {
+  public var id: String
+  public var line: String
+
+  /// The waits, then the pause condition, then the schedules.
+  static func list(waits: [Wait], pause: Pause?, schedules: [Schedule]) -> [OwnItem] {
+    let condition = pause.flatMap { p in p.until.map { OwnItem(id: $0.id, line: p.endLine) } }
+    return waits.map { OwnItem(id: $0.id, line: $0.line) } + (condition.map { [$0] } ?? [])
+      + schedules.map { OwnItem(id: $0.id, line: "Loop: \(oneLine($0.prompt))") }
+  }
+}
+
+extension Pause {
+  /// The pause's line, then the message that the resume would send.
+  public var endLine: String { line + (message.map { ". The resume would send: \(oneLine($0))" } ?? "") }
 }
 
 /// A session as a group pause or resume sees it. sbd decides each member's row with this rule, and the app shows

@@ -4,7 +4,8 @@ import Testing
 @testable import SwitchboardCore
 
 /// The Manager's and a group chat's Inbox items: a prompt that blocks the
-/// conversation until the user answers it, and nothing else.
+/// conversation until the user answers it, and an item that background
+/// follow-through routed to the conversation (`.report`).
 @Suite struct TriageConversations {
   static let conversations: [SessionKind] = [.manager, .chat]
 
@@ -206,6 +207,9 @@ import Testing
     SummaryShape(cards: [.mcp], openPrompt: false, item: nil, included: false),
     SummaryShape(cards: [.mcp], openPrompt: false, item: .card, included: true),
     SummaryShape(cards: [.send, .mcp], openPrompt: false, item: .card, included: true),
+    SummaryShape(cards: [], openPrompt: false, item: .report, included: true),
+    SummaryShape(cards: [.send], openPrompt: false, item: .report, included: true),
+    SummaryShape(cards: [.permission], openPrompt: true, item: .report, included: true),
   ]
 
   func summary(_ kind: SessionKind, _ shape: SummaryShape) -> SessionSummary {
@@ -336,8 +340,8 @@ import Testing
       (.manager, "Manager", nil, "Manager"),
       (.manager, "deploy watch", nil, "Manager: deploy watch"),
       (.manager, "deploy watch", "Flags", "Manager: deploy watch"),
-      (.operator, "Operator", nil, "Operator"),
-      (.operator, "Operator", "Flags", "Operator"),
+      (.operator, "Operator", nil, "Background follow-through"),
+      (.operator, "Operator", "Flags", "Background follow-through"),
       (.work, "fix-bug", "Flags", "fix-bug"),
       (.work, "fix-bug", nil, "fix-bug"),
     ] as [(SessionKind, String, String?, String)])

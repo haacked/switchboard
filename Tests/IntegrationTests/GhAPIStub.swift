@@ -6,14 +6,14 @@ import Testing
 /// `$SB_HOME/gh-api`.
 extension Instance {
   /// A private sbd whose poller asks `github`, with Fixtures/gh-api-stub as
-  /// its gh. Polls run only when a test asks.
-  static func withReplyStub(_ github: FakeGitHub) throws -> Instance {
-    try Instance(config: [
+  /// its gh. Polls run only when a test asks. `extra` adds other config keys.
+  static func withReplyStub(_ github: FakeGitHub, config extra: [String: JSON] = [:]) throws -> Instance {
+    let config: [String: JSON] = [
       "github": [
         "gh": .string("\(FakeGitHub.fixtures)/gh-api-stub"), "url": .string(github.url), "pollSeconds": 0,
-      ],
-      "tickSeconds": 1,
-    ])
+      ]
+    ]
+    return try Instance(config: config.merging(extra) { $1 })
   }
 
   /// The stub's file base for a `gh api` call. The stub maps the path the

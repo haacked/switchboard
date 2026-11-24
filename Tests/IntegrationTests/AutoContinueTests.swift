@@ -338,18 +338,21 @@ extension Instance {
     #expect(sbd.stubArgs().contains { $0.hasPrefix("--resume \(a.claudeSessionId) ") })
   }
 
-  /// The pane's shell takes 1.5 s to start claude, and the clock passes the
+  /// The pane's shell does not start claude until the test releases it, and the clock passes the
   /// 10 s in-flight window meanwhile. The `lag` message then reaches claude
   /// 1 s after its SessionStart, while ticks run.
   @Test func aSlowStartDoesNotContinueTwice() throws {
     let sbd = try instance(["message": "lag"], shell: Instance.slowShell)
+    try sbd.startSlowShells()
     let s = try offerSession(sbd)
     try sbd.sb("stop", s.id)
     try sbd.waitFor(s.id, "the stop") { $0.claudePid == nil }
+    try sbd.holdSlowShells()
     try sbd.sb("autocontinue", "on")
     try sbd.advanceClock(AutoContinueTests.pastQuiet)
     try waitForContinue(sbd, s.id)
     try sbd.advanceClock(11_000)
+    try sbd.startSlowShells()
     try sbd.waitFor(s.id, "the reply to the continue", timeout: 30) { $0.lastReply == "Done: lag" }
     #expect(try sbd.autoContinues(s.id).count == 1)
   }

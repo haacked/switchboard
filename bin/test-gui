@@ -11,12 +11,15 @@
 # DraftSelfTest, selects another session, whose field stays hidden, and comes back,
 # presses Esc, quits, and checks that the draft shows the field after a relaunch,
 # that two Escs clear it, and that a third hides the field.
-# Then it closes the shell pane of the Manager, a work session, an Inbox item, and a chat
-# through the app's ShellSelfTest: the pane's close button, `exit`, Ctrl-D, and
-# the Session menu. It checks that the shell stays closed after a relaunch and
+# Then it checks that a new Manager conversation and a new chat start with no shell, opens
+# each with Open Shell, and closes the shell pane of the Manager, a work session, an Inbox
+# item, and a chat through the app's ShellSelfTest: the pane's close button, `exit`, Ctrl-D,
+# and the Session menu. It checks that the shell stays closed after a relaunch and
 # a switch to another session, that Open Shell starts it again, that the pane
 # attaches to a shell that `sb shell --open` starts right after `exit`, and that the
 # Claude terminal keeps its tmux client and claude its process throughout.
+# It reads the titles in the View, Go, and Session menus and checks which menu holds each
+# view and navigation item.
 # It also presses mouse buttons 4 and 5 and checks that they go back and forward
 # between two selected sessions.
 # Last it drops sets of files on the message field of a session, the Inbox, and
@@ -38,19 +41,30 @@
 # The multiselect check clicks one row in the sidebar through the app's ShellSelfTest commands, adds another
 # row to the selection as a ⌘-click does, checks that the detail pane shows "2 sessions selected", clicks
 # Delete 2 Sessions…, and checks that the confirmation opens and that sbd still lists both sessions.
+# The settings check sends ⌘, through the app's ShellSelfTest commands and checks that it runs Settings… and
+# shows the Settings window at General. It then opens Settings at Issues the way the Issues view's gear button
+# does and checks that the window shows the Issues tab.
 # The boardselect check starts on the Board and drives its cards through the app's ShellSelfTest commands. It
 # checks that a click selects a card and stays on the Board, that ⌘-click adds a card, that ⇧-click adds the
 # cards between, that a click on empty space clears the selection, that a drag from empty space selects the
 # cards it covers, and that a double click opens the session.
+# The boarddrag check starts on the Board with Group lanes and drags a card through the app's ShellSelfTest
+# commands. It checks that a click on a draggable card selects it and that a drag starts a drag session. A
+# drag that the app posts starts a session only with some SwiftUI versions. The check first drags a draggable
+# view outside the Board, and it skips when that drag starts no session either.
 # The wake check stops a session's claude three times through the app's WakeSelfTest,
 # and checks that three keys in its terminal start it once, that a click starts it,
 # and that a drag does not.
-# The group check shows the Board in group lanes and drives a group's label through the app's ShellSelfTest
-# commands. It clicks Accept on a description that Claude wrote and checks through sb that the description is
-# the user's. It opens the Links popover, removes the seeded link, adds a link through its fields, and checks both
-# through sb. It opens the Notes link and checks that the popover shows each note.
+# The links check gives a session two links and a group one session link, one group link, and one link to a
+# claude.ai artifact. In a window 1024 pt wide, it checks through the app's ShellSelfTest commands that the
+# session's side panel lists both links inside the panel, that Remove deletes one, and that the group's Links
+# popover on the Board lists the group link and the session link but not the artifact link.
+# The group check shows the Board in group lanes in a window 1024 pt wide and drives a group's lane header through
+# the app's ShellSelfTest commands. It clicks Accept on a description that Claude wrote and checks through sb that
+# the description is the user's. It opens the Links popover, removes the seeded link, adds a link through the
+# popover's fields, and checks both through sb. It opens the Notes link and checks that the popover shows each note.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# boardselect, wake, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# settings, boardselect, boarddrag, wake, links, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -65,9 +79,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | boardselect | wake | group) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | boardselect | boarddrag | wake | links | group) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, boardselect, wake, and group." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, boardselect, boarddrag, wake, links, and group." >&2
     exit 2
     ;;
   esac
@@ -118,11 +132,16 @@ trap cleanup EXIT
 trap 'exit 130' INT TERM HUP
 
 export SB_HOME="$home"
+# sb takes a request as Claude's when CLAUDECODE is 1. The checks add links as the user, even when Claude Code runs
+# this script.
+unset CLAUDECODE SB_SESSION_ID
 sb() { "$bin_dir/sb" "$@"; }
 
 jq -n --arg claude "$root/Tests/GUI/received-bytes-stub" --arg home "$home" \
   '{claude: $claude, idleStopSeconds: 600, tickSeconds: 0.2, worktreeRoot: "\($home)/worktrees",
-    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}}' >"$home/config.json"
+    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}, sessionNames: {enabled: false},
+    codexHomes: []}' \
+  >"$home/config.json"
 mkdir "$home/work" "$home/shots"
 : >"$home/sbd.log"
 "$bin_dir/sbd" --home "$home" >>"$home/sbd.log" 2>&1 &
@@ -425,12 +444,9 @@ check_shell() {
     result=$(app click "$1")
     [[ $result == "clicked at "* ]] || fail "the app could not click $1 on $2: $result"
   }
-  # A chat and the Manager show their messages until the test shows their terminals. `terminal` shows them, then
-  # waits like `attached`.
-  start_app() { # <session> [attached | terminal]
+  start_app() { # <session> [attached]
     SB_SELECT="$1" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
     app_pid=$!
-    [ "${2:-}" != terminal ] || app show-terminal >/dev/null
     [ -z "${2:-}" ] || wait_for 120 has_clients "$1-claude" || fail "the app did not attach to $1's Claude pane"
   }
   remember_claude() { cc=$(clients "$1-claude") cp=$(sb get "$1" --json | jq -r .claudePid); }
@@ -444,21 +460,30 @@ check_shell() {
     wait_for 10 panes_are 1 || fail "$2 left the shell pane of $1 in the window"
     same_claude "$1"
   }
+  opens() { # <session> <what>
+    click open "$2"
+    wait_for 10 is_open "$1" || fail "Open Shell did not open the shell of $2"
+    wait_for 60 has_clients "$1-shell" || fail "the app did not attach to the opened shell of $2"
+  }
+  # sbd starts a conversation with its shell closed, so the window shows Claude's terminal alone.
+  starts_closed() { # <session> <what>
+    closed "$1" && shell_gone "$1" || fail "$2 started with a shell"
+    wait_for 10 panes_are 1 || fail "the window shows a shell pane for $2"
+  }
 
-  start_app "$manager" terminal
-  wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the Manager's shell"
+  start_app "$manager" attached
+  starts_closed "$manager" "the Manager"
   remember_claude "$manager"
+  opens "$manager" "the Manager"
   click close "the Manager"
   closes "$manager" "the close button"
   app snapshot "$shots/manager-closed.png" >/dev/null
   end_app
-  start_app "$manager" terminal
+  start_app "$manager" attached
   sleep 2
   shell_gone "$manager" && panes_are 1 || fail "a relaunch started the Manager's shell again"
   remember_claude "$manager"
-  click open "the Manager"
-  wait_for 10 is_open "$manager" || fail "Open Shell did not open the Manager's shell"
-  wait_for 60 has_clients "$manager-shell" || fail "the app did not attach to the opened shell"
+  opens "$manager" "the Manager"
   app type exit >/dev/null
   closes "$manager" "exit"
   end_app
@@ -468,7 +493,6 @@ check_shell() {
   remember_claude "$work"
   app ctrl-d >/dev/null
   closes "$work" "Ctrl-D"
-  app show-terminal >/dev/null
   app select "$manager" >/dev/null
   sleep 3
   app select "$work" >/dev/null
@@ -495,22 +519,36 @@ check_shell() {
   app show-terminal >/dev/null
   wait_for 120 has_clients "$work-claude" || fail "the Inbox did not attach to the work session's Claude pane"
   remember_claude "$work"
-  click open "the Inbox"
-  wait_for 10 is_open "$work" || fail "the Inbox's Open Shell did not open the shell"
-  wait_for 60 has_clients "$work-shell" || fail "the Inbox did not attach to the opened shell"
+  opens "$work" "the Inbox"
   wait_for 10 panes_are 2 || fail "the Inbox shows no shell pane"
   click close "the Inbox"
   closes "$work" "the Inbox's close button"
   end_app
 
-  start_app "$chat" terminal
-  wait_for 60 has_clients "$chat-shell" || fail "the app did not attach to the chat's shell"
+  start_app "$chat" attached
+  starts_closed "$chat" "the chat"
   remember_claude "$chat"
+  opens "$chat" "the chat"
   click close "the chat"
   closes "$chat" "the chat's close button"
   app snapshot "$shots/chat-closed.png" >/dev/null
   # Close acts on the key window. An app that a script starts may have none, so this checks only the binding.
   [ "$(app cmd-w)" = "handled true by Close" ] || fail "⌘W is not the window's Close"
+  file_menu=$(app titles File) view=$(app titles View) go=$(app titles Go) session_menu=$(app titles Session)
+  [[ $file_menu == *"|New Loop…|"* ]] || fail "the File menu has no New Loop…: $file_menu"
+  [[ $session_menu != *"|New Loop…|"* ]] || fail "the Session menu still has New Loop…: $session_menu"
+  for item in "Show Inbox" "Show Board" "Show Issues" "Show Loops" "Filter Sessions…"; do
+    [[ $view == *"|$item|"* ]] || fail "the View menu has no $item: $view"
+    [[ $session_menu != *"|$item|"* ]] || fail "the Session menu still has $item: $session_menu"
+  done
+  for item in Back Forward "Show Recent Places" "Next Needing You" "Next Session" "Previous Session" \
+    "Open Manager" "Search Sessions…" "Ask Switchboard…" "Move Focus to List" "Move Focus to Terminal"; do
+    [[ $go == *"|$item|"* ]] || fail "the Go menu has no $item: $go"
+    [[ $session_menu != *"|$item|"* ]] || fail "the Session menu still has $item: $session_menu"
+  done
+  for item in "Message Claude" "Stop Claude"; do
+    [[ $session_menu == *"|$item|"* ]] || fail "the Session menu has no $item: $session_menu"
+  done
   # A focused terminal keeps every key but the menu's, so these must reach their own menu items. Without a
   # key window, SwiftUI does not refresh the menu's enabled states. Move Focus to Terminal then keeps its
   # state from launch, disabled, and the result names the item that owns ⌘T instead. ⌘K goes last, because
@@ -737,7 +775,7 @@ check_slash() {
     got=$(probe_rows "${!view}")
     [ "$got" = "$probe" ] || fail "sb slash gave the $view the probe rows $got, not $probe"
   done
-  # A session's terminal view hides the field after each send, so the keystroke check runs in the chat only.
+  # The keystroke check runs in the chat. Its view hides the field after each send, and SlashSelfTest shows it again.
   view=chat
   SB_SELECT="$chat" SB_SLASH_TEST=1 "$bin_dir/Switchboard" >"$shots/$view.log" 2>&1 &
   app_pid=$!
@@ -748,6 +786,8 @@ check_slash() {
   field_logged slashtest "$view" 'down, tab: "/probe-cmd-user-only " open false focused true cursor at end true'
   field_logged slashtest "$view" 'return on /probe-d: "/probe-default " open false'
   field_logged slashtest "$view" 'return again: ""'
+  [ "$(grep -cxF 'slashtest: hidden after send: true' "$shots/$view.log")" = 3 ] ||
+    fail "the $view field did not hide after each of its three sends"
   field_logged slashtest "$view" 'enter on /probe-d: "/probe-default " open false focused true'
   field_logged slashtest "$view" 'enter again: ""'
   field_logged slashtest "$view" "exact name: open true rows probe-user-only"
@@ -812,6 +852,42 @@ check_multiselect() {
 
 if wants multiselect; then check_multiselect; fi
 
+check_settings() {
+  check=settings
+  local shots="$home/shots/settings" result
+  mkdir "$shots"
+  echo "Checking the Settings window…"
+  new_session settings-one
+  shows() { [ "$(app where)" = "session(\"$1\")" ]; }
+  settings_is() { [ "$(app settings)" = "$1" ]; }
+  start_app() {
+    SB_SELECT="$session" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+    app_pid=$!
+    wait_for 60 shows "$session" || fail "the app did not select $session: $(app where)"
+  }
+
+  # The gear's path opens Settings from a closed window, so it fails when MenuBarLabel doesn't register the opener.
+  # ⌘, then needs a launch of its own, because a Settings window that is already open would pass it without the key.
+  start_app
+  settings_is hidden || fail "the Settings window shows before the gear: $(app settings)"
+  result=$(app open-settings issues)
+  [ "$result" = opened ] || fail "the app could not open Settings at Issues: $result"
+  wait_for 10 settings_is "shown issues" || fail "the gear's path did not show Settings at Issues: $(app settings)"
+  end_app
+
+  start_app
+  settings_is hidden || fail "the Settings window shows before ⌘,: $(app settings)"
+  result=$(app settings-key)
+  # The hidden test app may not refresh a menu item's state, so an enabled Settings… that owns ⌘, also counts.
+  [[ $result == ", ran Settings…" || $result == *"(Settings… is enabled)" ]] || fail "⌘, did not run Settings…: $result"
+  wait_for 10 settings_is "shown general" || fail "⌘, did not show Settings at General: $(app settings)"
+  end_app
+  save_shots
+  echo "ok: settings (⌘, runs Settings…, the window shows General, the gear's path shows Issues)"
+}
+
+if wants settings; then check_settings; fi
+
 check_boardselect() {
   check=boardselect
   local shots="$home/shots/boardselect" a b c result
@@ -867,6 +943,50 @@ check_boardselect() {
 
 if wants boardselect; then check_boardselect; fi
 
+check_boarddrag() {
+  check=boarddrag
+  local shots="$home/shots/boarddrag" a b result control
+  mkdir "$shots"
+  echo "Checking drags of Board cards…"
+  new_session boarddrag-a
+  a=$session
+  new_session boarddrag-b
+  b=$session
+  shows() { [ "$(app where)" = "$1" ]; }
+  more_drags_than() { [ "$(app drags)" -gt "$1" ]; }
+  selection_is() { [ "$(app board-selection)" = "$1" ]; }
+  posted() {
+    result=$(app "$@")
+    [[ $result == posted* ]]
+  }
+
+  # A launch argument sets the lanes for this run only. A card is draggable only in Group lanes.
+  SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  # A posted drag's session never ends, because no real mouse-up reaches it. That session swallows later clicks,
+  # so the click comes first.
+  wait_for 10 posted board-click "$a" || fail "the app could not click the card of $a: $result"
+  wait_for 5 selection_is "$a" || fail "a click did not select the draggable card of $a: $(app board-selection)"
+  posted drag-control || fail "the app could not drag the control view: $result"
+  if ! wait_for 5 more_drags_than 0; then
+    control=$(app drags)
+    [ "$control" = 0 ] || fail "the app did not report its drag sessions after the control drag: $control"
+    end_app
+    save_shots
+    echo "skip: boarddrag (this SwiftUI starts no drag session from posted mouse events)"
+    return
+  fi
+  control=$(app drags)
+  wait_for 10 posted board-drag "$a" "$b" card || fail "the app could not drag the card of $a: $result"
+  wait_for 5 more_drags_than "$control" || fail "dragging the card of $a started no drag session"
+  end_app
+  save_shots
+  echo "ok: boarddrag (a click selects a draggable card, a card drag starts a drag session)"
+}
+
+if wants boarddrag; then check_boarddrag; fi
+
 # sbd records each start of claude with what caused it, so `sb events` is the evidence.
 check_wake() {
   check=wake
@@ -891,54 +1011,151 @@ check_wake() {
 
 if wants wake; then check_wake; fi
 
+# The rows draw only in the app, so the app's answers to ShellSelfTest commands are the evidence. `anchors` reports
+# whether each row and its Remove button lie inside the side panel and the window, which a layout that overflows
+# the 1024 pt CI window fails.
+check_links() {
+  check=links
+  local shots="$home/shots/links" a b group rfc slack linear design artifact result
+  mkdir "$shots"
+  echo "Checking links in the side panel and the Board…"
+  new_session links-a
+  a=$session
+  # The side panel hides beside an open shell at 1024 pt.
+  sb shell "$a" --close >/dev/null
+  sb link add "$a" https://example.com/rfc/flags --title "Flag RFC" >/dev/null
+  sb link add "$a" https://acme.slack.com/archives/C0123ABCD/p1700000000000100 >/dev/null
+  new_session links-b
+  b=$session
+  sb link add "$b" https://linear.app/acme/issue/ENG-12 >/dev/null
+  group=$(sb group add links-gui "$b" --json | jq -r '.id')
+  sb group link add links-gui https://example.com/design --title "Design doc" >/dev/null
+  sb group link add links-gui https://claude.ai/artifact/LinksGui1 >/dev/null
+  link_id() { sb get "$1" --json | jq -r --arg url "$2" '.links[]? | select(.url == $url) | .id'; }
+  group_link_id() {
+    sb group ls --json | jq -r --arg g "$group" --arg url "$1" '.groups[] | select(.id == $g) | .links[]? | select(.url == $url) | .id'
+  }
+  rfc=$(link_id "$a" https://example.com/rfc/flags)
+  slack=$(link_id "$a" https://acme.slack.com/archives/C0123ABCD/p1700000000000100)
+  linear=$(link_id "$b" https://linear.app/acme/issue/ENG-12)
+  design=$(group_link_id https://example.com/design)
+  artifact=$(group_link_id https://claude.ai/artifact/LinksGui1)
+  [ -n "$rfc" ] && [ -n "$slack" ] && [ -n "$linear" ] && [ -n "$design" ] && [ -n "$artifact" ] ||
+    check=sbd fail "sbd did not list every link the check added"
+  shows() { [ "$(app where)" = "$1" ]; }
+  # Each anchor is followed by :in or :out, so a name followed by :in is not a prefix of another name.
+  all_in() { # <anchors result> <name…>
+    local listed=$1 name
+    shift
+    [[ $listed != *":out"* ]] || return 1
+    for name in "$@"; do [[ ",$listed," == *",$name:in,"* ]] || return 1; done
+  }
+  panel_lists() {
+    result=$(app anchors panel-link- session-side-panel)
+    all_in "$result" "panel-link-$rfc" "panel-link-$rfc-remove" "panel-link-$slack" "panel-link-$slack-remove"
+  }
+  clicked() {
+    result=$(app click-anchor "$1")
+    [[ $result == "clicked at "* ]]
+  }
+  terminal_shows() { [ "$(app panes)" = 1 ]; }
+  only_link_left() { [ "$(sb get "$a" --json | jq -c '[.links[]?.id]')" = "[\"$1\"]" ]; }
+  pinned() {
+    result=$(app width 1024)
+    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
+  }
+
+  # A launch argument shows the side panel for this run only, whatever the user's saved setting is.
+  SB_SELECT="$a" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -sessionSidePanel YES >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows "session(\"$a\")" || fail "the app did not select $a: $(app where)"
+  # The Claude terminal takes its width once it attaches, so the side panel is measured after that.
+  wait_for 30 terminal_shows || fail "the app did not show the Claude terminal of $a: $(app panes) panes"
+  pinned
+  app snapshot "$shots/side-panel.png" >/dev/null
+  wait_for 10 panel_lists || fail "the side panel does not list both links of $a inside it: $result"
+  # A terminal wider than the space beside the panel would report more columns here than the pane shows.
+  echo "links: the Claude terminal's sizes beside the side panel: $(sb screen "$a" | grep '^sizes ')"
+  wait_for 10 clicked "panel-link-$rfc-remove" || fail "the app could not click Remove on $rfc: $result"
+  wait_for 10 only_link_left "$slack" || fail "Remove did not delete only $rfc: $(sb get "$a" --json | jq -c '.links')"
+  app width restore >/dev/null
+  end_app
+
+  popover_lists() {
+    result=$(app anchors group-link-)
+    all_in "$result" "group-link-$group-$design" "group-link-$group-$design-remove" "group-link-$b-$linear" \
+      "group-link-$b-$linear-remove" && [[ $result != *"$artifact"* ]]
+  }
+  lane_shows() { all_in "$(app anchors "group-links-$group")" "group-links-$group"; }
+  SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  pinned
+  wait_for 10 lane_shows || fail "the lane of $group does not show its Links link inside the window: $(app anchors group-links-)"
+  wait_for 10 clicked "group-links-$group" || fail "the app could not click the Links link of $group: $result"
+  wait_for 10 popover_lists || fail "the Links popover does not list the group's link and $b's link, or lists the artifact link: $result"
+  app snapshot "$shots/group-links.png" >/dev/null
+  app width restore >/dev/null
+  end_app
+  save_shots
+  echo "ok: links (side panel rows and Remove, the group's Links popover, 1024 pt)"
+}
+
+if wants links; then check_links; fi
+
 check_group() {
   check=group
   local shots="$home/shots/group" group rfc notes result
   mkdir "$shots"
-  echo "Checking a group's description author, notes, and links on the Board…"
+  echo "Checking a group's description author, links, and notes on the Board…"
   # sb records Claude as the author when CLAUDECODE is set, as it is when a Claude session runs this script.
   you() { env -u CLAUDECODE "$bin_dir/sb" "$@"; }
   new_session group-work
-  you group add group-context "$session" >/dev/null
-  group=$(sb groups --json | jq -r '.groups[] | select(.name == "group-context") | .id')
+  group=$(you group add group-context "$session" --json | jq -r '.id')
   CLAUDECODE=1 sb group describe "$group" "Ship the flag cache." >/dev/null
   you group note "$group" "Ask Ana before the deploy." >/dev/null
   you group note "$group" "The cache lives in Redis." >/dev/null
   you group link add "$group" https://example.com/rfc --title RFC >/dev/null
-  rfc=$(sb groups --json | jq -r --arg g "$group" '.groups[] | select(.id == $g) | .links[0].id')
-  group_json() { sb groups --json | jq -c --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
+  group_json() { sb group ls --json | jq -c --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
+  rfc=$(group_json '.links[0].id' | tr -d '"')
+  notes=$(group_json '[.notes[].id | "group-note-" + . + ":in"] | sort | join(",")' | tr -d '"')
   author_is() { [ "$(group_json '.descriptionBy // "you"')" = "\"$1\"" ]; }
   links_are() { [ "$(group_json '[.links[]?.title]')" = "$1" ]; }
   shows() { [ "$(app where)" = "$1" ]; }
   # A control can draw a moment after the Board shows, so each first click on it is retried.
   clicked() {
     result=$(app click-anchor "$1")
-    [[ $result == clicked* ]]
+    [[ $result == "clicked at "* ]]
   }
-  notes=$(group_json '[.notes[].id | "group-note-" + .] | sort | join(",")' | tr -d '"')
   notes_shown() { [ "$(app anchors group-note-)" = "$notes" ]; }
+  pinned() {
+    result=$(app width 1024)
+    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
+  }
   author_is claude || fail "sb did not record Claude as the author: $(group_json .descriptionBy)"
 
   SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
   app_pid=$!
   wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  pinned
   wait_for 10 clicked "group-description-accept-$group" || fail "the app could not click Accept: $result"
   wait_for 10 author_is you || fail "Accept did not make the description yours: $(group_json .descriptionBy)"
   [ "$(group_json .description)" = '"Ship the flag cache."' ] || fail "Accept changed the text: $(group_json .description)"
   wait_for 10 clicked "group-links-$group" || fail "the app could not open the links: $result"
-  wait_for 5 clicked "group-link-rm-$rfc" || fail "the links popover did not show the RFC link: $result"
-  wait_for 10 links_are '[]' || fail "the remove button did not remove the link: $(group_json .links)"
+  wait_for 5 clicked "group-link-$group-$rfc-remove" || fail "the links popover did not show the RFC link: $result"
+  wait_for 10 links_are '[]' || fail "Remove did not remove the link: $(group_json .links)"
   [ "$(app fill 'Link URL|https://example.com/design')" = filled ] || fail "the app could not fill the URL field"
   [ "$(app fill 'Link title (optional)|Design doc')" = filled ] || fail "the app could not fill the title field"
-  clicked "group-link-add-$group" || fail "the app could not click Add: $result"
+  clicked "add-group-link-$group" || fail "the app could not click Add: $result"
   wait_for 10 links_are '["Design doc"]' || fail "Add did not add the link: $(group_json .links)"
   app snapshot "$shots/links.png" >/dev/null
   wait_for 10 clicked "group-notes-$group" || fail "the app could not open the notes: $result"
-  wait_for 5 notes_shown || fail "the notes popover did not show $notes: $(app anchors group-note-)"
+  wait_for 5 notes_shown || fail "the notes popover did not show $notes inside the window: $(app anchors group-note-)"
   app snapshot "$shots/notes.png" >/dev/null
+  app width restore >/dev/null
   end_app
   save_shots
-  echo "ok: group (Accept, links add and remove, notes)"
+  echo "ok: group (Accept, links add and remove, notes, 1024 pt)"
 }
 
 if wants group; then check_group; fi

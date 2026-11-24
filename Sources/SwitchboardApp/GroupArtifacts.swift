@@ -33,10 +33,18 @@ struct GroupArtifactRows {
       let action: Action =
         planLinks.contains(where: artifact.names) ? .plan : artifact.removed == nil ? .useAsPlan : .removed
       return Row(
-        artifact: artifact, sessionLabel: "by \(liveNames[artifact.session] ?? artifact.sessionName)",
+        artifact: artifact, sessionLabel: Self.sessionLabel(artifact, group: group, liveNames: liveNames),
         caption: artifact.caption(now: now), action: action)
     }
     linkTitle = Self.linkTitle(group)
+  }
+
+  /// `by <session>` for a row that a session published, else who added the group link that names it.
+  private static func sessionLabel(_ artifact: GroupArtifact, group: GroupSummary, liveNames: [String: String])
+    -> String
+  {
+    if let session = artifact.session { return "by \(liveNames[session] ?? artifact.sessionName ?? session)" }
+    return (group.links?.first(where: { $0.id == artifact.link })?.by ?? .you).phrase
   }
 
   static func linkTitle(_ group: GroupSummary) -> String? {
@@ -52,48 +60,41 @@ struct GroupArtifactsLink: View {
 
   var body: some View {
     if let title = GroupArtifactRows.linkTitle(group) {
-      GroupLaneLink(
-        title: title, help: "Show the artifacts that this group's sessions published",
-        label: "\(title) in group \(group.name)", id: "group-artifacts-\(group.id)", width: 420
+      LanePopoverLink(
+        title: title, help: "Show the artifacts that this group's sessions published or its links point to",
+        accessibilityLabel: "\(title) in group \(group.name)", identifier: "group-artifacts-\(group.id)"
       ) { GroupArtifactList(group: group) }
     }
   }
 }
 
-/// A group's artifacts in the popover, each with Use as plan, Plan, or Removed.
+/// The rows of a group's artifact popover, each with Use as plan, Plan, or Removed.
 struct GroupArtifactList: View {
   @EnvironmentObject var model: BoardModel
   let group: GroupSummary
 
   var body: some View {
-    let names = Dictionary(model.allSessions.map { ($0.id, $0.name) }) { first, _ in first }
-    ScrollView {
-      VStack(alignment: .leading, spacing: 8) {
-        ForEach(GroupArtifactRows(group: group, liveNames: names).rows) { row in
-          HStack(alignment: .firstTextBaseline, spacing: 8) {
-            VStack(alignment: .leading, spacing: 2) {
-              // The title is untrusted text from the tool result, so it never renders as Markdown.
-              if row.artifact.removed == nil, let url = URL(string: row.artifact.url) {
-                Button {
-                  NSWorkspace.shared.open(url)
-                } label: {
-                  Text(verbatim: row.artifact.title)
-                }
-                .buttonStyle(.link)
-                .help(row.artifact.url)
-              } else {
-                Text(verbatim: row.artifact.title)
-              }
-              Text(verbatim: "\(row.sessionLabel) · \(row.caption)").font(.caption).foregroundStyle(.secondary)
+    ForEach(GroupArtifactRows(group: group, liveNames: model.sessionsByID.mapValues(\.name)).rows) { row in
+      HStack(alignment: .firstTextBaseline, spacing: 8) {
+        VStack(alignment: .leading, spacing: 2) {
+          // The title is untrusted text from the tool result, so it never renders as Markdown.
+          if row.artifact.removed == nil, let url = URL(string: row.artifact.url) {
+            Button {
+              NSWorkspace.shared.open(url)
+            } label: {
+              Text(verbatim: row.artifact.title)
             }
-            Spacer(minLength: 0)
-            action(row)
+            .buttonStyle(.link)
+            .help(row.artifact.url)
+          } else {
+            Text(verbatim: row.artifact.title)
           }
+          Text(verbatim: "\(row.sessionLabel) · \(row.caption)").font(.caption).foregroundStyle(.secondary)
         }
+        Spacer(minLength: 0)
+        action(row)
       }
-      .padding(12)
     }
-    .frame(maxHeight: 360)
   }
 
   @ViewBuilder private func action(_ row: GroupArtifactRows.Row) -> some View {

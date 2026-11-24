@@ -1,5 +1,6 @@
 import Foundation
 import SwitchboardCore
+import os
 
 /// Wait actions: when an action wait's condition is met, sbd runs the action with its checks on
 /// `followThroughQueue`, off the state queue, and records the result. Anything that needs judgment goes to the
@@ -19,17 +20,23 @@ extension Service {
     case judgment(question: String, approval: MergeGuard.Approval? = nil, reply: String? = nil)
   }
 
-  /// config.json's `operator` settings, read again on each use so that an edit takes effect without a restart. A
-  /// config.json that doesn't decode allows no merges and keeps the hold timing that sbd started with.
+  /// config.json's `operator` settings. sbd reads them again when config.json's modification date changes, so an
+  /// edit takes effect without a restart. A config.json that doesn't decode allows no merges and keeps the hold
+  /// timing that sbd started with.
   var operatorSettings: OperatorSettings {
+    let stamp = try? FileManager.default.attributesOfItem(atPath: home.config)[.modificationDate] as? Date
+    if let read = operatorSettingsRead.withLock({ $0 }), read.stamp == stamp { return read.settings }
+    let settings: OperatorSettings
     do {
-      return try home.readConfig().operator
+      settings = try home.readConfig().operator
     } catch {
       logLine("ignoring \(home.config) for operator settings: \(error)")
-      var settings = config.operator
-      settings.mergeRepos = []
-      return settings
+      var fallback = config.operator
+      fallback.mergeRepos = []
+      settings = fallback
     }
+    operatorSettingsRead.withLock { $0 = (stamp, settings) }
+    return settings
   }
 
   /// Marks the action running, stores it, and runs it on `followThroughQueue`.
@@ -82,11 +89,16 @@ extension Service {
   }
 
   private func setActionStatus(_ holder: String, _ waitId: String, _ status: ActionStatus?) throws {
+    try updateWait(holder, waitId) { $0.actionStatus = status }
+  }
+
+  /// Applies `change` to the stored wait `waitId` of `holder`, and changes nothing else. It runs on the state queue.
+  func updateWait(_ holder: String, _ waitId: String, _ change: (inout Wait) -> Void) throws {
     try update(holder) {
       $0.waits = $0.waits?.map { w in
         guard w.id == waitId else { return w }
         var w = w
-        w.actionStatus = status
+        change(&w)
         return w
       }
     }
@@ -108,7 +120,104 @@ extension Service {
     } catch {
       outcome = .judgment(question: "sbd could not \(action.kind.skipped): \(error)")
     }
+    if case .judgment(let question, let approval?, let reply?) = outcome {
+      return gateReply(holder, waitId, question: question, approval: approval, reply: reply)
+    }
     queue.sync { finish(holder, waitId, outcome) }
+  }
+
+  /// Sends a question about the subject's last reply to the reply gate judge before the holder.
+  ///
+  /// `merge` starts the action again with the approval, so `takeForMerge` checks the head and the reply again. `ask`
+  /// records a needs-you report with the judge's question and parks the action until the subject's state changes.
+  /// Anything else asks the holder. The judge runs once per head and reply digest: a later question about the pair
+  /// that the judge asked about parks again, and one about a pair that it was unsure of or failed on asks the holder.
+  /// A reply longer than `OperatorJudge.maxReply` skips the judge. It runs on `followThroughQueue`.
+  private func gateReply(
+    _ holder: String, _ waitId: String, question: String, approval: MergeGuard.Approval, reply: String
+  ) {
+    let toHolder = ActionOutcome.judgment(question: question, approval: approval, reply: reply)
+    let call: (input: String, subject: String, since: Int64?)? = queue.sync {
+      guard let wait = storedWait(holder, waitId), let status = wait.actionStatus, status.kind == .running,
+        let subject = wait.actionSubject?.id, let e = entries[subject], let pr = e.facts.pr
+      else {
+        finish(holder, waitId, toHolder)
+        return nil
+      }
+      // The subject replied after the run read its facts, so its `stateSince` already reflects that reply. A park would
+      // store that value, and no later change of state would retry the park. So sbd runs the checks again.
+      guard MergeGuard.replyDigest(e.facts.lastReply) == approval.replyDigest else {
+        do { try startAction(holder, wait) } catch { finish(holder, waitId, toHolder) }
+        return nil
+      }
+      if status.judged == approval {
+        if status.subjectSince == nil {
+          finish(holder, waitId, toHolder)
+        } else {
+          parkAsk(holder, waitId, status, since: subjectSince(of: wait))
+        }
+        return nil
+      }
+      guard reply.count <= OperatorJudge.maxReply else {
+        finish(holder, waitId, toHolder)
+        return nil
+      }
+      let input = OperatorJudge.ReplyGate.input(
+        repo: pr.repo, number: pr.number, title: pr.title, session: e.session.name, reply: reply)
+      return (input, subject, subjectSince(of: wait))
+    }
+    guard let call else { return }
+    let result = judge(
+      OperatorJudge.ReplyGate.self, session: call.subject, wait: waitId, head: approval.head, input: call.input)
+    queue.sync {
+      guard let result else { return finish(holder, waitId, toHolder) }
+      guard var wait = storedWait(holder, waitId), var status = wait.actionStatus, status.kind == .running else {
+        logLine("wait \(waitId) of \(holder) went while the judge read its reply")
+        return
+      }
+      status.judged = approval
+      wait.actionStatus = status
+      do {
+        switch result {
+        case .success(let answer) where answer.word == .merge:
+          try startAction(holder, wait, approval: approval)
+        case .success(let answer) where answer.word == .ask:
+          let about = entries[call.subject] == nil ? nil : call.subject
+          try recordReport(answer.question, needsYou: true, about: about, on: try ensureOperator(), wait: waitId)
+          status.reason = answer.question
+          parkAsk(holder, waitId, status, since: call.since)
+        case .success(let answer):
+          try setActionStatus(holder, waitId, status)
+          let because = answer.reason.isEmpty ? "" : " sbd's reply judge was unsure: " + Wait.sentence(answer.reason)
+          finish(
+            holder, waitId, .judgment(question: Wait.sentence(question) + because, approval: approval, reply: reply))
+        case .failure:
+          try setActionStatus(holder, waitId, status)
+          finish(holder, waitId, toHolder)
+        }
+      } catch {
+        logLine("can't record the judge's answer for wait \(waitId) of \(holder): \(error)")
+        finish(holder, waitId, toHolder)
+      }
+    }
+  }
+
+  /// Parks the action after the judge's `ask` for the pair in `status.judged`, with no message to the holder.
+  /// `since` is the subject's state when the judge read the reply, so the next change of state runs the checks
+  /// again. It runs on the state queue.
+  private func parkAsk(_ holder: String, _ waitId: String, _ status: ActionStatus, since: Int64?) {
+    var status = status
+    status.kind = .awaitingJudgment
+    status.since = nowMs()
+    status.retryAt = nil
+    status.asked = status.judged
+    status.subjectSince = since
+    do {
+      try setActionStatus(holder, waitId, status)
+    } catch {
+      logLine("can't park wait \(waitId) of \(holder) after the judge asked: \(error)")
+      holdAfterFailure(holder, waitId, "sbd could not record the judge's question")
+    }
   }
 
   /// Records how the action ended.
@@ -183,13 +292,14 @@ extension Service {
         status.reason = question
         status.retryAt = nil
         status.asked = approval
+        status.subjectSince = nil
         try setActionStatus(holder, waitId, status)
         do {
           let session = entries[holder]!.session
           let text = wait.judgmentMessage(
             question: question, holder: Wait.SessionTarget(id: holder, name: session.name),
             byOperator: session.kind == .operator, approvable: approval != nil, reply: reply)
-          _ = try send(holder, text, by: .sbd, trigger: .wait)
+          _ = try send(holder, text, by: .sbd, trigger: .wait, extra: handedFromData(holder, wait))
         } catch {
           logLine("can't ask about wait \(waitId) of \(holder): \(error)")
           holdAfterFailure(holder, waitId, question)
@@ -203,11 +313,15 @@ extension Service {
 
   /// Holds the action of a wait that `finish` could not move on, so the tick or the poller checks it again and the
   /// wait never stays running or asks nobody. It does nothing when the wait is gone.
+  ///
+  /// It forgets the pair that the judge answered. Otherwise a later hold would store the subject's state, and the
+  /// next question about that pair would park as if the judge's `ask` had reached the user.
   private func holdAfterFailure(_ holder: String, _ waitId: String, _ reason: String) {
     guard var status = storedWait(holder, waitId)?.actionStatus, status.kind != .held else { return }
     let now = nowMs()
     hold(&status, reason, now: now)
     status.since = now
+    status.judged = nil
     try? setActionStatus(holder, waitId, status)
   }
 
@@ -218,7 +332,7 @@ extension Service {
     status.retryAt = now + Int64(operatorSettings.holdRetrySeconds) * 1000
   }
 
-  private func storedWait(_ holder: String, _ id: String) -> Wait? {
+  func storedWait(_ holder: String, _ id: String) -> Wait? {
     entries[holder]?.session.waits?.first { $0.id == id }
   }
 
@@ -559,7 +673,9 @@ extension Service {
       let op = try ensureOperator()
       if try store.operatorReport(wait: wait.id, session: op) == nil {
         let about = wait.actionSubject.flatMap { entries[$0.id] == nil ? nil : $0.id }
-        try recordReport(wait.note ?? "", needsYou: wait.action?.needsYou == true, about: about, on: op, wait: wait.id)
+        try recordReport(
+          wait.note ?? "", needsYou: wait.action?.needsYou == true, about: about, on: op, wait: wait.id,
+          handedFrom: wait.handedFrom?.id)
       }
       return .done(result: "reported", detail: "Recorded the report", reports: false)
     }

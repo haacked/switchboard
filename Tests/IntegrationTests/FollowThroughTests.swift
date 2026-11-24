@@ -88,10 +88,16 @@ struct LiveGitHub {
 extension Instance {
   /// Makes gh-merge-stub print `json` for the call that it keys as `key`.
   func serveGh(_ key: String, _ json: JSON) throws {
-    let file = "\(home.path)/gh-live/\(key).json"
+    try serveGhText("\(key).json", json.text)
+  }
+
+  /// Writes `text` to `path` under gh-merge-stub's `gh-live` folder. `path` carries the file's extension, such as
+  /// `.json`, `.txt`, or `.error`.
+  func serveGhText(_ path: String, _ text: String) throws {
+    let file = "\(home.path)/gh-live/\(path)"
     try FileManager.default.createDirectory(
       atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-    try json.text.write(toFile: file, atomically: true, encoding: .utf8)
+    try text.write(toFile: file, atomically: true, encoding: .utf8)
   }
 
   /// Serves every live read of one PR's merge action.

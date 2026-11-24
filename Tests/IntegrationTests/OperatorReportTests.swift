@@ -3,15 +3,19 @@ import SwitchboardCore
 import Testing
 
 /// The operator records reports with `sb operator report` or the MCP
-/// `report` tool. A report with `needsYou` is the operator's Inbox item until
-/// the user writes to the operator or acknowledges it. Nothing else that the
-/// operator says reaches the Inbox, except a blocking prompt and the wait
-/// rule's Needs you. `sb operator reports` lists every report.
+/// `report` tool. A report with `needsYou` is an Inbox item on the session that
+/// it is about, or on the most recent Manager conversation, until the user
+/// answers or acknowledges it. With neither, the operator keeps the item.
+/// Nothing else that the operator says reaches the Inbox, except a blocking
+/// prompt. `sb operator reports` lists every report. OperatorAskTests covers
+/// the routing.
 @Suite(.blocking(timeLimit: .seconds(120))) struct OperatorReportTests {
   let operatorHelpers = OperatorTests()
   let conversationHelpers = ManagerConversationsTests()
 
   static let question = "PR #12 is green. Merge it?"
+  /// The reason of the session that owns the report.
+  static let askReason = "Operator: \(question)"
 
   func decode<T: Decodable>(_ type: T.Type, _ text: String) throws -> T { try JSONCoding.decode(type, from: text) }
 
@@ -72,32 +76,46 @@ import Testing
 
   // MARK: A report that needs the user
 
-  @Test func aNeedsYouReportPutsTheOperatorInNeedsYouWithItsText() throws {
+  @Test func aNeedsYouReportPutsItsSessionInNeedsYouWithItsText() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    _ = try sbd.new(name: "kid")
+    let kid = try sbd.new(name: "kid")
 
     try reported(sbd, op, about: "kid")
 
-    let s = try sbd.get(op.id)
+    let s = try sbd.get(kid.id)
     #expect(s.state == .needsYou)
-    #expect(s.reason == Self.question)
+    #expect(s.reason == Self.askReason)
   }
 
-  @Test func aNeedsYouReportGivesAReportItemWithAReplyOption() throws {
+  @Test func aNeedsYouReportGivesItsSessionAReportItemWithAReplyOption() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    _ = try sbd.new(name: "kid")
+    let kid = try sbd.new(name: "kid")
 
     try reported(sbd, op, about: "kid")
 
-    let item = try #require(try inboxItem(sbd, op))
+    let item = try #require(try inboxItem(sbd, kid))
     #expect(item.source == .report)
     #expect(item.options.contains { $0.action == .reply }, "\(item.options)")
     #expect(item.summary.contains(Self.question), "\(item.summary)")
+    #expect(try inboxItem(sbd, op) == nil)
   }
 
-  @Test func sbTriageListsTheOperatorWithItsReport() throws {
+  @Test func sbTriageListsTheReportsSessionWithItsReport() throws {
+    let sbd = try Instance()
+    let op = try idleOperator(sbd)
+    let kid = try sbd.new(name: "kid")
+
+    try reported(sbd, op, about: "kid")
+
+    let listed = try #require(try sbd.triage().first { $0.id == kid.id })
+    #expect(listed.triage?.source == .report)
+    #expect(try !sbd.triage().contains { $0.id == op.id })
+  }
+
+  /// With no Manager conversation and no session named, the operator keeps the item.
+  @Test func sbTriageListsTheOperatorWithAReportThatNoSessionOwns() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
 
@@ -112,7 +130,8 @@ import Testing
   @Test func aWaitMessageThatSbdSendsLeavesTheReportItem() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
     try sbd.sb("wait", "Operator", "--kind", "date", "--until", "1h", "--then", "resume")
     let mark = try sbd.lastEventId(op.id)
 
@@ -122,7 +141,7 @@ import Testing
       $0.lastReply?.hasPrefix("Done: Switchboard:") == true
     }
     #expect(try !sbd.sbdMessages(op.id, after: mark).isEmpty)
-    #expect(try inboxItem(sbd, op)?.source == .report)
+    #expect(try inboxItem(sbd, kid)?.source == .report)
   }
 
   @Test func sbSendFromATerminalClosesTheReport() throws {
@@ -145,14 +164,16 @@ import Testing
     let c = try conversationHelpers.idleConversation(sbd, name: "Queue work", "hello")
     let op = try idleOperator(sbd)
     try reported(sbd, op)
+    try #require(try inboxItem(sbd, c)?.source == .report)
     let mark = try sbd.lastEventId(op.id)
 
     try sbd.sb(["operator", "yes"], env: ["SB_SESSION_ID": c.id])
 
     #expect(try sentEvent(sbd, op, "yes", after: mark).data["by"]?.string == "you")
-    #expect(try inboxItem(sbd, op) == nil)
+    #expect(try inboxItem(sbd, c) == nil)
+    #expect(try reports(sbd).map { $0["open"]?.bool } == [false])
     try sbd.waitFor(op.id, "the reply to yes", timeout: 30) { $0.lastReply == "Done: yes" }
-    #expect(try inboxItem(sbd, op) == nil)
+    #expect(try inboxItem(sbd, c) == nil)
   }
 
   /// How a conversation's Claude sends the operator a message. Each carries `from`.
@@ -182,7 +203,7 @@ import Testing
     #expect(sent.data["from"]?.string == c.id, "\(sent.data.text)")
     #expect(sent.data["by"]?.string == "claude", "\(sent.data.text)")
     try sbd.waitFor(op.id, "the operator's reply", timeout: 30) { $0.lastReply == "Done: \(text)" }
-    #expect(try inboxItem(sbd, op)?.source == .report)
+    #expect(try inboxItem(sbd, c)?.source == .report)
   }
 
   /// A message that the operator sends itself is not the user's, so it leaves the report open.
@@ -286,108 +307,105 @@ import Testing
     #expect(try inboxItem(sbd, op)?.source == .report)
   }
 
-  /// A conversation's Claude can't answer the report for the user through `sb choose`.
+  /// A conversation's Claude can't answer the report for the user through `sb choose` on the conversation that owns it.
   @Test func sbChooseInsideClaudeOnAReportIsRefused() throws {
     let sbd = try Instance()
     let c = try conversationHelpers.idleConversation(sbd, name: "Queue work", "hello")
     let op = try idleOperator(sbd)
     try reported(sbd, op)
-    let item = try #require(try sbd.get(op.id).triage)
+    let item = try #require(try sbd.get(c.id).triage)
     let reply = try #require(item.options.firstIndex { $0.action == .reply }, "\(item.options)")
     let sent = try sbd.count("sent", of: op.id)
 
-    let r = try sbd.run(["choose", "Operator", "\(reply + 1)", "--text", "yes"], env: inside(c.id))
+    let r = try sbd.run(["choose", c.id, "\(reply + 1)", "--text", "yes"], env: inside(c.id))
 
     #expect(r.status != 0)
     #expect(r.stderr.contains("inside Claude Code"), "\(r.stderr)")
     #expect(try sbd.count("sent", of: op.id) == sent)
-    #expect(try inboxItem(sbd, op)?.source == .report)
+    #expect(try inboxItem(sbd, c)?.source == .report)
   }
 
   @Test func sbAckClosesTheReport() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
 
-    try sbd.sb("ack", "Operator")
+    try sbd.sb("ack", "kid")
 
-    #expect(try inboxItem(sbd, op) == nil)
+    #expect(try inboxItem(sbd, kid)?.source != .report)
+    #expect(try reports(sbd).map { $0["open"]?.bool } == [false])
   }
 
   @Test func aReportRecordedAfterTheAckStaysOpen() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op, "PR alpha is green. Merge it?")
-    try sbd.sb("ack", "Operator")
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, "PR alpha is green. Merge it?", about: "kid")
+    try sbd.sb("ack", "kid")
 
-    try reported(sbd, op, "PR bravo is green. Merge it?")
+    try reported(sbd, op, "PR bravo is green. Merge it?", about: "kid")
 
-    let item = try #require(try inboxItem(sbd, op))
+    let item = try #require(try inboxItem(sbd, kid))
     #expect(item.source == .report)
     #expect(item.summary.contains("PR bravo is green. Merge it?"), "\(item.summary)")
     #expect(!item.summary.contains("PR alpha"), "\(item.summary)")
-    #expect(try sbd.get(op.id).reason == "PR bravo is green. Merge it?")
+    #expect(try sbd.get(kid.id).reason == "Operator: PR bravo is green. Merge it?")
   }
 
   // MARK: Undoing the ack
 
-  @Test func sbAckUndoReopensTheReportsThatTheAckClosed() throws {
+  /// The operator keeps the reports, because no session owns them. Acknowledging them records `report-closed`,
+  /// which has no undo (Decision 40).
+  @Test func sbAckUndoOfTheOperatorsOwnReportsIsRefusedAndTheyStayClosed() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
     try reported(sbd, op, "PR alpha is green. Merge it?")
     try reported(sbd, op, "PR bravo is green. Merge it?")
     let acked = try sbd.client.call("ack", ["session": .string(op.id)], as: SessionSummary.self)
-    #expect(acked.acknowledged == true, "\(acked.state) \(acked.reason)")
     #expect(acked.triage == nil)
-    // A second ack must not discard the reports that the undo reopens, whatever it answers.
-    _ = try sbd.run("ack", "Operator")
 
-    try sbd.sb("ack", "Operator", "--undo")
-
-    let latest = try #require(try reportEvents(sbd).last)
-    let item = try #require(try inboxItem(sbd, op))
-    #expect(item.source == .report)
-    #expect(item.ref == "report:\(latest.id)")
-    #expect(item.summary == "PR alpha is green. Merge it?\nPR bravo is green. Merge it?")
-    #expect(try reports(sbd).map { $0["open"]?.bool } == [true, true])
     let error = failure(sbd, "ack", ["session": .string(op.id), "undo": true])
+
     #expect(error.contains("isn't acknowledged"), Comment(rawValue: error))
+    #expect(try reports(sbd).map { $0["open"]?.bool } == [false, false])
+    #expect(try inboxItem(sbd, op) == nil)
   }
 
   @Test func choosingTheReplyOptionSendsTheTextToTheOperator() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
-    let item = try #require(try sbd.get(op.id).triage)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
+    let item = try #require(try sbd.get(kid.id).triage)
     let reply = try #require(item.options.firstIndex { $0.action == .reply }, "\(item.options)")
 
     _ = try sbd.client.call(
       "choose",
       [
-        "session": .string(op.id), "option": .string("\(reply + 1)"), "text": "Yes, merge it.",
+        "session": .string(kid.id), "option": .string("\(reply + 1)"), "text": "Yes, merge it.",
         "ref": .string(item.ref),
       ])
 
-    let replied = try sbd.waitFor(op.id, "the reply to the choice", timeout: 30) {
-      $0.lastReply == "Done: Yes, merge it."
-    }
+    try sbd.waitFor(op.id, "the reply to the choice", timeout: 30) { $0.lastReply == "Done: About kid: Yes, merge it." }
     let sent = try #require(try sbd.events(op.id).last { $0.kind == "sent" })
-    #expect(sent.data["text"]?.string == "Yes, merge it.")
+    #expect(sent.data["text"]?.string == "About kid: Yes, merge it.")
     #expect(sent.data["from"] == nil)
     #expect(sent.data["by"]?.string == "you")
-    #expect(replied.triage == nil)
+    #expect(try sbd.get(kid.id).triage?.source != .report)
   }
 
   @Test func sbChooseWithTheReplyOptionSendsTheText() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
-    let item = try #require(try sbd.get(op.id).triage)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
+    let item = try #require(try sbd.get(kid.id).triage)
     let reply = try #require(item.options.firstIndex { $0.action == .reply }, "\(item.options)")
 
-    try sbd.sb("choose", "Operator", "\(reply + 1)", "--text", "Yes, merge it.")
+    try sbd.sb("choose", "kid", "\(reply + 1)", "--text", "Yes, merge it.")
 
-    try sbd.waitFor(op.id, "the reply to the choice", timeout: 30) { $0.lastReply == "Done: Yes, merge it." }
+    try sbd.waitFor(op.id, "the reply to the choice", timeout: 30) { $0.lastReply == "Done: About kid: Yes, merge it." }
   }
 
   // MARK: What doesn't reach the Inbox
@@ -407,7 +425,7 @@ import Testing
 
     let op = try operatorHelpers.idleOperator(sbd, "Which database should I use?")
 
-    try #require(op.state == .needsYou, "\(op.state): \(op.reason)")
+    #expect(op.state == .waiting, "\(op.state): \(op.reason)")
     #expect(try inboxItem(sbd, op) == nil)
   }
 
@@ -425,17 +443,21 @@ import Testing
     #expect(try inboxItem(sbd, op) == nil)
   }
 
-  @Test func anOverdueWaitOnTheOperatorCreatesARuleItem() throws {
+  /// With no Manager conversation, the operator keeps its overdue wait's item.
+  @Test func anOverdueWaitOnTheOperatorWithNoConversationGivesItAHeldItem() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
     let kid = try sbd.new(name: "kid")
     try sbd.sb("wait", "Operator", "--kind", "session", "--target", kid.id, "--state", "done")
+    let wait = try #require(try sbd.get(op.id).waits.last)
 
     try sbd.advanceClock(25 * WaitTests.hourMs)
 
     try sbd.waitFor(op.id, "the recheck") { $0.state == .needsYou && $0.triage != nil }
     let item = try #require(try inboxItem(sbd, op))
-    #expect(item.source == .rule)
+    #expect(item.source == .report)
+    #expect(item.ref == "held:\(wait.id)")
+    #expect(item.details.overdueWaits == [wait.id])
   }
 
   // MARK: Only the operator reports
@@ -494,13 +516,13 @@ import Testing
   @Test func theMCPReportToolInTheOperatorRecordsTheReport() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    _ = try sbd.new(name: "kid")
+    let kid = try sbd.new(name: "kid")
 
     let result = try MCPClient(sbd, env: inside(op.id)).call(
       "report", ["text": .string(Self.question), "needsYou": true, "session": "kid"])
 
     #expect(!result.isError, "\(result.text)")
-    #expect(try inboxItem(sbd, op)?.source == .report)
+    #expect(try inboxItem(sbd, kid)?.source == .report)
   }
 
   @Test func theReportToolIsListedWithItsFields() throws {
@@ -551,9 +573,10 @@ import Testing
   @Test func reportsMarksAnAcknowledgedReportClosed() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
+    _ = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
 
-    try sbd.sb("ack", "Operator")
+    try sbd.sb("ack", "kid")
 
     #expect(try reports(sbd).map { $0["open"]?.bool } == [false])
   }
@@ -618,26 +641,29 @@ import Testing
   @Test func anOpenReportStaysOpenAfterAnSbdRestart() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
 
     sbd.stopSbd()
     try sbd.startSbd()
 
-    let item = try #require(try inboxItem(sbd, op))
+    let item = try #require(try inboxItem(sbd, kid))
     #expect(item.source == .report)
-    #expect(try sbd.get(op.id).reason == Self.question)
+    #expect(try sbd.get(kid.id).reason == Self.askReason)
   }
 
   @Test func anAcknowledgedReportStaysClosedAfterAnSbdRestart() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
-    try sbd.sb("ack", "Operator")
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
+    try sbd.sb("ack", "kid")
 
     sbd.stopSbd()
     try sbd.startSbd()
 
-    #expect(try inboxItem(sbd, op) == nil)
+    #expect(try inboxItem(sbd, kid)?.source != .report)
+    #expect(try reports(sbd).map { $0["open"]?.bool } == [false])
   }
 
   // MARK: rm is refused while a report is open (Risk 5)
@@ -669,25 +695,28 @@ import Testing
   @Test func rmOnTheOperatorSucceedsAfterTheAck() throws {
     let sbd = try Instance()
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
-    try sbd.sb("ack", "Operator")
+    _ = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
+    try sbd.sb("ack", "kid")
 
     try sbd.sb("rm", "Operator")
 
     #expect(try operators(sbd).isEmpty)
   }
 
-  @Test func sbAckOfTheOperatorInsideClaudeIsRefusedAndLeavesTheReportOpen() throws {
+  @Test func sbAckOfTheReportsOwnerInsideClaudeIsRefusedAndLeavesTheReportOpen() throws {
     let sbd = try Instance()
     let c = try conversationHelpers.idleConversation(sbd, name: "Queue work", "hello")
     let op = try idleOperator(sbd)
-    try reported(sbd, op)
+    let kid = try sbd.new(name: "kid")
+    try reported(sbd, op, about: "kid")
 
-    let refused = try sbd.run(["ack", "Operator"], env: inside(c.id))
+    let refused = try sbd.run(["ack", "kid"], env: inside(c.id))
 
     #expect(refused.status != 0)
     #expect(refused.stderr.contains("inside Claude Code"), "\(refused.stderr)")
-    #expect(try inboxItem(sbd, op)?.source == .report)
+    #expect(try inboxItem(sbd, kid)?.source == .report)
+    #expect(try reports(sbd).map { $0["open"]?.bool } == [true])
   }
 
   @Test func sbAckInsideClaudeOfTheOperatorsBlockingPromptIsAcceptedAndLeavesTheReportOpen() throws {

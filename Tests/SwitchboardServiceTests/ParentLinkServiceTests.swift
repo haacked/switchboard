@@ -98,7 +98,6 @@ private struct ParentLinkState: Equatable {
   var sessions: [String: Session]
   var stored: [Session]
   var marks: [String: ChildMark]
-  var unsent: [String: [ParentNotices.Line]]
 }
 
 extension Service {
@@ -110,8 +109,7 @@ extension Service {
     try queue.sync {
       ParentLinkState(
         events: try store.events(), sessions: entries.mapValues(\.session),
-        stored: try store.sessions().sorted { $0.id < $1.id }, marks: parentNotices.marks,
-        unsent: parentNotices.unsent)
+        stored: try store.sessions().sorted { $0.id < $1.id }, marks: parentNotices.marks)
     }
   }
 
@@ -131,11 +129,6 @@ extension Service {
     try queue.sync { try store.events(session: id) }.map(\.kind).filter { $0 == "unlinked" || $0 == "linked" }
   }
 
-  /// Keeps the session's turn running, so a notice to it stays in `unsent` and is never sent.
-  fileprivate func keepBusy(_ id: String) {
-    queue.sync { entries[id]?.facts.turnRunning = true }
-  }
-
   /// Records a `pr` event for the session, as the poller does, after a first prompt and a reply. A child with no
   /// prompt and no reply shows `.fresh` to its parent, so it would queue nothing.
   fileprivate func openPR(_ id: String, number: Int = 77, repo: String = "secret/listed") throws {
@@ -150,52 +143,17 @@ extension Service {
     }
   }
 
-  /// Runs `notifyParents` and returns every line that `parent` has not heard yet.
-  fileprivate func queuedLines(for parent: String) -> [ParentNotices.Line] {
+  /// The child lines of the digest that `parent` gets with its next prompt. Reading it counts the lines as heard.
+  fileprivate func digestLines(for parent: String) -> [String] {
     queue.sync {
-      notifyParents(now: nowMs())
-      return parentNotices.unsent[parent] ?? []
+      (digest(parent, now: nowMs()) ?? "").split(separator: "\n").map(String.init).filter { $0.hasPrefix("- ") }
     }
   }
-
-  fileprivate func sentTexts(_ id: String) throws -> [String] {
-    try linkEvents(id, "sent").compactMap { $0.data["text"]?.string }
-  }
-}
-
-private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line {
-  ParentNotices.Line(child: child, text: text ?? "\(child) (\(child)) needs you: read its last reply")
 }
 
 // MARK: forgetChild (Stage 1)
 
 @Suite struct ParentNoticeForgetChildTests {
-  @Test(.timeLimit(.minutes(1)))
-  func forgetChildDropsOnlyThatChildsQueuedLines() throws {
-    try withParents([]) { service in
-      let unsent = service.queue.sync { () -> [String: [ParentNotices.Line]] in
-        service.parentNotices.unsent = ["boss": [line("kid"), line("sibling"), line("kid", "kid (kid) is done")]]
-        service.forgetChild("kid")
-        return service.parentNotices.unsent
-      }
-
-      #expect(unsent == ["boss": [line("sibling")]])
-    }
-  }
-
-  @Test(.timeLimit(.minutes(1)))
-  func forgetChildDropsTheChildsLinesUnderEveryParent() throws {
-    try withParents([]) { service in
-      let unsent = service.queue.sync { () -> [String: [ParentNotices.Line]] in
-        service.parentNotices.unsent = ["boss": [line("kid"), line("sibling")], "other": [line("kid"), line("x")]]
-        service.forgetChild("kid")
-        return service.parentNotices.unsent
-      }
-
-      #expect(unsent == ["boss": [line("sibling")], "other": [line("x")]])
-    }
-  }
-
   @Test(.timeLimit(.minutes(1)))
   func forgetChildDropsOnlyThatChildsMark() throws {
     try withParents([]) { service in
@@ -211,33 +169,16 @@ private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line 
   }
 
   @Test(.timeLimit(.minutes(1)))
-  func forgetChildRemovesAParentWhoseListBecomesEmpty() throws {
-    try withParents([]) { service in
-      let unsent = service.queue.sync { () -> [String: [ParentNotices.Line]] in
-        service.parentNotices.unsent = ["boss": [line("kid")], "other": [line("sibling")]]
-        service.forgetChild("kid")
-        return service.parentNotices.unsent
-      }
-
-      #expect(unsent["boss"] == nil)
-      #expect(unsent.keys.sorted() == ["other"])
-    }
-  }
-
-  @Test(.timeLimit(.minutes(1)))
   func forgetChildOfAnUnknownIdChangesNothing() throws {
     try withParents([]) { service in
       let marks: [String: ChildMark] = ["kid": ChildMark(state: .needsYou, pr: nil)]
-      let unsent: [String: [ParentNotices.Line]] = ["boss": [line("kid"), line("sibling")]]
-      let after = service.queue.sync { () -> ([String: ChildMark], [String: [ParentNotices.Line]]) in
+      let after = service.queue.sync { () -> [String: ChildMark] in
         service.parentNotices.marks = marks
-        service.parentNotices.unsent = unsent
         service.forgetChild("nosuch")
-        return (service.parentNotices.marks, service.parentNotices.unsent)
+        return service.parentNotices.marks
       }
 
-      #expect(after.0 == marks)
-      #expect(after.1 == unsent)
+      #expect(after == marks)
     }
   }
 }
@@ -901,64 +842,38 @@ private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line 
   }
 }
 
-// MARK: Risk 3: queued notices and the seed
+// MARK: Risk 3: the digest and the seed
 
-/// After a `parent` request, no parent holds a queued line about the child, and a new parent hears only what
+/// After a `parent` request, no parent's digest holds a line about the child, and a new parent hears only what
 /// changes after the link.
 @Suite struct ParentLinkNoticeTests {
   static let family = [work("boss"), work("kid", parent: "boss"), work("sibling", parent: "boss")]
 
-  /// Queues a PR line about `kid` and about `sibling` for the busy `boss`, and checks that both are queued.
-  private func queueBothLines(_ service: Service) throws {
-    service.keepBusy("boss")
+  /// Gives `kid` and `sibling` a PR that `boss` has not heard of.
+  private func openBothPRs(_ service: Service) throws {
     try service.openPR("kid", number: 77)
     try service.openPR("sibling", number: 78)
-    let queued = service.queuedLines(for: "boss")
-    try #require(queued.contains { $0.child == "kid" }, "the setup queued no line about kid: \(queued)")
-    try #require(queued.contains { $0.child == "sibling" }, "the setup queued no line about sibling: \(queued)")
   }
 
   @Test(.timeLimit(.minutes(1)))
-  func aClearDropsTheLinesQueuedAboutTheChild() throws {
+  func aClearedChildLeavesTheDigestAndTheSiblingStays() throws {
     try withParents(Self.family) { service in
-      try queueBothLines(service)
+      try openBothPRs(service)
 
       _ = service.parent(["session": "kid", "clear": true])
 
-      let unsent = service.queue.sync { service.parentNotices.unsent }
-      #expect(unsent.values.allSatisfy { $0.allSatisfy { $0.child != "kid" } }, "\(unsent)")
-    }
-  }
-
-  @Test(.timeLimit(.minutes(1)))
-  func aClearKeepsTheLinesQueuedAboutTheSibling() throws {
-    try withParents(Self.family) { service in
-      try queueBothLines(service)
-
-      _ = service.parent(["session": "kid", "clear": true])
-
-      #expect(service.queue.sync { service.parentNotices.unsent["boss"] ?? [] }.contains { $0.child == "sibling" })
-    }
-  }
-
-  @Test(.timeLimit(.minutes(1)))
-  func theNextNoticeAfterAClearHoldsNoLineAboutTheChild() throws {
-    try withParents(Self.family) { service in
-      try queueBothLines(service)
-
-      _ = service.parent(["session": "kid", "clear": true])
-
-      let queued = service.queuedLines(for: "boss").map(\.text)
-      let heard = try queued + service.sentTexts("boss")
-      #expect(!heard.isEmpty)
-      #expect(heard.allSatisfy { !$0.contains("kid") }, "\(heard)")
+      let lines = service.digestLines(for: "boss")
+      #expect(lines.allSatisfy { !$0.contains("kid") }, "\(lines)")
+      #expect(lines.contains { $0.contains("sibling") }, "\(lines)")
     }
   }
 
   @Test(.timeLimit(.minutes(1)))
   func aClearDropsTheChildsMark() throws {
     try withParents(Self.family) { service in
-      try queueBothLines(service)
+      try openBothPRs(service)
+      _ = service.digestLines(for: "boss")
+      try #require(service.queue.sync { service.parentNotices.marks["kid"] } != nil, "the setup recorded no mark")
 
       _ = service.parent(["session": "kid", "clear": true])
 
@@ -967,41 +882,34 @@ private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line 
   }
 
   @Test(.timeLimit(.minutes(1)))
-  func aMoveDropsTheLinesQueuedForTheOldParent() throws {
+  func aMovedChildLeavesTheOldParentsDigest() throws {
     try withParents(Self.family + [work("new")]) { service in
-      try queueBothLines(service)
-      service.keepBusy("new")
+      try openBothPRs(service)
 
       _ = service.parent(["session": "kid", "parent": "new"])
 
-      let boss = service.queuedLines(for: "boss")
-      #expect(boss.allSatisfy { $0.child != "kid" }, "\(boss)")
-      #expect(boss.contains { $0.child == "sibling" })
+      let boss = service.digestLines(for: "boss")
+      #expect(boss.allSatisfy { !$0.contains("kid") }, "\(boss)")
+      #expect(boss.contains { $0.contains("sibling") })
     }
   }
 
   // MARK: A new parent hears only what changes after the link
 
   /// The child already has a PR, a reply, and a state its new parent never heard about. `.fresh` would hide a bare
-  /// child, so the test gives it all three and then proves that, without the seed, a line would queue.
+  /// child, so the test gives it all three and then proves that, without the seed, a line would appear.
   @Test(.timeLimit(.minutes(1)), arguments: [String?.none, "old"])
-  func aLinkedChildSendsTheNewParentNothingAboutWhatHappenedBefore(from old: String?) throws {
+  func aLinkedChildIsAbsentFromTheNewParentsDigestForWhatHappenedBefore(from old: String?) throws {
     try withParents([work("boss"), work("old"), work("kid", parent: old)]) { service in
-      service.keepBusy("boss")
       try service.openPR("kid")
 
       let answer = service.parent(["session": "kid", "parent": "boss"])
       try #require(answer.ok, "\(answer.error ?? "")")
 
-      #expect(service.queuedLines(for: "boss").isEmpty)
-      let check27 = try service.sentTexts("boss").isEmpty
-      #expect(check27)
-      let unseeded = service.queue.sync { () -> [ParentNotices.Line] in
-        service.parentNotices.marks["kid"] = nil
-        service.notifyParents(now: nowMs())
-        return service.parentNotices.unsent["boss"] ?? []
-      }
-      #expect(unseeded.contains { $0.child == "kid" }, "the setup would queue nothing without the seed")
+      #expect(service.digestLines(for: "boss").isEmpty)
+      service.queue.sync { service.parentNotices.marks["kid"] = nil }
+      let unseeded = service.digestLines(for: "boss")
+      #expect(unseeded.contains { $0.contains("kid") }, "the setup would show nothing without the seed")
     }
   }
 
@@ -1025,10 +933,8 @@ private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line 
   func aMoveFromAHostParentSeedsWhatTheNewParentSees() throws {
     let sessions = [work("m1", host: "mini"), work("boss"), work("mkid", parent: "m1", host: "mini")]
     try withParents(sessions, hosts: listedHosts) { service in
-      service.keepBusy("boss")
-      service.keepBusy("m1")
       try service.openPR("mkid", number: 4242, repo: "secret/vault")
-      let heardOnMini = service.queuedLines(for: "m1").map(\.text)
+      let heardOnMini = service.digestLines(for: "m1")
       let markOnMini = service.queue.sync { service.parentNotices.marks["mkid"] }
       try #require(markOnMini != nil, "the setup gave m1 no mark of mkid")
       try #require(
@@ -1038,13 +944,10 @@ private func line(_ child: String, _ text: String? = nil) -> ParentNotices.Line 
       let answer = service.parent(["session": "mkid", "parent": "boss"])
       try #require(answer.ok, "\(answer.error ?? "")")
 
-      #expect(service.queuedLines(for: "boss").isEmpty)
-      let unseeded = service.queue.sync { () -> [String] in
-        service.parentNotices.marks["mkid"] = nil
-        service.notifyParents(now: nowMs())
-        return (service.parentNotices.unsent["boss"] ?? []).map(\.text)
-      }
-      #expect(unseeded.contains { $0.contains("#4242") }, "the setup would queue nothing without the seed: \(unseeded)")
+      #expect(service.digestLines(for: "boss").isEmpty)
+      service.queue.sync { service.parentNotices.marks["mkid"] = nil }
+      let unseeded = service.digestLines(for: "boss")
+      #expect(unseeded.contains { $0.contains("#4242") }, "the setup would show nothing without the seed: \(unseeded)")
     }
   }
 }

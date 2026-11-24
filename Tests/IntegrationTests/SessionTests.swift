@@ -12,7 +12,7 @@ import Testing
     #expect(done.reason == "read its last reply and decide what's next")
     #expect(
       sbd.stubArgs().first
-        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- hello there")
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- hello there")
     try sbd.waitFor(s.id, "claude's pid") { $0.claudePid != nil }
     #expect(try sbd.sb("screen", s.id).contains("⏺ Done: hello there"))
   }
@@ -71,11 +71,33 @@ import Testing
     try sbd.waitFor(s.id, "the queued message's reply", timeout: 20) { $0.lastReply == "Done: after the slow one" }
   }
 
+  /// A message that arrives as claude starts waits until claude has drawn its prompt. The test sets the production
+  /// wait after SessionStart.
+  @Test func pastesAMessageThatArrivesAsClaudeStartsOnlyAfterTheWait() throws {
+    let sbd = try Instance(config: Instance.productionPasteSettle)
+    let s = try sbd.new()
+    try sbd.waitFor(s.id, "SessionStart") { $0.live }
+    let start = try #require(try sbd.events(s.id).last { $0.kind == "SessionStart" }?.t)
+
+    let printed = try sbd.sb("send", s.id, "early")
+
+    let sent = try #require(try sbd.events(s.id, "sent", text: "early").first?.t)
+    try #require(
+      sent - start < Instance.productionPasteSettleMs,
+      "the send came \(sent - start) ms after SessionStart, too late to test the wait")
+    #expect(printed == "queued\n")
+    try sbd.waitFor(s.id, "the reply") { $0.lastReply == "Done: early" }
+    let pasting = try #require(try sbd.events(s.id, "pasting", text: "early").first?.t)
+    #expect(pasting - start >= Instance.productionPasteSettleMs, "pasted \(pasting - start) ms after SessionStart")
+  }
+
   @Test func sendsTwoMessagesInARowAsTwoTurns() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.productionPasteSettle)
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    try sbd.waitFor("the prompt to settle") { (try sbd.events(s.id).last.map { nowMs() - $0.t > 1600 }) ?? false }
+    try sbd.waitFor("the prompt to settle") {
+      (try sbd.events(s.id).last.map { nowMs() - $0.t > Instance.productionPasteSettleMs + 100 }) ?? false
+    }
     #expect(try sbd.sb("send", s.id, "lag first --model opus") == "pasted\n")
     #expect(try sbd.sb("send", s.id, "second") == "queued\n")
     try sbd.waitFor(s.id, "the second reply", timeout: 20) { $0.lastReply == "Done: second" }
@@ -156,7 +178,8 @@ import Testing
     #expect(try sbd.sb("send", s.id, "- fix A") == "resumed\n")
     try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply == "Done: - fix A" }
     #expect(
-      sbd.stubArgs().last == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- - fix A")
+      sbd.stubArgs().last
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- - fix A")
   }
 
   @Test func startsAConversationThatClaudeLeftBeforeItsFirstPromptWithItsId() throws {
@@ -169,7 +192,8 @@ import Testing
     #expect(try sbd.sb("send", s.id, "begin") == "resumed\n")
     try sbd.waitFor(s.id, "the first turn's reply") { $0.lastReply == "Done: begin" }
     #expect(
-      sbd.stubArgs().last == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- begin")
+      sbd.stubArgs().last
+        == "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- begin")
   }
 
   @Test func restartsClaudeWithoutTheVariablesThatItsTmuxSessionKeptFromAnEarlierStart() throws {
@@ -332,7 +356,7 @@ import Testing
     try sbd.waitFor(s.id, "claude") { $0.live }
     #expect(
       sbd.stubArgs() == [
-        "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- first\nsecond"
+        "--session-id \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- first\nsecond"
       ])
   }
 
@@ -390,10 +414,12 @@ import Testing
   }
 
   @Test func pastesAMessageWithNewLinesAsOnePrompt() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.productionPasteSettle)
     let s = try sbd.new(prompt: "hello")
     try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
-    try sbd.waitFor("the prompt to settle") { (try sbd.events(s.id).last.map { nowMs() - $0.t > 1600 }) ?? false }
+    try sbd.waitFor("the prompt to settle") {
+      (try sbd.events(s.id).last.map { nowMs() - $0.t > Instance.productionPasteSettleMs + 100 }) ?? false
+    }
 
     #expect(try sbd.sb("send", s.id, Self.multiline) == "pasted\n")
 
@@ -422,7 +448,8 @@ import Testing
     try expectMultilineAsOnePrompt(sbd, s, after: "hello")
     #expect(
       sbd.stubArgs().last
-        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) -- \(Self.multiline)")
+        == "--resume \(s.claudeSessionId) --settings \(sbd.home.claudeSettings(s.id)) --model opus -- \(Self.multiline)"
+    )
   }
 
   @Test func keepsASessionRunningWhileATerminalIsAttached() throws {

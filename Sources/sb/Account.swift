@@ -17,6 +17,11 @@ func account(_ a: Args) {
     if a.json { return printJSON(["accounts": accounts, "move": moved]) }
     printAccounts(accounts, json: false)
     printMove(decode(moved, as: AccountMove.self))
+  case "add":
+    guard words.count == 2, let agent = a.values["--agent"] else { die("usage: sb account add \(addUsage)") }
+    let result = call("account-add", ["name": .string(words[1]), "agent": .string(agent)])
+    if a.json { return printJSON(result) }
+    print("Made \(result["folder"]?.string ?? words[1]). Sign it in with:\n  \(result["login"]?.string ?? "")")
   case "move":
     guard words.count == 2 else { die("usage: sb account move \(moveUsage)") }
     let sessions = a.allValues["--session"] ?? []
@@ -32,11 +37,12 @@ func account(_ a: Args) {
       die("\(n) named session\(n == 1 ? "" : "s") did not move")
     }
   default:
-    die("usage: sb account [use <name|folder> [--move | --new-only] | move \(moveUsage)]")
+    die("usage: sb account [use <name|folder> [--move | --new-only] | add \(addUsage) | move \(moveUsage)]")
   }
 }
 
 private let moveUsage = "<name|folder> [--session <ref>]... [--stop] [--dry-run]"
+private let addUsage = "<name> --agent \(Agent.allCases.map(\.rawValue).joined(separator: "|"))"
 
 /// Whether `use` also moves the existing sessions. `--move` and `--new-only`
 /// answer it. Without either, a terminal asks when a session could move, and a
@@ -57,13 +63,14 @@ func printAccounts(_ result: JSON, json: Bool) {
   for info in decode(result, as: [AccountInfo].self) {
     let folder = (info.folder as NSString).abbreviatingWithTildeInPath
     let count = "\(info.sessions) session\(info.sessions == 1 ? "" : "s")"
-    print(
-      "\(info.active ? "*" : " ") \(info.name.padding(toLength: 12, withPad: " ", startingAt: 0))  \(folder), \(count)")
+    let name = info.name.padding(toLength: 12, withPad: " ", startingAt: 0)
+    let agent = info.agent.rawValue.padding(toLength: 6, withPad: " ", startingAt: 0)
+    print("\(info.active ? "*" : " ") \(name)  \(agent)  \(folder), \(count)")
   }
 }
 
 func printMove(_ move: AccountMove, dryRun: Bool = false) {
-  let name = ClaudeAccount(folder: move.account).name
+  let name = Account.name(ofFolder: move.account)
   let n = move.moved.count
   print(
     "\(dryRun ? "\(n) session\(n == 1 ? "" : "s") would move" : "Moved \(n) session\(n == 1 ? "" : "s")") to \(name)")

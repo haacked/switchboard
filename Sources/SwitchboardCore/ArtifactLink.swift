@@ -20,6 +20,13 @@ public enum ArtifactLink {
     parts(of: text)?.last
   }
 
+  /// The id of a `/code/artifact/<id>` link, or nil for any other link. Only that form's id is the
+  /// `artifact_id` that a publish records.
+  public static func artifactId(of text: String) -> String? {
+    guard let parts = parts(of: text), parts.first == "code" else { return nil }
+    return parts.last
+  }
+
   private static func parts(of text: String) -> [String]? {
     guard let url = URL(string: text) else { return nil }
     let parts = url.path.split(separator: "/").map(String.init)

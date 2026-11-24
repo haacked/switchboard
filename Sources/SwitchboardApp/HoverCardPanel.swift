@@ -80,7 +80,8 @@ final class HoverCardAnchorView: PointerTrackingView {
     DispatchQueue.main.async { [weak self] in
       guard let self, let window = self.window, let card = self.card else { return }
       let pointer = self.convert(window.mouseLocationOutsideOfEventStream, from: nil)
-      card.appeared(self.id, anchor: self.anchor, pointerInside: self.visibleRect.contains(pointer))
+      card.appeared(
+        self.id, anchor: self.anchor, pointerInside: !BackgroundLaunch.isRunning && self.visibleRect.contains(pointer))
       if self.pinned {
         // A card in a lazy stack can appear before it has its final frame.
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in

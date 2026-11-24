@@ -195,7 +195,9 @@ jq -n --arg root "$root" --arg home "$home" --arg cap "$cap" --arg tick "$tick" 
   claude: "\($root)/Tests/IntegrationTests/Fixtures/claude-stub",
   worktreeRoot: "\($home)/worktrees",
   claudeConfigDirs: [],
+  codexHomes: [],
   github: {pollSeconds: 0},
+  sessionNames: {enabled: false},
   depot: {enabled: false},
   usage: {pollSeconds: 0, keychain: false},
   trunk: {path: "\($home)/trunk"}

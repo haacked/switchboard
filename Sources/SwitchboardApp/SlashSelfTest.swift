@@ -4,6 +4,8 @@ import AppKit
 /// `bin/test-gui` with SB_SLASH_TEST=1. The session's folder holds `probe-repo`'s commands and skills. The check
 /// types into the field and posts each key to the app's event queue, so SwiftUI's key handlers see it as they see
 /// a typed key. Each step logs the field's text and the panel's rows to standard error, and the app quits at the end.
+/// A session's view hides the field after each send and after an Esc in the empty field, so the check shows the
+/// field again and types into the new one.
 @MainActor
 enum SlashSelfTest {
   static let probeRows = ["probe-cmd-plain", "probe-cmd-user-only", "probe-default", "probe-user-only"]
@@ -12,19 +14,35 @@ enum SlashSelfTest {
     let env = ProcessInfo.processInfo.environment
     guard env["SB_SLASH_TEST"] != nil, let session = env["SB_SELECT"] else { return }
     Task { @MainActor in
-      if let field = await DraftSelfTest.waitForField(model, session) {
-        await run(field, model, session: session)
-      }
+      await run(model, session: session)
       log("done")
       NSApp.terminate(nil)
     }
   }
 
-  private static func run(_ field: NSTextField, _ model: BoardModel, session: String) async {
-    field.window?.makeFirstResponder(field)
-    await pause()
-    guard let editor = field.currentEditor() as? NSTextView else { return log("no focus") }
+  private static func run(_ model: BoardModel, session: String) async {
+    // `reveal` sets both before any step reads them.
+    var field: NSTextField!
+    var editor: NSTextView!
+    func reveal() async -> Bool {
+      guard let shown = await DraftSelfTest.waitForField(model, session, reveal: true) else { return false }
+      shown.window?.makeFirstResponder(shown)
+      await pause()
+      guard let shownEditor = shown.currentEditor() as? NSTextView else {
+        log("no focus")
+        return false
+      }
+      (field, editor) = (shown, shownEditor)
+      return true
+    }
     let focused = { editor.window?.firstResponder === editor }
+    let text = { (DraftSelfTest.draft(model, session)?.text ?? "").debugDescription }
+    func sent() async -> Bool {
+      for _ in 0..<120 where DraftSelfTest.draft(model, session)?.isEmpty == false { await pause() }
+      log("hidden after send: \(model.revealedMessageField != session)")
+      return await reveal()
+    }
+    guard await reveal() else { return }
     func type(_ text: String) async {
       editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
       await pause()
@@ -56,8 +74,8 @@ enum SlashSelfTest {
     await pause()
     log("return on /probe-d: \(field.stringValue.debugDescription) open \(panel()?.isVisible == true)")
     press(field, .return)
-    await waitForSend(field)
-    log("return again: \(field.stringValue.debugDescription)")
+    guard await sent() else { return }
+    log("return again: \(text())")
 
     // Keypad Enter reaches `onSubmit`, not the Return key handler.
     await type("/probe-d")
@@ -67,16 +85,16 @@ enum SlashSelfTest {
       "enter on /probe-d: \(field.stringValue.debugDescription) open \(panel()?.isVisible == true) focused \(focused())"
     )
     press(field, .enter)
-    await waitForSend(field)
-    log("enter again: \(field.stringValue.debugDescription)")
+    guard await sent() else { return }
+    log("enter again: \(text())")
 
     await type("/probe-user-only")
     log("exact name: open \(panel()?.isVisible == true) rows \(rows().joined(separator: " "))")
     press(field, .return)
     await pause()
     log("return on the exact name: open \(panel()?.isVisible == true)")
-    await waitForSend(field)
-    log("sent: \(field.stringValue.debugDescription)")
+    guard await sent() else { return }
+    log("sent: \(text())")
 
     await type("/co")
     log("/co: open \(panel()?.isVisible == true)")
@@ -88,7 +106,8 @@ enum SlashSelfTest {
     try? await Task.sleep(for: .seconds(0.2))
     press(field, .escape)
     await pause()
-    log("two more escs: \(field.stringValue.debugDescription)")
+    log("two more escs: \(text())")
+    guard await reveal() else { return }
 
     // A held key accepts on its down press. Its repeats neither send nor move focus. Tab goes last, because a Tab
     // that moves focus would break the steps after it.
@@ -100,11 +119,6 @@ enum SlashSelfTest {
       log("held \(key) on /probe-d: \(field.stringValue.debugDescription) focused \(focused())")
       await clear()
     }
-  }
-
-  /// A field empties once sbd accepts what it sent.
-  private static func waitForSend(_ field: NSTextField) async {
-    for _ in 0..<120 where !field.stringValue.isEmpty { await pause() }
   }
 
   /// The open panel of a message field in the window, if any.

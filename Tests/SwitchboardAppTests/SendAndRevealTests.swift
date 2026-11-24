@@ -4,51 +4,60 @@ import Testing
 
 @testable import SwitchboardApp
 
+/// A work session, a group chat, a Manager conversation, and the operator all send the same way.
 @MainActor
 @Suite struct BoardModelSend {
 
-  @Test func doesNotReportASendThatFailed() async {
-    let model = offlineModel()
-    model.send = { _, _ in throw Boom() }
+  @Test(arguments: ["a", "c", "m", "op"])
+  func aRefusedSendShowsTheErrorBannerAndDoesNotReportTheSend(_ session: String) async {
+    let (model, _) = recordingModel(everyKind) { op, _ in op == "send" ? "the session is gone" : nil }
     let sent = Counter()
-    model.send("a", "hello") { sent.increment() }
+
+    model.send(session, "hello") { sent.increment() }
     await settle { model.actionError != nil }
-    #expect(model.actionError != nil)
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
+    #expect(model.actionError == "send: the session is gone")
     #expect(sent.value == 0)
   }
 
-  @Test func reportsASendThatSucceeded() async {
-    let model = offlineModel()
-    model.send = { _, _ in .null }
+  @Test(arguments: ["a", "c", "m", "op"])
+  func anAcceptedSendReportsTheSendOnceAndClearsAnEarlierErrorBanner(_ session: String) async {
+    let (model, _) = recordingModel(everyKind)
+    model.actionError = "merge: refused"
     let sent = Counter()
-    model.send("a", "hello") { sent.increment() }
+
+    model.send(session, "hello") { sent.increment() }
     await settle { sent.value > 0 }
+    await settle { !model.sending.contains(session) }
+    try? await Task.sleep(nanoseconds: 100_000_000)
+
     #expect(sent.value == 1)
+    #expect(model.actionError == nil)
   }
 
-  @Test func ignoresASecondSendWhileTheFirstIsPending() async {
-    let model = offlineModel()
-    let requests = Counter()
-    model.send = { _, _ in
-      requests.increment()
-      Thread.sleep(forTimeInterval: 0.2)
-      return .null
-    }
+  @Test(arguments: ["a", "c", "m", "op"])
+  func ignoresASecondSendWhileTheFirstIsPending(_ session: String) async {
+    let (model, release, requests) = heldModel(everyKind)
     let sent = Counter()
-    model.send("a", "hello") { sent.increment() }
-    model.send("a", "hello") { sent.increment() }
-    #expect(model.sending == ["a"])
+
+    model.send(session, "hello") { sent.increment() }
+    model.send(session, "hello") { sent.increment() }
+    #expect(model.sending == [session])
+    await settle { requests.value == 1 }
+    release.signal()
     await settle { sent.value > 0 }
     await settle { model.sending.isEmpty }
+
     #expect(requests.value == 1)
     #expect(sent.value == 1)
     #expect(model.sending.isEmpty)
   }
 
-  @Test func allowsASendAfterAFailedOne() async {
-    let model = offlineModel()
-    model.send = { _, _ in throw Boom() }
-    model.send("a", "hello")
+  @Test(arguments: ["a", "c", "m", "op"])
+  func allowsASendAfterAFailedOne(_ session: String) async {
+    let (model, _) = recordingModel(everyKind) { _, _ in "the session is gone" }
+    model.send(session, "hello")
     await settle { model.actionError != nil }
     await settle { model.sending.isEmpty }
     #expect(model.sending.isEmpty)
@@ -101,7 +110,7 @@ import Testing
 
   // MARK: submit(then:)
 
-  /// Work session `a` and chat `c`. A chat's send takes a different path, which marks a pending message.
+  /// Work session `a` and chat `c`.
   static let targets = [needsItem("a"), chatItem("c", group: "g1")]
 
   @Test(arguments: ["a", "c"])

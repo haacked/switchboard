@@ -1,5 +1,6 @@
 import AppKit
 import SwiftTerm
+import SwitchboardCore
 
 /// The colors of a SwiftTerm pane in one appearance. The initializer resolves the system colors to fixed
 /// sRGB values. SwiftTerm copies the foreground and background into the terminal as RGB when the view sets
@@ -62,6 +63,27 @@ struct TerminalTheme {
 final class ThemedTerminalView: LocalProcessTerminalView {
   /// Shift+Return sends `TerminalReturnKey.newline` instead of CR.
   var newlineOnShiftReturn = false
+
+  /// Receives a clicked `switchboard:` link. The app focuses the session itself, so the click does not depend on
+  /// Launch Services delivering the URL back to this process.
+  @MainActor var openSessionLink: (URL) -> Void = { LinkInbox.shared.receive($0) }
+
+  /// The session link a clicked `link` names, with the scheme in lowercase, or nil for any other link.
+  static func sessionLinkURL(_ link: String) -> URL? {
+    guard var parts = URLComponents(string: link), parts.scheme?.lowercased() == SessionLink.scheme else {
+      return nil
+    }
+    parts.scheme = SessionLink.scheme
+    return parts.url
+  }
+
+  override func requestOpenLink(source: TerminalView, link: String, params: [String: String]) {
+    if let url = Self.sessionLinkURL(link) {
+      openSessionLink(url)
+    } else {
+      super.requestOpenLink(source: source, link: link, params: params)
+    }
+  }
 
   // SwiftTerm's keyDown is not open. Without the kitty keyboard protocol, it passes Return to
   // interpretKeyEvents, which it does not override. Its doCommand then sends CR.

@@ -42,75 +42,43 @@ public enum ChildQuestions {
 
 }
 
-/// The messages that a parent session gets about its children.
-public enum ParentNotice {
-  /// The most lines in one message. The rest become a count.
-  static let maxLines = 20
-
-  /// What changed between two sightings of a child that a parent hears
-  /// about: a new PR, then a move into Needs you, Ready to merge, or Done.
-  enum Change: Equatable {
-    case pr(Int, url: String?)
-    case needsYou(String)
-    case readyToMerge(String)
-    case done
-
-    static func between(_ before: ChildMark, _ after: ChildMark, reason: String, prURL: String?) -> [Change] {
-      var changes: [Change] = []
-      if let number = after.pr, !before.heardPRs.contains(number) { changes.append(.pr(number, url: prURL)) }
-      if after.state != before.state || after.needs != before.needs {
-        switch after.state {
-        case .needsYou: changes.append(.needsYou(oneLine(reason)))
-        case .readyToMerge: changes.append(.readyToMerge(oneLine(reason)))
-        case .done: changes.append(.done)
-        default: break
-        }
-      }
-      return changes
-    }
-
-    static func opened(_ number: Int, url: String?) -> String {
-      "opened PR #\(number)" + (url.map { ": \($0)" } ?? "")
-    }
-
-    /// The child's link goes in the line so that the parent can copy it when it points the user at the item.
-    static func needsYou(id: String, reason: String) -> String {
-      "needs you in its own Inbox item (\(SessionLink.url(for: id).absoluteString)): \(reason)"
-    }
-  }
-
-  /// The lines that say what changed between two sightings of a child, one per change.
-  public static func lines(
-    name: String, id: String, before: ChildMark, after: ChildMark, reason: String, prURL: String?
-  ) -> [String] {
-    let mention = sessionMention(name: name, id: id)
-    return Change.between(before, after, reason: reason, prURL: prURL).map {
-      switch $0 {
-      case .pr(let number, let url): "\(mention) \(Change.opened(number, url: url))"
-      case .needsYou(let reason): "\(mention) \(Change.needsYou(id: id, reason: reason))"
-      case .readyToMerge(let reason): "\(mention): \(reason)"
-      case .done: "\(mention) is done"
-      }
-    }
-  }
-
-  /// One line for all the changes that a parent has not heard yet. A child
-  /// that returns to a state before its parent hears it adds the same line
-  /// twice. The message keeps only the last copy, so each child's latest
-  /// line stays after its older ones.
-  public static func message(_ lines: [String]) -> String {
-    var seen: Set<String> = []
-    let lines = Array(lines.reversed().filter { seen.insert($0).inserted }.reversed())
-    let more = lines.count > maxLines ? ["and \(lines.count - maxLines) more"] : []
-    return "Switchboard: sessions you started changed: "
-      + (Array(lines.prefix(maxLines)) + more).joined(separator: "; ") + "."
-  }
+/// How a parent session learns that a child changed. The Manager guide and the chat guide say the same in their own words.
+public enum ChildChanges {
+  /// The guidance that the default system prompt gives every work session.
+  public static let guidance =
+    "Switchboard sends you no message when a session you started changes. Instead, the context of a prompt can list what changed since your last turn: each session you started that opened a PR, moved to Needs you or Ready to merge, or reached Done, and how many other sessions are in Needs you and Ready to merge. To follow a session until it reaches a state, set a `session` wait on it with `sb wait` or `set_wait`. The wait resumes you when the session gets there."
 }
 
-extension SessionKind {
-  /// Whether sbd sends this kind of session a message when a child changes. A
-  /// Manager or a chat instead gets a digest with the user's next prompt.
-  public var hearsChildNotices: Bool { self == .work }
+/// What changed between two sightings of a child that a parent hears about: a new PR, then a move into Needs you,
+/// Ready to merge, or Done.
+enum ChildChange: Equatable {
+  case pr(Int, url: String?)
+  case needsYou(String)
+  case readyToMerge(String)
+  case done
+
+  static func between(_ before: ChildMark, _ after: ChildMark, reason: String, prURL: String?) -> [ChildChange] {
+    var changes: [ChildChange] = []
+    if let number = after.pr, !before.heardPRs.contains(number) { changes.append(.pr(number, url: prURL)) }
+    if after.state != before.state || after.needs != before.needs {
+      switch after.state {
+      case .needsYou: changes.append(.needsYou(oneLine(reason)))
+      case .readyToMerge: changes.append(.readyToMerge(oneLine(reason)))
+      case .done: changes.append(.done)
+      default: break
+      }
+    }
+    return changes
+  }
+
+  static func opened(_ number: Int, url: String?) -> String {
+    "opened PR #\(number)" + (url.map { ": \($0)" } ?? "")
+  }
+
+  /// The child's link goes in the line so that the parent can copy it when it points the user at the item.
+  static func needsYou(id: String, reason: String) -> String {
+    "needs you in its own Inbox item (\(SessionLink.url(for: id).absoluteString)): \(reason)"
+  }
 }
 
 /// How many sessions outside a parent's own children need the user.
@@ -132,7 +100,7 @@ public struct BoardCounts: Sendable {
   }
 }
 
-/// The text that a Manager or a chat gets with a prompt, through the
+/// The text that a parent session gets with a prompt, through the
 /// `additionalContext` of its UserPromptSubmit hook. Claude Code saves it in
 /// the conversation's transcript as an attachment, so every later call in the
 /// conversation reads it again.
@@ -146,10 +114,10 @@ public enum ParentDigest {
   public static func line(
     name: String, id: String, heard: ChildMark, now: ChildMark, reason: String, prURL: String?
   ) -> String? {
-    let parts = ParentNotice.Change.between(heard, now, reason: reason, prURL: prURL).map {
+    let parts = ChildChange.between(heard, now, reason: reason, prURL: prURL).map {
       switch $0 {
-      case .pr(let number, let url): ParentNotice.Change.opened(number, url: url)
-      case .needsYou(let reason): ParentNotice.Change.needsYou(id: id, reason: reason)
+      case .pr(let number, let url): ChildChange.opened(number, url: url)
+      case .needsYou(let reason): ChildChange.needsYou(id: id, reason: reason)
       case .readyToMerge(let reason): reason
       case .done: "done"
       }

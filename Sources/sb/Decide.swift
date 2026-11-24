@@ -5,9 +5,11 @@ import SwitchboardCore
 /// answers so far. With a decision's number it answers that decision, and
 /// `--submit` and `--discard` finish the list. `--resend` sends the
 /// submitted answers again when sbd can't tell whether the session got them.
+/// `--ask` sends the session a question about one decision.
 func decide(_ a: Args) {
   let id = a.session("decide")
   let session = JSON.string(id)
+  if a.switches.contains("--ask") { return askAboutDecision(a, id) }
   if a.switches.contains("--submit") {
     var args: [String: JSON] = ["session": session]
     if a.switches.contains("--stale") { args["stale"] = true }
@@ -54,7 +56,46 @@ func decide(_ a: Args) {
   )
 }
 
-/// Prints each decision with its options and its answer. The text comes from the session.
+/// `sb decide <session> --ask <n> <question>` sends the question about decision n, waits for the session's reply,
+/// and prints it. `--no-wait` prints the ask's id instead. A question to a session is the user's to ask, so it
+/// refuses inside Claude Code.
+private func askAboutDecision(_ a: Args, _ id: String) {
+  refuseInsideClaudeCode("a question to a session is the user's to ask, so sb decide --ask refuses inside Claude Code")
+  let words = Array(a.positional.dropFirst())
+  guard let first = words.first, let number = Int(first) else {
+    die("decide --ask takes a decision's number, then the question")
+  }
+  let timeout = timeoutSeconds(a) ?? 600
+  let wait = !a.switches.contains("--no-wait")
+  let session = JSON.string(id)
+  // The list that the user asks about, so a question never lands in a list that replaced it.
+  let shown = decode(call("decisions", ["session": session]), as: DecisionList.self)
+  let result = call(
+    "decision-ask",
+    [
+      "session": session, "ref": .string(shown.ref), "number": .number(Double(number)),
+      "text": .string(words.dropFirst().joined(separator: " ")),
+    ])
+  guard let askId = result["askId"]?.string else { die("sbd gave no id for the question") }
+  if !wait { return a.json ? printJSON(result) : print(askId) }
+  let deadline = Date().addingTimeInterval(timeout)
+  while true {
+    let list = decode(call("decisions", ["session": session]), as: DecisionList.self)
+    guard let exchange = list.exchanges.first(where: { $0.askId == askId }) else {
+      die("the decisions closed before \(id) answered question \(askId)")
+    }
+    if !exchange.pending {
+      guard let reply = exchange.reply else { die("question \(askId) got no answer: \(exchange.error ?? "")") }
+      return a.json ? printJSON(["askId": .string(askId), "reply": .string(reply)]) : print(reply.printable)
+    }
+    if Date() > deadline {
+      die("no answer to question \(askId) after \(Int(timeout)) s. sb decide \(id) shows it when it comes")
+    }
+    usleep(useconds_t(max(0.05, min(0.5, deadline.timeIntervalSinceNow)) * 1_000_000))
+  }
+}
+
+/// Prints each decision with its options, its answer, and the questions about it. The text comes from the session.
 func printDecisions(_ list: DecisionList) {
   func out(_ line: String) { print(line.printable) }
   if list.stale { out("The session took a turn since these decisions. --submit needs --stale.") }
@@ -65,6 +106,13 @@ func printDecisions(_ list: DecisionList) {
       out(optionLine(i + 1, o.label, recommended: o.recommended, detail: o.detail))
     }
     out("   Answer: \(list.answer(d.number).map { DecisionList.text(of: $0, for: d) } ?? "none yet")")
+    for x in list.exchanges where x.number == d.number {
+      out("   Question: \(x.text)")
+      let reply = x.reply ?? (x.pending ? "not yet. The session is answering…" : "none. \(x.error ?? "")")
+      for (i, line) in reply.components(separatedBy: "\n").enumerated() {
+        out(i == 0 ? "   Reply: \(line)" : "          \(line)")
+      }
+    }
   }
   if !list.newer.isEmpty {
     out("The session's newer item has \(list.newer.count) other decisions. --discard drops these answers.")

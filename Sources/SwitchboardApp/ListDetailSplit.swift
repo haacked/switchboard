@@ -39,7 +39,8 @@ struct ListSectionHeader: View {
     .accessibilityAddTraits(.isHeader)
     .font(.caption.bold())
     .foregroundStyle(.secondary)
-    .padding(inset ? EdgeInsets(top: 10, leading: 12, bottom: 4, trailing: 12) : EdgeInsets())
+    .padding(
+      inset ? EdgeInsets(top: 10, leading: Design.listInset, bottom: 4, trailing: Design.listInset) : EdgeInsets())
   }
 
   /// What VoiceOver reads for the header: the title, then the count when it is not zero, then whether a section that
@@ -70,13 +71,14 @@ struct CountedTitle: View {
 
 extension View {
   /// A list row's padding, the accent background that marks the current row, and the ring of a highlighted session.
+  /// The background sits halfway to `Design.listInset`, so the row's content starts at the list's inset.
   func listRowChrome(current: Bool, highlighted: Bool = false) -> some View {
-    padding(.horizontal, 12)
+    padding(.horizontal, Design.listInset / 2)
       .padding(.vertical, 6)
       .frame(maxWidth: .infinity, alignment: .leading)
       .background(RoundedRectangle(cornerRadius: 8).fill(current ? Color.accentColor.opacity(0.14) : Color.clear))
       .highlightRing(highlighted, cornerRadius: 8, outset: 0)
-      .padding(.horizontal, 6)
+      .padding(.horizontal, Design.listInset / 2)
       .contentShape(Rectangle())
   }
 

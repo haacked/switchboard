@@ -3,6 +3,17 @@ import SwitchboardCore
 import os
 
 extension Service {
+  /// The id of the live session on `host` other than `id` whose PR has the node id `prId`, or nil when no other session
+  /// on that host owns it. Sessions on another host never count, because a remote caller may not read them. It takes
+  /// the state queue.
+  func prOwner(of prId: String, besides id: String, onHost host: String?) -> String? {
+    queue.sync {
+      entries.values.first {
+        $0.session.id != id && $0.session.host == host && !$0.session.done && $0.facts.pr?.id == prId
+      }?.session.id
+    }
+  }
+
   /// The `ref-details` request. It answers from a session's PR, then from the Issues cache, then from sbd's cache of
   /// earlier reads, and only then reads the item from GitHub. A fresh answer in sbd's cache that is newer than the
   /// session's PR or the Issues cache wins over it. With `fresh: true` it skips those answers and reads

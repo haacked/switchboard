@@ -782,7 +782,7 @@ private final class FolderHold {
   /// The Inbox shows the job's error next to a Retry button, so a pane stop that fails in the job names retry, not
   /// a command.
   @Test func aPaneStopThatFailsInTheJobSaysToRetryTheDelete() throws {
-    let sbd = try Instance()
+    let sbd = try Instance(config: Instance.shortStopWait)
     let repo = try sbd.repoWithOrigin()
     let a = try sbd.worktreeSession(repo, branch: "haacked/a")
     try sbd.markSessionDone(a.id)
