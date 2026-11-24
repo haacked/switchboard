@@ -6,14 +6,14 @@ extension Service {
   /// Runs one call of the judge `spec` about the session `session`, the wait `wait`, and the PR head `head`, and
   /// records a `judge` event on the Operator with the word that `spec` gives for a parsed answer.
   ///
-  /// The call runs `operator.judgeModel` under `triage.account`, or under the Operator's pane environment when that
+  /// The call runs `operator.model` under `triage.account`, or under the Operator's pane environment when that
   /// is unset, and ends after `triage.timeoutSeconds`. It returns nil and runs nothing when the account has no quota
   /// left or sbd can't create the Operator. It runs off the state queue.
   func judge<J: OperatorJudge.Spec>(
     _ spec: J.Type, session: String, wait: String, head: String, input: String
   ) -> Result<J.Answer, Error>? {
     let kind = J.kind
-    let model = operatorSettings.judgeModel
+    let model = operatorSettings.model
     let setup: (op: String, env: [String: String])? = queue.sync {
       let op: String
       do { op = try ensureOperator() } catch {

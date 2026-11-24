@@ -7,6 +7,11 @@ enum DecisionStep: Hashable {
   case review
 }
 
+struct DecisionStepEntry: Equatable {
+  var ref: String
+  var step: DecisionStep
+}
+
 /// What the user answers a decision with. `options` holds 1-based option numbers.
 enum DecisionReply: Equatable, Sendable {
   case options([Int])
@@ -17,7 +22,7 @@ enum DecisionReply: Equatable, Sendable {
 enum DecisionKeyAction: Equatable, Sendable {
   case next, previous
   case pick(Int)
-  case focusOther, skip, review, submit
+  case focusOther, focusAsk, skip, review, submit
 }
 
 extension SessionSummary {
@@ -72,13 +77,15 @@ struct DecisionSteps {
     return (after ?? open.first).map(DecisionStep.decision) ?? .review
   }
 
-  /// The action of a key pressed while the step view has focus and no text
-  /// field does, or nil to leave the key alone. `options` is the number of
-  /// options on the current decision. Only ⇧⌘Return takes a modifier. Command,
-  /// Option, and Control leave every other key to the menus.
-  static func keyAction(_ key: KeyEquivalent, modifiers: EventModifiers, onReview: Bool, options: Int)
-    -> DecisionKeyAction?
-  {
+  /// The action of a key pressed in the step view, or nil to leave the key
+  /// alone. `focus` is what has the keyboard, and a text field keeps every key.
+  /// `options` is the number of options on the current decision. Only ⇧⌘Return
+  /// takes a modifier. Command, Option, and Control leave every other key to
+  /// the menus.
+  static func keyAction(
+    _ key: KeyEquivalent, modifiers: EventModifiers, onReview: Bool, options: Int, focus: DecisionFocus? = nil
+  ) -> DecisionKeyAction? {
+    guard focus != .other, focus != .ask else { return nil }
     let modifiers = modifiers.intersection([.shift, .command, .option, .control])
     if key == .return { return modifiers == [.command, .shift] ? (onReview ? .submit : .next) : nil }
     guard modifiers.isDisjoint(with: [.command, .option, .control]) else { return nil }
@@ -88,6 +95,7 @@ struct DecisionSteps {
     case "r": return .review
     case "o": return onReview ? nil : .focusOther
     case "s": return onReview ? nil : .skip
+    case "a", "/": return onReview ? nil : .focusAsk
     default:
       guard !onReview, let n = Int(String(key.character)), n >= 1, n <= options else { return nil }
       return .pick(n)

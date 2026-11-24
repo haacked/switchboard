@@ -34,11 +34,6 @@ import Testing
         .frame(width: ListDetailSplit<EmptyView, EmptyView>.detailMinWidth))
   }
 
-  /// The width that `view` takes when nothing squeezes it.
-  func idealWidth<V: View>(_ view: V) -> CGFloat {
-    NSHostingView(rootView: view.fixedSize()).fittingSize.width
-  }
-
   @Test func aLongNameLeavesThePRNumberReadableInFull() throws {
     let hosted = host(session(name: Self.longName))
 

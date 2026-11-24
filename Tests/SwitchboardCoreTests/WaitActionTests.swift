@@ -441,10 +441,21 @@ extension WaitActionTests {
       #expect(c.`operator`.holdLimitSeconds == 21600)
     }
 
-    @Test func configWithoutOperatorJudgesWithSonnet() throws {
+    @Test func configWithoutOperatorRunsTheDefaultModel() throws {
       let c = try JSONCoding.decode(Config.self, from: "{}")
 
-      #expect(c.`operator`.judgeModel == "sonnet")
+      #expect(c.`operator`.model == OperatorSettings.defaultModel)
+    }
+
+    @Test func theOperatorModelComesFromModelThenFromTheLegacyJudgeModelThenTheDefault() throws {
+      func model(_ operatorJSON: String) throws -> String {
+        try JSONCoding.decode(Config.self, from: #"{"operator": \#(operatorJSON)}"#).`operator`.model
+      }
+
+      #expect(try model(#"{"model": "haiku"}"#) == "haiku")
+      #expect(try model(#"{"judgeModel": "opus"}"#) == "opus")
+      #expect(try model(#"{"model": "haiku", "judgeModel": "opus"}"#) == "haiku")
+      #expect(try model("{}") == OperatorSettings.defaultModel)
     }
 
     @Test func theDefaultSettingsMatchAnEmptyOperatorObject() throws {
@@ -458,13 +469,13 @@ extension WaitActionTests {
         Config.self,
         from: #"""
           {"operator": {"mergeRepos": ["haacked/switchboard", "PostHog/charts"], "holdRetrySeconds": 30,
-           "holdLimitSeconds": 600, "judgeModel": "haiku"}}
+           "holdLimitSeconds": 600, "model": "haiku"}}
           """#)
 
       #expect(c.`operator`.mergeRepos == ["haacked/switchboard", "PostHog/charts"])
       #expect(c.`operator`.holdRetrySeconds == 30)
       #expect(c.`operator`.holdLimitSeconds == 600)
-      #expect(c.`operator`.judgeModel == "haiku")
+      #expect(c.`operator`.model == "haiku")
     }
 
     @Test func aPartialOperatorKeepsTheOtherDefaults() throws {
@@ -473,7 +484,7 @@ extension WaitActionTests {
       #expect(c.`operator`.mergeRepos == ["haacked/switchboard"])
       #expect(c.`operator`.holdRetrySeconds == 120)
       #expect(c.`operator`.holdLimitSeconds == 21600)
-      #expect(c.`operator`.judgeModel == "sonnet")
+      #expect(c.`operator`.model == OperatorSettings.defaultModel)
     }
 
     @Test func theOperatorKeyLeavesTheOtherSettingsAlone() throws {

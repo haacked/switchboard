@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Compares models on the operator's judgments, with the real claude CLI.
+#
+#   bin/operator-eval <fixtures-dir> [--models haiku,sonnet] [--runs 3]
+#
+# Each *.json file in the directory is one case:
+#
+#   {"kind": "reply-gate|ci-failure|pick-issues",
+#    "expected": "merge" or "ask|unsure" or "#12",
+#    "input": { ...the file that `sb operator judge --input` takes... }}
+#
+# `expected` lists the acceptable answers, split by "|". A pick-issues answer is its first pick. The script runs
+# every case on every model --runs times through `sb operator judge`, which uses sbd's own prompt, schema, and
+# account, and prints a table of the answers. A case passes for a model when every run gave an acceptable answer.
+# A reply-gate run that answers `merge` where `merge` is not an acceptable answer is a hard fail, because sbd would
+# merge a PR that needed the user.
+#
+# The last lines say whether the model meets the bar for `operator.model`: no hard fail, and at least 90 percent
+# of all runs acceptable. They also give the tokens per judgment. It runs the `sb` on PATH, or $SB.
+set -euo pipefail
+
+usage() {
+  echo "usage: bin/operator-eval <fixtures-dir> [--models haiku,sonnet] [--runs 3]" >&2
+  exit 2
+}
+
+models=haiku,sonnet
+runs=3
+dir=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --models) models=${2:-}; shift 2 ;;
+    --runs) runs=${2:-}; shift 2 ;;
+    -h | --help) usage ;;
+    -*) usage ;;
+    *) dir=$1; shift ;;
+  esac
+done
+[ -n "$dir" ] && [ -d "$dir" ] || usage
+[[ $runs =~ ^[1-9][0-9]*$ ]] || usage
+((BASH_VERSINFO[0] >= 4)) || { echo "operator-eval needs bash 4 or later (brew install bash)" >&2; exit 1; }
+command -v jq >/dev/null || { echo "operator-eval needs jq" >&2; exit 1; }
+sb=${SB:-sb}
+
+IFS=, read -r -a model_list <<<"$models"
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT
+
+declare -A runs_ok runs_all hard_fails tokens_in tokens_out
+for m in "${model_list[@]}"; do
+  runs_ok[$m]=0 runs_all[$m]=0 hard_fails[$m]=0 tokens_in[$m]=0 tokens_out[$m]=0
+done
+
+printf '%-34s %-14s' case expected
+for m in "${model_list[@]}"; do printf ' %-26s' "$m"; done
+printf ' pass\n'
+
+shopt -s nullglob
+for file in "$dir"/*.json; do
+  name=$(basename "$file" .json)
+  kind=$(jq -r .kind "$file")
+  expected=$(jq -r .expected "$file")
+  jq .input "$file" >"$tmp/input.json"
+  pass=yes
+  row=$(printf '%-34s %-14s' "$name" "${expected:0:14}")
+  for m in "${model_list[@]}"; do
+    answers=()
+    for _ in $(seq "$runs"); do
+      if out=$("$sb" operator judge --kind "$kind" --input "$tmp/input.json" --model "$m" --json 2>"$tmp/err"); then
+        answer=$(jq -r '(.answer | split(",")[0]) // "none"' <<<"$out")
+        tokens_in[$m]=$((${tokens_in[$m]} + $(jq -r '.inputTokens // 0' <<<"$out")))
+        tokens_out[$m]=$((${tokens_out[$m]} + $(jq -r '.outputTokens // 0' <<<"$out")))
+      else
+        answer=error
+      fi
+      answers+=("$answer")
+      runs_all[$m]=$((${runs_all[$m]} + 1))
+      if [[ "|$expected|" == *"|$answer|"* ]]; then
+        runs_ok[$m]=$((${runs_ok[$m]} + 1))
+      else
+        [ "$pass" = HARD-FAIL ] || pass=no
+        if [ "$kind" = reply-gate ] && [ "$answer" = merge ]; then
+          hard_fails[$m]=$((${hard_fails[$m]} + 1))
+          pass=HARD-FAIL
+        fi
+      fi
+    done
+    row+=$(printf ' %-26s' "${answers[*]}")
+  done
+  printf '%s %s\n' "$row" "$pass"
+done
+
+echo
+for m in "${model_list[@]}"; do
+  total=${runs_all[$m]}
+  [ "$total" -gt 0 ] || { echo "$m: no cases"; continue; }
+  percent=$((100 * ${runs_ok[$m]} / total))
+  verdict=meets
+  if [ "${hard_fails[$m]}" -gt 0 ] || [ "$percent" -lt 90 ]; then verdict="does not meet"; fi
+  echo "$m: ${runs_ok[$m]}/$total runs acceptable ($percent%), ${hard_fails[$m]} hard fails, $verdict the bar;" \
+    "$((${tokens_in[$m]} / total)) input and $((${tokens_out[$m]} / total)) output tokens per judgment"
+done

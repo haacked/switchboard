@@ -164,10 +164,10 @@ struct NewSessionView: View {
         if let account = form.groupAccount(model.groups) {
           Text(GroupAccountMenu.label(account, accounts: model.accounts, usage: model.usage))
             .help("This group runs its sessions under this account")
-        } else if model.accounts.count > 1 {
+        } else if model.sessionAccounts.count > 1 {
           Picker("Account", selection: $form.account) {
             Text(Self.defaultAccountLabel(parent: parentSession, active: model.activeAccount)).tag("")
-            ForEach(model.accounts) { Text($0.name).tag($0.folder) }
+            ForEach(model.sessionAccounts) { Text($0.name).tag($0.folder) }
           }
         }
         Toggle("Start in plan mode", isOn: $form.planMode)
@@ -216,7 +216,7 @@ struct NewSessionView: View {
   static func defaultAccountLabel(parent: SessionSummary?, active: AccountInfo?) -> String {
     guard let parent else { return "Active (\(active?.name ?? "default"))" }
     guard let account = parent.account else { return "Same as \(parent.name)" }
-    return "Same as \(parent.name) (\(ClaudeAccount(folder: account).name))"
+    return "Same as \(parent.name) (\(Account.name(ofFolder: account)))"
   }
 }
 

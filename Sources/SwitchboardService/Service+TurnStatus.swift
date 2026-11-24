@@ -75,6 +75,8 @@ extension Service {
       guard entries[id]?.turnProbe.check(activity: activity, now: now) == true else { continue }
       let site = self.site(for: e.session)
       let account = claudeAccount(of: id)
+      // `claude agents` must not run under a folder that became a Codex account while its claude ran.
+      if case .codex = account { continue }
       let check = TurnCheck(id: id, claudeSessionId: e.session.claudeSessionId, activity: activity)
       if let i = due.firstIndex(where: { $0.site === site && $0.account == account }) {
         due[i].checks.append(check)
@@ -90,18 +92,22 @@ extension Service {
   /// account that claude uses, which a shell profile or a wrapper can pick.
   /// Before a SessionStart, the account is the one that the pane sets.
   /// A session on a host runs under that host's login, which is no account of this Mac. Its answer names the
-  /// host and is no folder.
+  /// host and is no folder. A folder that `codexName` names is `.codex`.
   func claudeAccount(of id: String) -> SessionAccount {
     if let host = entries[id]?.session.host { return .host(host) }
+    let folder = localAccountFolder(of: id)
+    return claudeAccount(folder: folder).map(SessionAccount.local) ?? .codex(CodexAccount(folder: folder))
+  }
+
+  /// The folder of the session's transcript account, else the one that its pane sets.
+  private func localAccountFolder(of id: String) -> String {
     if let e = entries[id], let path = e.facts.transcriptPath,
       Transcript.isFile(path, of: e.session.claudeSessionId)
     {
       let projects = ((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent as NSString
-      if projects.lastPathComponent == "projects" {
-        return .local(ClaudeAccount(folder: projects.deletingLastPathComponent))
-      }
+      if projects.lastPathComponent == "projects" { return projects.deletingLastPathComponent }
     }
-    return .local(ClaudeAccount(folder: paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder))
+    return paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
   }
 
   /// The conversations that `claude agents` lists with a running claude that sits idle.
@@ -123,6 +129,8 @@ extension Service {
 /// under that host's login, which is no account of this Mac.
 enum SessionAccount: Hashable {
   case local(ClaudeAccount)
+  /// A folder that became a Codex account, which no Claude-only consumer may use.
+  case codex(CodexAccount)
   case host(String)
 
   /// The local account's folder, or "<host>:~/.claude" for a host. The host
@@ -131,6 +139,7 @@ enum SessionAccount: Hashable {
   var key: String {
     switch self {
     case .local(let account): account.folder
+    case .codex(let account): account.folder
     case .host(let host): "\(host):~/.claude"
     }
   }

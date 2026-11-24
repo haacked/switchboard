@@ -12,12 +12,12 @@ import Testing
     #expect(ContentView.viewLabel("Issues", 0) == "Issues")
   }
 
-  /// The toolbar picker and the Session menu's Show items read these titles.
+  /// The toolbar picker and the View menu's Show items read these titles.
   @Test func mainViewTitlesKeepThePickerAndMenuOrder() {
     #expect(MainView.allCases.map(\.title) == ["Inbox", "Board", "Issues", "Loops"])
   }
 
-  /// The Session menu binds Show Inbox, Show Board, Show Issues, and Show Loops to ⌘1 to ⌘4.
+  /// The View menu binds Show Inbox, Show Board, Show Issues, and Show Loops to ⌘1 to ⌘4.
   @Test func mainViewShortcutKeysAreOneToFour() {
     #expect(MainView.allCases.map(\.shortcutKey) == ["1", "2", "3", "4"])
   }

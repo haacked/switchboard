@@ -10,7 +10,7 @@ Each session is the real `claude` CLI in its own folder or git worktree, under y
 
 ### The Inbox: answer sessions without opening a terminal
 
-Every session that needs you gets one item in the Inbox. A permission prompt shows as a card with Allow and Deny. A question from Claude shows its options. When Claude's reply asks you to make several decisions, the Inbox lists them with the answer Claude recommends, and you send all your answers as one message. ⌘J moves to the next item.
+Every session that needs you gets one item in the Inbox. A permission prompt shows as a card with Allow and Deny. A question from Claude shows its options. When Claude's reply asks you to make several decisions, the Inbox lists them with the answer Claude recommends, and you send all your answers as one message. Before you answer one, you can ask the session about it in the decision's step, or with `sb decide <session> --ask <n> "<question>"`. Its reply shows under that decision while the session keeps its place in the Inbox, and the session gets your question with a request to answer in text only (see [Decision lists](docs/inbox.md#decision-lists)). ⌘J moves to the next item.
 
 ![A permission card in the Inbox, with the Bash command Claude wants to run and buttons to allow or deny it](docs/images/inbox-permission.png)
 
@@ -34,7 +34,7 @@ See [Groups](docs/groups.md) and [The Manager](docs/manager.md).
 
 ### Usage across Claude accounts
 
-The toolbar's gauge button names the active account and its 5-hour and weekly usage in its tooltip, and opens the account menu. The menu lists every signed-in account with its sessions and limits, and a click makes it the account for new sessions. A session keeps its account until you move it.
+The toolbar's gauge button names the active account and its 5-hour and weekly usage in its tooltip, and opens the account menu. The menu lists every signed-in account with its sessions and limits, and a click makes it the account for new sessions. A session keeps its account until you move it. Codex accounts (`~/.codex` and `~/.codex-*`) are listed too, with the limits from their newest Codex session. `sb account add <name> --agent codex` makes one and prints the command that signs it in. Sessions run only on Claude accounts for now.
 
 ![The account menu, listing three Claude accounts with their session counts and their 5-hour and weekly usage](docs/images/accounts.png)
 
@@ -42,7 +42,7 @@ See [Accounts](docs/accounts.md).
 
 ### Waits and notes
 
-A wait says what a session is waiting on: CI, a review, a merge, a deploy, another session, or a time. Switchboard resolves most waits on its own and then resumes the session with what happened. Notes and to-dos stay with the session. The session view lists its waits, schedules, and notes in a panel beside its terminals.
+A wait says what a session is waiting on: CI, a review, a merge, a deploy, another session, or a time. Switchboard resolves most waits on its own and then resumes the session with what happened. Notes and to-dos stay with the session. The session view lists its waits, schedules, notes, artifacts, and links in a panel beside its terminals.
 
 <img src="docs/images/session-panel.png" width="240" alt="A session's side panel, with a wait on CI, a manual wait, an hourly schedule, a to-do, and a note">
 

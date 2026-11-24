@@ -1,6 +1,13 @@
 import SwiftUI
 import SwitchboardCore
 
+extension BoardModel {
+  /// True while `key` holds a value. Dismissing the sheet or dialog sets `key` to nil.
+  fileprivate func isPresent<T>(_ key: ReferenceWritableKeyPath<BoardModel, T?>) -> Binding<Bool> {
+    Binding(get: { self[keyPath: key] != nil }, set: { if !$0 { self[keyPath: key] = nil } })
+  }
+}
+
 extension AttentionState {
   var color: Color {
     switch self {
@@ -35,12 +42,7 @@ struct StateBadge: View {
   let state: AttentionState
 
   var body: some View {
-    Text(state.title)
-      .font(.caption.bold())
-      .padding(.horizontal, 6)
-      .padding(.vertical, 2)
-      .background(Capsule().fill(state.color.opacity(0.18)))
-      .foregroundStyle(state.color)
+    Text(state.title).pill(state.color, size: .regular)
   }
 }
 
@@ -54,10 +56,6 @@ struct ContentView: View {
 
   @EnvironmentObject var model: BoardModel
 
-  private var isConfirmingDelete: Binding<Bool> {
-    Binding(get: { model.confirmingDelete != nil }, set: { if !$0 { model.confirmingDelete = nil } })
-  }
-
   private var confirmingCleanupOffer: CleanupOffer? {
     model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
   }
@@ -66,28 +64,13 @@ struct ContentView: View {
     Binding(get: { model.showingDoneRemoval }, set: { if !$0 { model.doneRemoval = nil } })
   }
 
-  private var isPickingSnoozeTime: Binding<Bool> {
-    Binding(get: { model.pickingSnoozeTime != nil }, set: { if !$0 { model.pickingSnoozeTime = nil } })
-  }
-
-  private var isPickingPauseTime: Binding<Bool> {
-    Binding(get: { model.pickingPauseTime != nil }, set: { if !$0 { model.pickingPauseTime = nil } })
-  }
-
-  private var isEditingLoop: Binding<Bool> {
-    Binding(get: { model.loopEditor != nil }, set: { if !$0 { model.loopEditor = nil } })
-  }
-
   private var isShowingQuickAsk: Binding<Bool> {
     Binding(get: { model.quickAsk != nil }, set: { if !$0 { model.closeQuickAsk() } })
   }
 
-  private var isConfirmingCleanup: Binding<Bool> {
-    Binding(get: { model.confirmingCleanup != nil }, set: { if !$0 { model.confirmingCleanup = nil } })
-  }
-
   var body: some View {
-    NavigationSplitView {
+    let deleteConfirmation = model.confirmingDelete.map(DeleteConfirmation.init)
+    return NavigationSplitView {
       Sidebar()
         .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: Self.sidebarIdealWidth, max: 420)
     } detail: {
@@ -117,7 +100,7 @@ struct ContentView: View {
       }
       // The delete dialog is on the split view. Two dialogs on one view can hide each other.
       .confirmationDialog(
-        confirmingCleanupOffer?.title ?? "Clean up this session?", isPresented: isConfirmingCleanup,
+        confirmingCleanupOffer?.title ?? "Clean up this session?", isPresented: model.isPresent(\.confirmingCleanup),
         presenting: confirmingCleanupOffer
       ) { offer in
         Button("Clean Up", role: .destructive) { model.cleanup(offer.session) }
@@ -128,12 +111,12 @@ struct ContentView: View {
     }
     .removingToolbarTitle()
     .confirmationDialog(
-      "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: isConfirmingDelete,
-      presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
-    ) { session, todos in
-      Button(todos.button("Delete"), role: .destructive) { model.deleteSession(session, resolve: todos.ids) }
-    } message: { session, todos in
-      Text(model.sessionNames.replacingIDs(in: todos.message(before: BoardModel.deletePlan(session).message)))
+      deleteConfirmation?.title ?? "Delete this session?", isPresented: model.isPresent(\.confirmingDelete),
+      presenting: deleteConfirmation
+    ) { confirmation in
+      Button(confirmation.button, role: .destructive) { confirmation.confirm(model) }
+    } message: { confirmation in
+      Text(model.sessionNames.replacingIDs(in: confirmation.message))
     }
     .sheet(item: $model.newSession) {
       NewSessionView(request: $0).environmentObject(model)
@@ -150,7 +133,7 @@ struct ContentView: View {
     .sheet(isPresented: isShowingDoneRemoval) {
       DoneRemovalSheet().environmentObject(model).inlineLinks(model)
     }
-    .sheet(isPresented: isPickingSnoozeTime) {
+    .sheet(isPresented: model.isPresent(\.pickingSnoozeTime)) {
       if let id = model.pickingSnoozeTime {
         UntilPicker(
           session: id, verb: "Snooze", apply: { model.snooze(id, until: $0) },
@@ -158,7 +141,7 @@ struct ContentView: View {
         ).environmentObject(model)
       }
     }
-    .sheet(isPresented: isPickingPauseTime) {
+    .sheet(isPresented: model.isPresent(\.pickingPauseTime)) {
       if let id = model.pickingPauseTime {
         UntilPicker(
           session: id, verb: "Pause", apply: { model.pause(id, until: $0) },
@@ -166,7 +149,12 @@ struct ContentView: View {
         ).environmentObject(model)
       }
     }
-    .sheet(isPresented: isEditingLoop) {
+    .sheet(isPresented: model.isPresent(\.editingNotes)) {
+      if let id = model.editingNotes {
+        NotesSheet(id: id) { model.editingNotes = nil }.environmentObject(model)
+      }
+    }
+    .sheet(isPresented: model.isPresent(\.loopEditor)) {
       if let request = model.loopEditor {
         LoopEditor(
           request: request, schedule: model.editedSchedule(request),
@@ -266,7 +254,7 @@ struct Sidebar: View {
     }
     .takesListFocus(.sidebar, $focused, model: model)
     .confirmationDialog(
-      accountSwitchTitle, isPresented: isSwitchingAccount, presenting: model.switchingAccount
+      accountSwitchTitle, isPresented: model.isPresent(\.switchingAccount), presenting: model.switchingAccount
     ) { change in
       if change.switches {
         Button("New Sessions Only") { model.confirmAccountSwitch(change, move: false) }
@@ -282,7 +270,7 @@ struct Sidebar: View {
       Text(accountSwitchMessage(change))
     }
     .confirmationDialog(
-      model.confirmingAccountMove?.title ?? "", isPresented: isConfirmingAccountMove,
+      model.confirmingAccountMove?.title ?? "", isPresented: model.isPresent(\.confirmingAccountMove),
       presenting: model.confirmingAccountMove
     ) { move in
       Button(move.button) { model.confirmAccountMove(move) }
@@ -328,14 +316,6 @@ struct Sidebar: View {
     }
   }
 
-  private var isConfirmingAccountMove: Binding<Bool> {
-    Binding(get: { model.confirmingAccountMove != nil }, set: { if !$0 { model.confirmingAccountMove = nil } })
-  }
-
-  private var isSwitchingAccount: Binding<Bool> {
-    Binding(get: { model.switchingAccount != nil }, set: { if !$0 { model.switchingAccount = nil } })
-  }
-
   private var accountSwitchTitle: String {
     guard let change = model.switchingAccount else { return "Switch accounts?" }
     return change.switches ? "Switch to \(change.name)?" : "Move sessions to \(change.name)?"
@@ -379,26 +359,26 @@ struct DeleteButton: View {
 }
 
 /// Opens the most recent Manager conversation, or starts the first one. The
-/// star turns the Needs you color and fills while a conversation needs you,
+/// icon turns the Needs you color and fills while a conversation needs you,
 /// because the Inbox and the Dock badge leave the conversations out.
 struct ManagerButton: View {
   @EnvironmentObject var model: BoardModel
 
   var body: some View {
     let managers = model.managers
-    let star = ManagerStar(managers)
+    let icon = ManagerIcon(managers)
     Button {
       model.openManager()
     } label: {
-      Label("Manager", systemImage: star == .outline ? "star" : "star.fill")
-        .foregroundStyle(star.color)
+      Label("Manager", systemImage: icon.systemImage)
+        .foregroundStyle(icon.color)
     }
-    .accessibilityValue(star.value)
-    .help(tooltip(star, managers))
+    .accessibilityValue(icon.value)
+    .help(tooltip(icon, managers))
   }
 
-  private func tooltip(_ star: ManagerStar, _ managers: [SessionSummary]) -> String {
-    switch star {
+  private func tooltip(_ icon: ManagerIcon, _ managers: [SessionSummary]) -> String {
+    switch icon {
     case .needsMe:
       guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
         return "A Manager conversation needs you (⇧⌘M)"
@@ -412,9 +392,9 @@ struct ManagerButton: View {
   }
 }
 
-/// How the toolbar star looks: orange while a conversation waits on the
-/// user, blue while one has unread replies, and an outline otherwise.
-enum ManagerStar: Equatable {
+/// How the toolbar's Manager icon looks: orange while a conversation waits on
+/// the user, blue while one has unread replies, and an outline otherwise.
+enum ManagerIcon: Equatable {
   case needsMe, unread, outline
 
   init(_ managers: [SessionSummary]) {
@@ -426,6 +406,10 @@ enum ManagerStar: Equatable {
     } else {
       self = .outline
     }
+  }
+
+  var systemImage: String {
+    self == .outline ? "person.crop.circle.badge.checkmark" : "person.crop.circle.fill.badge.checkmark"
   }
 
   var color: Color {
@@ -550,6 +534,7 @@ enum BoardLanes: String, CaseIterable {
 /// `MergeBoard.columns`. Done sessions and merged PRs collapse into a footer.
 struct BoardView: View {
   @EnvironmentObject var model: BoardModel
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @AppStorage(BoardLanes.storageKey) private var laneKind = BoardLanes.repo
   @FocusState private var focused: Bool
   @State private var boardGeometry = BoardGeometry()
@@ -756,7 +741,7 @@ struct BoardView: View {
           // ⇧⌘G shows the Board with the new group's name field, which closes when it loses focus while empty.
           .onAppear { if !model.namingGroup { focused = true } }
           .onChange(of: model.boardJumps, initial: true) {
-            if let id = model.boardFocus { withAnimation { proxy.scrollTo(id) } }
+            if let id = model.boardFocus { proxy.scrollTo(id, reduceMotion: reduceMotion) }
           }
         }
       }
@@ -852,6 +837,7 @@ private struct LaneHeader: View {
             .accessibilityLabel("Delete group \(group.name)")
           GroupPauseButtons(group: group)
           GroupArtifactsLink(group: group)
+          GroupLinksLink(group: group)
         }
       }
       if let group { GroupDescriptionView(group: group) }
@@ -1102,13 +1088,9 @@ extension BoardHolder {
 extension View {
   /// Small secondary text on one line in a gray capsule.
   func capsuleBadge() -> some View {
-    font(.caption2.bold())
-      .lineLimit(1)
+    lineLimit(1)
       .fixedSize()
-      .padding(.horizontal, 5)
-      .padding(.vertical, 1)
-      .background(Capsule().fill(Color.secondary.opacity(0.15)))
-      .foregroundStyle(.secondary)
+      .pill(.secondary)
   }
 }
 
@@ -1196,7 +1178,7 @@ struct BoardCard: View {
             if let until = s.snoozedUntil { SnoozeMark(until: until) }
             if let pause = s.pause { PausedBadge(pause: pause) }
             Text(statusLine)
-              .font(.caption2).foregroundStyle(.tertiary)
+              .font(.caption2).foregroundStyle(.secondary)
           }
         }
         .opacity(s.boardCardOpacity)

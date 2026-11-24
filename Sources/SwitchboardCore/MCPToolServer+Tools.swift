@@ -47,12 +47,12 @@ extension MCPToolServer {
   static let sessionTools: [Tool] = [
     Tool(
       "list_sessions",
-      "Lists the sessions, with the ones that need the user first. Each one shows its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as the last reply, notes, cards, and artifacts.",
+      "Lists the sessions, with the ones that need the user first. Each one shows its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as the last reply, notes, cards, artifacts, and links.",
       ["full": full]
     ),
     Tool(
       "get_session",
-      "Shows one session: its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as its folder, branch, last reply, notes, cards, its group's name and description, and its artifacts. Get the full form before you act on the session.",
+      "Shows one session: its id, name, url, state, reason, PR, and open waits. Pass `full: true` for every field, such as its folder, branch, last reply, notes, cards, its group's name and description, and its artifacts and links. Get the full form before you act on the session.",
       ["session": session, "full": full],
       required: ["session"]),
     Tool(
@@ -96,7 +96,9 @@ extension MCPToolServer {
         "prompt": string("The first prompt."),
         "base": string("The commit that the branch starts from, such as origin/main. A follow-up takes none."),
         "name": string("The session's name."),
-        "model": string("The model to run, such as sonnet or opus."),
+        "model": string(
+          "The model to run, such as opus. Leave it out unless the user asked for a model: the session then runs config.json's `model`, opus by default."
+        ),
         "account": string("The Claude account, by name or folder."),
         "followup": boolean("Adds a follow-up instead of starting the session."),
         "planMode": boolean(
@@ -145,8 +147,21 @@ extension MCPToolServer {
         "todo": boolean("Adds a to-do. The user must resolve it before the session can be deleted."),
       ], required: ["session", "text"]),
     Tool(
+      "add_link",
+      "Adds a link to the calling session, such as a page or thread that the session posted to by a path Switchboard can't see. It takes any http or https URL. Switchboard already lists the Slack, Linear, Notion, Google Docs, and Grafana links in the user's prompts and the messages sent with the Slack connector.",
+      [
+        "url": string("The http or https URL."),
+        "title": string(
+          "A title of one line, at most \(ExternalLink.titleLimit) characters. Without it, the title is the URL."),
+      ], required: ["url"]),
+    Tool(
+      "remove_link",
+      "Removes a link that `add_link` added to the calling session. It refuses a link that the user added and a link that Switchboard found.",
+      ["link": string("The link's id: the `id` of a link in `get_session` with `full`.")], required: ["link"]),
+    Tool(
       "list_groups",
-      "Lists the groups with their descriptions, sessions, notes, and artifacts, then the sessions in no group."),
+      "Lists the groups with their descriptions, sessions, notes, links, and artifacts, then the sessions in no group. A group's artifacts include its links to claude.ai artifacts."
+    ),
     Tool(
       "add_group", "Adds a group.",
       [
@@ -165,6 +180,15 @@ extension MCPToolServer {
     Tool(
       "add_group_note", "Adds a note to a group.", ["group": group, "text": string("The note.")],
       required: ["text"]),
+    Tool(
+      "add_group_artifact",
+      "Attaches a claude.ai artifact to a group as a link, so it lists among the group's artifacts. It takes only a https://claude.ai/artifact/ or https://claude.ai/code/artifact/ link, and the link's title is its URL.",
+      ["group": group, "url": string("The claude.ai artifact link.")], required: ["url"]),
+    Tool(
+      "remove_group_artifact",
+      "Removes a link that `add_group_artifact` attached to a group. It refuses a link that the user added.",
+      ["group": group, "link": string("The link's id: the `link` of an artifact in `list_groups`.")],
+      required: ["link"]),
     Tool(
       "suggest_groups",
       "Lists at most \(GroupSuggestions.defaultLimit) groups suggested from dependencies, branch prefixes, and PR title scopes. With `accept`, it accepts that suggestion instead.",

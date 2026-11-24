@@ -4,7 +4,7 @@ import SwiftUI
 import SwitchboardCore
 
 /// Hooks for scripted checks of the GUI. SB_SELECT selects a session when the
-/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_ISSUES starts on the Issues view, SB_ISSUES=setup also opens its setup sheet, SB_ISSUES=backlog-hidden also turns on Hide Backlog, SB_LOOPS starts on the Loops view, SB_BOARD_CLICK starts on the Board and opens that session's card after 2 seconds, SB_BOARD_SELECT=<id,id> starts on the Board and selects those cards once sbd lists the sessions, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_SHEET_GROUP=<name or id> opens it instead with that group chosen once sessions are listed, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SHEET=loop opens New Loop… once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and opens that session's hover card a second after its card appears, because the card otherwise opens only on a real hover, SB_HOVER_REF=<owner/name#N> opens the reference card on the first text that names that reference a second after the text appears, and SB_HOVER_REF=<session id> opens the session card on the first text that names that session by its id or links to its id link, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ACCOUNT_MOVE=<session id>:<account name> asks to move that session to that account once both are listed, which shows the move's confirmation when it asks one, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, SB_HISTORY=<place,place> goes to each place in turn once sbd lists the sessions, where a place is a session id, `inbox`, `board`, `issues`, or `loops`, SB_HISTORY_BACK=<n> then goes back n times, SB_HISTORY_MENU=open then opens Recent Places, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
+/// app starts, SB_INBOX focuses a session's item in the Inbox, SB_ISSUES starts on the Issues view, SB_ISSUES=backlog-hidden also turns on Hide Backlog, SB_SETTINGS=<general|issues|advanced> opens the Settings window at that tab once sbd lists the sessions, SB_LOOPS starts on the Loops view, SB_BOARD_CLICK starts on the Board and opens that session's card after 2 seconds, SB_BOARD_SELECT=<id,id> starts on the Board and selects those cards once sbd lists the sessions, SB_JUMP then runs Next Needing You (⌘J) after 3, SB_SHEET=import opens the import sheet, SB_SHEET=new opens the New Session sheet, SB_SHEET_GROUP=<name or id> opens it instead with that group chosen once sessions are listed, SB_REPO_PICKER=open then opens its repository picker once the repositories are read, SB_SHEET=search opens the search panel once sessions are listed, SB_SHEET=loop opens New Loop… once sessions are listed, SB_SEARCH=<query> types that query into the panel, SB_DETAILS opens each card's Details, SB_HOVER=<id> starts on the Board and opens that session's hover card a second after its card appears, because the card otherwise opens only on a real hover, SB_HOVER_REF=<owner/name#N> opens the reference card on the first text that names that reference a second after the text appears, and SB_HOVER_REF=<session id> opens the session card on the first text that names that session by its id or links to its id link, SB_ACCOUNTS=open opens the account menu once the accounts and their usage are read, SB_ACCOUNTS_CHOOSE=<name> then chooses that account a second later, SB_ACCOUNTS_MOVE=1 instead presses the menu's Move button, SB_ACCOUNTS_CONFIRM=new-only or move then answers the switch's dialog 2 seconds after that, SB_ACCOUNT_MOVE=<session id>:<account name> asks to move that session to that account once both are listed, which shows the move's confirmation when it asks one, SB_ORG_FILTER=<org,org> starts the app with that org filter, where `(local)` names the sessions with no GitHub remote, SB_ORGS=open opens the org filter's menu once sbd lists the sessions, SB_HISTORY=<place,place> goes to each place in turn once sbd lists the sessions, where a place is a session id, `inbox`, `board`, `issues`, or `loops`, SB_HISTORY_BACK=<n> then goes back n times, SB_HISTORY_MENU=open then opens Recent Places, and SB_QUIT_FILE=<path> quits the app (⌘Q) once that file exists. SB_SNAPSHOT names a
 /// PNG file that the app draws its windows into after SB_SNAPSHOT_DELAY
 /// seconds (default 3): the main window with its toolbar, and any sheet or
 /// popover in front of it. The app draws the windows itself, so this needs no
@@ -41,7 +41,9 @@ enum Snapshot {
       if env["SB_ISSUES"] != nil { model.show(.issues) }
       if env["SB_LOOPS"] != nil { model.show(.loops) }
     }
-    if env["SB_ISSUES"] == "setup" { model.showingIssueSetup = true }
+    if let tab = env["SB_SETTINGS"].flatMap(SettingsTab.init(rawValue:)) {
+      whenListed(model) { model.openSettings(tab) }
+    }
     if env["SB_ISSUES"] == "backlog-hidden" { model.hidesBacklog = true }
     if let id = env["SB_BOARD_CLICK"] {
       DispatchQueue.main.asyncAfter(deadline: .now() + 2) { model.openFromBoard(id) }
@@ -199,27 +201,253 @@ enum Snapshot {
     return NSSize(width: parts[0], height: parts[1])
   }
 
-  /// What `view` draws. `cacheDisplay` gets four things wrong that the window shows correctly. It leaves out the
-  /// contents of some scroll views, such as a `List`'s rows. It leaves out the colors that a vibrancy filter gives
-  /// sidebar text and symbols. It draws a selected row's highlight black. It draws a translucent overlay, such as the
-  /// dimming behind a sheet, opaque. This draws all four as the window shows them.
+  /// What `view` draws, on the window background color. `cacheDisplay` gets six things wrong that the window shows
+  /// correctly. It leaves out the contents of some scroll views, such as a `List`'s rows. It leaves out the colors that
+  /// a vibrancy filter gives sidebar text and symbols. It draws plus-lighter and plus-darker layers, such as dark
+  /// sidebar text, as plain layers. It erases too much under a knockout layer, such as the selected segment of a
+  /// segmented control. It draws a selected row's highlight black. It draws a translucent overlay, such as the dimming
+  /// behind a sheet, opaque. This draws all six as the window shows them.
   static func cache(_ view: NSView) -> NSBitmapImageRep? {
     guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
+    // The layer changes below last only for the drawing. Disabled actions keep them from animating in the window.
+    CATransaction.begin()
+    CATransaction.setDisableActions(true)
+    defer { CATransaction.commit() }
     let restore = view.layer.map(applyVibrancy) ?? {}
     defer { restore() }
+    let restoreKnockouts = view.layer.map(applyKnockouts) ?? {}
+    defer { restoreKnockouts() }
+    let clips = clipViews(in: view)
+    // An overlay above the content, such as the dimming behind a sheet, covers the scroll views' contents too.
+    let overlays =
+      view.subviews.lastIndex { subview in clips.contains { $0.isDescendant(of: subview) } }
+      .map { content in view.subviews[(content + 1)...].filter { $0.frame == view.bounds }.compactMap(\.layer) } ?? []
+    // `applyKnockouts` has already set its masks. A blend under one of them counts as masked.
+    let blends = blendedLayers(in: view, overlays: overlays)
+    let showBlends = hide(blends)
     view.cacheDisplay(in: view.bounds, to: rep)
     NSGraphicsContext.saveGraphicsState()
     defer { NSGraphicsContext.restoreGraphicsState() }
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    let clips = clipViews(in: view)
     for clip in clips { drawContents(of: clip, in: view) }
-    // An overlay above the content, such as the dimming behind a sheet, covers the scroll views' contents too.
-    if let content = view.subviews.lastIndex(where: { subview in clips.contains { $0.isDescendant(of: subview) } }) {
-      let overlays = view.subviews[(content + 1)...].filter { $0.frame == view.bounds }.compactMap(\.layer)
-      for overlay in overlays { fillSolids(overlay, in: view) }
-    }
+    showBlends()
+    // A blend adds to what is under it, so the background goes in first.
+    fillBackground(view)
+    for blend in blends { draw(blend, in: view) }
+    for overlay in overlays { fillSolids(overlay, in: view) }
     return rep
   }
+
+  /// Fills the window background color under what the current context already holds, in a rounded rect of `view`'s
+  /// bounds. `cacheDisplay` leaves the window's translucent material out.
+  private static func fillBackground(_ view: NSView) {
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSGraphicsContext.current?.compositingOperation = .destinationOver
+    view.effectiveAppearance.performAsCurrentDrawingAppearance {
+      NSColor.windowBackgroundColor.setFill()
+      NSBezierPath(roundedRect: view.bounds, xRadius: cornerRadius, yRadius: cornerRadius).fill()
+    }
+  }
+
+  /// The corner radius of a window and of a popover.
+  private static let cornerRadius: CGFloat = 10
+
+  /// A layer that the window server blends with what is under it, the opacity that its ancestors give it, and the
+  /// part of the view where it shows, in the root layer's coordinates.
+  private struct BlendedLayer {
+    let layer: CALayer
+    let mode: CGBlendMode
+    let opacity: Float
+    let visible: CGRect
+  }
+
+  /// The blend mode of each `compositingFilter` that AppKit puts on sidebar text and symbols: plus-lighter in the dark
+  /// appearance and plus-darker in the light one.
+  private static let blendModes: [String: CGBlendMode] = ["plusL": .plusLighter, "plusD": .plusDarker]
+
+  /// Each layer under `view`'s layer that has a blending `compositingFilter`, that shows, and that `draw(_:in:)` can
+  /// draw as the window does. A layer under a hidden or fully transparent ancestor does not show, such as an overlay
+  /// scroller that has faded out. `draw(_:in:)` renders the layer alone, clips it to rects, and draws it after
+  /// everything else. So it leaves out a layer that an ancestor changes some other way, such as with a mask, rounded
+  /// clipping, or a transform, and a layer that something drawn after it covers. The `overlays` that `fillSolids`
+  /// draws last do not count. `cacheDisplay` draws the layers it leaves out as plain layers.
+  private static func blendedLayers(in view: NSView, overlays: [CALayer]) -> [BlendedLayer] {
+    guard let root = view.layer else { return [] }
+    func visit(_ layer: CALayer, opacity: Float) -> [BlendedLayer] {
+      guard !layer.isHidden, layer.opacity > 0 else { return [] }
+      if let mode = (layer.compositingFilter as? String).flatMap({ blendModes[$0] }) {
+        guard isTranslation(layer.transform) else { return [] }
+        let visible = visibleRect(of: layer, in: view)
+        // A layer that shows nowhere stays in the list, so it stays out of `cacheDisplay` too.
+        guard visible.isEmpty || !isCovered(layer, within: visible, root: root, overlays: overlays) else { return [] }
+        return [BlendedLayer(layer: layer, mode: mode, opacity: opacity, visible: visible)]
+      }
+      let plain =
+        layer.mask == nil && !(layer.masksToBounds && layer.cornerRadius > 0) && isTranslation(layer.transform)
+        && CATransform3DIsIdentity(layer.sublayerTransform) && (layer.filters ?? []).isEmpty
+        && layer.compositingFilter == nil
+      guard plain else { return [] }
+      return (layer.sublayers ?? []).flatMap { visit($0, opacity: opacity * layer.opacity) }
+    }
+    return visit(root, opacity: 1)
+  }
+
+  private static func isTranslation(_ transform: CATransform3D) -> Bool {
+    CATransform3DIsIdentity(CATransform3DTranslate(transform, -transform.m41, -transform.m42, -transform.m43))
+  }
+
+  /// The part of `layer` that shows inside each ancestor that masks to its bounds and inside the visible part of the
+  /// scroll view that holds it, as `drawContents` draws, in the root layer's coordinates.
+  private static func visibleRect(of layer: CALayer, in view: NSView) -> CGRect {
+    guard let root = view.layer else { return .null }
+    var visible = layer.convert(layer.bounds, to: root)
+    var ancestor = layer.superlayer
+    while let outer = ancestor, outer !== root {
+      if let clip = outer.delegate as? NSClipView { return visible.intersection(visibleRect(of: clip, in: view)) }
+      if outer.masksToBounds { visible = visible.intersection(outer.convert(outer.bounds, to: root)) }
+      ancestor = outer.superlayer
+    }
+    return visible
+  }
+
+  /// Whether a layer that Core Animation draws after `layer` draws something inside `rect`, or whether the draw order
+  /// is unclear because siblings on the way to `root` differ in `zPosition`.
+  private static func isCovered(_ layer: CALayer, within rect: CGRect, root: CALayer, overlays: [CALayer]) -> Bool {
+    var child = layer
+    while child !== root, let parent = child.superlayer {
+      let siblings = (parent.sublayers ?? []).filter { !$0.isHidden }
+      guard siblings.allSatisfy({ $0.zPosition == child.zPosition }),
+        let index = siblings.firstIndex(where: { $0 === child })
+      else { return true }
+      let later = siblings[(index + 1)...].filter { sibling in !overlays.contains { $0 === sibling } }
+      if later.contains(where: { draws($0, within: rect, root: root) }) { return true }
+      child = parent
+    }
+    return false
+  }
+
+  /// Whether `layer` or a layer under it draws anything inside `rect`, a rect in `root`'s coordinates.
+  private static func draws(_ layer: CALayer, within rect: CGRect, root: CALayer) -> Bool {
+    guard !layer.isHidden, layer.opacity > 0 else { return false }
+    let shadow =
+      layer.shadowOpacity > 0
+      ? layer.shadowRadius + max(abs(layer.shadowOffset.width), abs(layer.shadowOffset.height)) : 0
+    let paints =
+      (layer.backgroundColor.map { $0.alpha > 0 } ?? false) || layer.contents != nil || layer.borderWidth > 0
+      || shadow > 0 || layer.compositingFilter != nil
+    if paints && layer.convert(layer.bounds.insetBy(dx: -shadow, dy: -shadow), to: root).intersects(rect) {
+      return true
+    }
+    return (layer.sublayers ?? []).contains { draws($0, within: rect, root: root) }
+  }
+
+  /// Sets each blended layer's opacity to 0, which leaves it out of `cacheDisplay`, and returns a function that puts
+  /// the opacities back.
+  private static func hide(_ blends: [BlendedLayer]) -> () -> Void {
+    let opacities = blends.map(\.layer.opacity)
+    for blend in blends { blend.layer.opacity = 0 }
+    return { for (blend, opacity) in zip(blends, opacities) { blend.layer.opacity = opacity } }
+  }
+
+  /// Draws `blend` into the current context with its blend mode, inside the part of the view where it shows.
+  private static func draw(_ blend: BlendedLayer, in view: NSView) {
+    guard let root = view.layer, let context = NSGraphicsContext.current?.cgContext else { return }
+    let layer = blend.layer
+    let frame = layer.convert(layer.bounds, to: root)
+    let scale = context.convertToDeviceSpace(CGSize(width: 1, height: 1)).width
+    guard !blend.visible.isEmpty,
+      let image = bitmapContext(
+        width: Int((layer.bounds.width * scale).rounded(.up)), height: Int((layer.bounds.height * scale).rounded(.up)))
+    else { return }
+    image.scaleBy(x: scale, y: scale)
+    if layer.contentsAreFlipped() {
+      image.translateBy(x: 0, y: layer.bounds.height)
+      image.scaleBy(x: 1, y: -1)
+    }
+    layer.render(in: image)
+    guard let rendered = image.makeImage() else { return }
+    context.saveGState()
+    defer { context.restoreGState() }
+    context.clip(to: unflipped(blend.visible, in: view))
+    context.setBlendMode(blend.mode)
+    context.setAlpha(CGFloat(blend.opacity))
+    context.draw(rendered, in: unflipped(frame, in: view))
+  }
+
+  /// A `destOut` compositing filter erases its superlayer's other sublayers where its shapes are opaque, such as the
+  /// labels under the selected segment of a segmented control, which draws its own label on top. `cacheDisplay`
+  /// erases everything under the shapes instead, including the selected segment. This hides each such layer and masks
+  /// its superlayer to leave out the shapes. It returns a function that puts both back. It leaves a layer alone
+  /// unless the mask can stand for it: every visible sibling draws before the layer, the superlayer has no mask, and
+  /// the layer and its sublayers draw only opaque solid rounded rects.
+  static func applyKnockouts(_ layer: CALayer) -> () -> Void {
+    var restores: [() -> Void] = []
+    func visit(_ layer: CALayer) {
+      guard !layer.isHidden else { return }
+      if (layer.compositingFilter as? String) == "destOut" {
+        guard let parent = layer.superlayer, drawsLast(layer, in: parent), parent.mask == nil,
+          let shapes = knockoutShapes(layer, in: parent)
+        else {
+          FileHandle.standardError.write(
+            Data(
+              "snapshot: a knockout layer is not drawn as the window shows it, so the drawing erases too much under it\n"
+                .utf8))
+          return
+        }
+        let mask = CAShapeLayer()
+        mask.frame = parent.bounds
+        mask.path = shapes.reduce(CGPath(rect: parent.bounds, transform: nil)) { $0.subtracting($1) }
+        parent.mask = mask
+        layer.isHidden = true
+        restores.append {
+          parent.mask = nil
+          layer.isHidden = false
+        }
+        return
+      }
+      layer.sublayers?.forEach(visit)
+    }
+    visit(layer)
+    return { restores.reversed().forEach { $0() } }
+  }
+
+  /// Whether Core Animation draws every visible sibling of `layer` before it. The mask erases from every sublayer of
+  /// `parent`, and the window erases only from the sublayers drawn before the knockout. Core Animation draws siblings
+  /// in order of `zPosition`, then in array order.
+  private static func drawsLast(_ layer: CALayer, in parent: CALayer) -> Bool {
+    let siblings = (parent.sublayers ?? []).filter { !$0.isHidden }
+    return siblings.last === layer && siblings.allSatisfy { $0.zPosition == layer.zPosition }
+  }
+
+  /// The outlines of what the knockout `layer` erases, in `parent`'s coordinates, or nil when something it draws is
+  /// not an opaque solid rounded rect.
+  private static func knockoutShapes(_ layer: CALayer, in parent: CALayer) -> [CGPath]? {
+    // A plain CALayer draws its background, border, shadow, contents, and sublayers, and its filters, mask, opacity,
+    // and transforms change them. A subclass such as CAShapeLayer or CATextLayer draws more.
+    func isSolid(_ shape: CALayer) -> Bool {
+      type(of: shape) == CALayer.self && (shape.filters ?? []).isEmpty && (shape.backgroundFilters ?? []).isEmpty
+        && CATransform3DIsIdentity(shape.sublayerTransform) && shape.contents == nil && shape.mask == nil
+        && shape.borderWidth == 0 && shape.shadowOpacity == 0
+        && shape.opacity == 1 && CATransform3DIsIdentity(shape.transform)
+        && (shape.cornerRadius == 0 || shape.maskedCorners == Self.allCorners)
+        && (shape.backgroundColor.map { $0.alpha == 1 } ?? true)
+    }
+    let sublayers = (layer.sublayers ?? []).filter { !$0.isHidden }
+    guard isSolid(layer),
+      sublayers.allSatisfy({ isSolid($0) && $0.compositingFilter == nil && ($0.sublayers ?? []).isEmpty }),
+      !layer.masksToBounds || sublayers.allSatisfy({ layer.bounds.contains($0.frame) })
+    else { return nil }
+    return ([layer] + sublayers).filter { $0.backgroundColor != nil }.map { shape in
+      let rect = shape.convert(shape.bounds, to: parent)
+      let radius = min(shape.cornerRadius, rect.width / 2, rect.height / 2)
+      return CGPath(roundedRect: rect, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    }
+  }
+
+  private static let allCorners: CACornerMask = [
+    .layerMinXMinYCorner, .layerMaxXMinYCorner, .layerMinXMaxYCorner, .layerMaxXMaxYCorner,
+  ]
 
   /// Fills each layer under `layer` that has a background color, such as the dimming behind a sheet, at its
   /// opacity. `cacheDisplay` draws those layers opaque.
@@ -247,6 +475,19 @@ enum Snapshot {
   /// content scrolls under the floating sidebar, the toolbar, and inset bars such as the sidebar's search field.
   private static func drawContents(of clip: NSClipView, in view: NSView) {
     guard let document = clip.documentView, !clip.isHiddenOrHasHiddenAncestor else { return }
+    let visible = visibleRect(of: clip, in: view)
+    guard !visible.isEmpty else { return }
+    NSGraphicsContext.saveGraphicsState()
+    defer { NSGraphicsContext.restoreGraphicsState() }
+    NSBezierPath(rect: unflipped(visible, in: view)).addClip()
+    guard document is NSTableView else { return draw(document, within: visible, in: view) }
+    for row in document.subviews.compactMap({ $0 as? NSTableRowView }) {
+      if row.isSelected { drawSelected(row, within: visible, in: view) } else { draw(row, within: visible, in: view) }
+    }
+  }
+
+  /// The part of `view` that `clip` shows, in `view`'s coordinates.
+  private static func visibleRect(of clip: NSClipView, in view: NSView) -> NSRect {
     let scroll = clip.enclosingScrollView ?? clip
     var visible = scroll.convert(scroll.safeAreaRect, to: view).intersection(clip.convert(clip.bounds, to: view))
     // A scroll view inside another one, such as a code block in a transcript, shows only what the outer one shows.
@@ -257,14 +498,7 @@ enum Snapshot {
       }
       ancestor = outer.superview
     }
-    guard !visible.isEmpty else { return }
-    NSGraphicsContext.saveGraphicsState()
-    defer { NSGraphicsContext.restoreGraphicsState() }
-    NSBezierPath(rect: unflipped(visible, in: view)).addClip()
-    guard document is NSTableView else { return draw(document, within: visible, in: view) }
-    for row in document.subviews.compactMap({ $0 as? NSTableRowView }) {
-      if row.isSelected { drawSelected(row, within: visible, in: view) } else { draw(row, within: visible, in: view) }
-    }
+    return visible
   }
 
   /// Draws the part of `part` inside `visible`, a rect in `view`'s coordinates. A long document caches only what
@@ -370,16 +604,19 @@ enum Snapshot {
     else { return nil }
     let template = image as! CGImage
     let rect = CGRect(x: 0, y: 0, width: template.width, height: template.height)
-    guard
-      let context = CGContext(
-        data: nil, width: template.width, height: template.height, bitsPerComponent: 8, bytesPerRow: 0,
-        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
-    else { return nil }
+    guard let context = bitmapContext(width: template.width, height: template.height) else { return nil }
     context.draw(template, in: rect)
     context.setBlendMode(.sourceIn)
     context.setFillColor(apply(matrix, to: tint as! CGColor))
     context.fill(rect)
     return context.makeImage()
+  }
+
+  /// An empty RGBA bitmap context of `width` by `height` pixels.
+  private static func bitmapContext(width: Int, height: Int) -> CGContext? {
+    CGContext(
+      data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+      space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
   }
 
   /// Returns false when it wrote no PNG. It writes to a temporary file first, so the PNG never exists half written.
@@ -412,15 +649,14 @@ enum Snapshot {
       let view = popover ? content : content.superview ?? content
       guard let image = cache(view) else { continue }
       let rect = window.convertToScreen(view.convert(view.bounds, to: nil)).offsetBy(dx: -bounds.minX, dy: -bounds.minY)
-      window.effectiveAppearance.performAsCurrentDrawingAppearance {
-        NSColor.windowBackgroundColor.setFill()
-        NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10).fill()
-        if popover {
+      image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+      if popover {
+        window.effectiveAppearance.performAsCurrentDrawingAppearance {
           NSColor.separatorColor.setStroke()
-          NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: 10, yRadius: 10).stroke()
+          NSBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), xRadius: cornerRadius, yRadius: cornerRadius)
+            .stroke()
         }
       }
-      image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
     }
     NSGraphicsContext.restoreGraphicsState()
     guard let png = rep.representation(using: .png, properties: [:]) else { return false }

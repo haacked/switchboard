@@ -2,6 +2,18 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
+  /// The `auto-mode` request. With `autoMode`, it saves the setting in config.json and applies it to the sessions
+  /// created after it. Sessions that exist keep their mode. The answer is the setting.
+  func autoModeRequest(_ args: JSON) throws -> JSON {
+    if let value = args["autoMode"] {
+      guard let on = value.bool else { throw APIError("auto mode is on or off") }
+      try saveSetting("autoMode", .bool(on))
+      defaultAutoMode = on
+      logLine(on ? "new sessions start in auto mode" : "new sessions start without auto mode")
+    }
+    return .object(["autoMode": .bool(defaultAutoMode)])
+  }
+
   /// Writes one top-level setting into config.json and keeps every other setting there. It refuses to rewrite a
   /// file that it can't read as a JSON object.
   func saveSetting(_ key: String, _ value: JSON) throws {

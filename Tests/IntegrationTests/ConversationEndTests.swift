@@ -7,7 +7,8 @@ import Testing
 /// that is queued for the conversation, or that claude has not confirmed, blocks the end whatever `--drop` names.
 /// A wait handed to the operator never blocks and stays there. Only the user ends a conversation, so sbd refuses a session caller, a process in
 /// any session's Claude pane, and sb refuses inside Claude Code. `--new` starts a conversation in its place.
-/// `sb rm` on a conversation gets the same wait and schedule check.
+/// `sb rm` on a conversation gets the same wait and schedule check. An open to-do blocks the end until the request's
+/// `resolve` names every open to-do, as it does for `sb rm`.
 ///
 /// The answer of `sb manager end --json` is an object. `ended` is the conversation's id, `name` its name,
 /// `transcript` the path of its transcript, and `claudeSessionId` its Claude session id. `handed` and `dropped` are
@@ -625,8 +626,8 @@ import Testing
     sbd.hold("hold-delivered")
 
     try sbd.sb("send", c.id, text)
-    try sbd.waitFor("the command's SessionStart", timeout: 30) {
-      try sbd.events(c.id, after: mark).contains { $0.kind == "SessionStart" && $0.data["source"]?.string == "compact" }
+    _ = try sbd.waitFor("the command's SessionStart", timeout: 30, fetch: { try sbd.events(c.id, after: mark) }) {
+      $0.contains { $0.kind == "SessionStart" && $0.data["source"]?.string == "compact" }
     }
     try #require(try sbd.events(c.id, "delivered", text: text).isEmpty, "hold-delivered let delivered through")
     try sbd.release("hold-delivered")
@@ -828,7 +829,7 @@ import Testing
     #expect(try sbd.client.sessions().map(\.id).contains(s.id))
   }
 
-  // MARK: Open to-dos (Decision 7)
+  // MARK: Open to-dos
 
   @Test func anOpenToDoRefusesTheEnd() throws {
     let sbd = try Instance()
@@ -841,6 +842,26 @@ import Testing
     #expect(refused.stderr.contains(todo.id), Comment(rawValue: refused.stderr))
     try expectUnchanged(sbd, before)
     #expect(try sbd.isOpenTodo(c.id, todo.id))
+  }
+
+  /// The app's delete names every open to-do in `resolve` and sends no `new`.
+  @Test func aFullResolveEndsTheConversationAndRecordsEachTodo() throws {
+    let sbd = try Instance()
+    let c = try conversation(sbd)
+    let first = try sbd.addTodo(c.id, "tell Alex in #flags that the fix shipped")
+    let second = try sbd.addTodo(c.id, "bump the SDK")
+
+    let answer = try sbd.client.call(
+      "manager-end",
+      ["session": .string(c.id), "drop": [], "resolve": .array([.string(first.id), .string(second.id)])])
+
+    #expect(answer["ended"]?.string == c.id, "\(answer.text)")
+    #expect(answer["started"] == nil, "\(answer.text)")
+    #expect(try !listed(sbd).contains(c.id))
+    #expect(try !sbd.client.sessions().map(\.id).contains(c.id))
+    let resolved = try sbd.resolvedTodoIds()
+    #expect(resolved.contains(first.id), "\(resolved)")
+    #expect(resolved.contains(second.id), "\(resolved)")
   }
 
   // MARK: --new (Decision 3)

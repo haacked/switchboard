@@ -431,14 +431,14 @@ extension OperatorResetTests {
       let s = try JSONCoding.decode(
         Config.self,
         from: #"""
-          {"operator": {"holdRetrySeconds": 30, "judgeModel": "haiku", "maxTurns": 5, "resetEverySeconds": 60,
+          {"operator": {"holdRetrySeconds": 30, "model": "haiku", "maxTurns": 5, "resetEverySeconds": 60,
            "autoCompactWindow": 120000}}
           """#
       ).operator
 
       #expect(s.holdRetrySeconds == 30)
       #expect(s.holdLimitSeconds == OperatorSettings().holdLimitSeconds)
-      #expect(s.judgeModel == "haiku")
+      #expect(s.model == "haiku")
     }
 
     @Test func theNewSettingsRoundTripThroughConfig() throws {

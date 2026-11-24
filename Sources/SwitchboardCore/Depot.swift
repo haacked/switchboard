@@ -192,9 +192,12 @@ extension PullRequest {
   public var headDepot: DepotRun? { depot?.headSha == headSha ? depot : nil }
 
   /// The Depot run of the open PR's head commit when it has a failure, while
-  /// GitHub's rollup doesn't show that every check passed.
+  /// GitHub's rollup doesn't show that every check passed. A cancelled run
+  /// has no verdict, so its jobs that failed before the cancel don't count.
   public var depotFailure: DepotRun? {
-    guard state == .open, !checksPassed, let run = headDepot, run.hasFailure else { return nil }
+    guard state == .open, !checksPassed, let run = headDepot, run.status != "cancelled", run.hasFailure else {
+      return nil
+    }
     return run
   }
 

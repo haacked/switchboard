@@ -194,8 +194,8 @@ public final class Service {
   var checkedUnknown: Set<String> = []
   /// gh's login, which the look for an unknown post's reply reads.
   var ghLogin: String?
-  /// The sessions whose decision list `decision-submit` is sending.
-  var submittingDecisions: Set<String> = []
+  /// The sessions to which sbd is sending a decisions submit, resend, or question.
+  var sendingAboutDecisions: Set<String> = []
   /// The sessions that the removal job takes next, in order.
   var removalOrder: [String] = []
   /// The timer that starts a pass of the removal job at the earliest `notBefore` of the queued removals.
@@ -336,9 +336,11 @@ public final class Service {
   var memoryPinOff = false
   /// The most claude processes that may run at once. `sb live --set` changes it.
   var liveCap: Int
+  /// Whether new sessions start in auto mode. `sb auto-mode` changes it.
+  var defaultAutoMode: Bool
   /// The `operator` settings that the tick last read, with config.json's modification time then.
   var cachedOperatorSettings: (modified: Date?, settings: OperatorSettings)?
-  /// The model of a Manager conversation without its own. `sb manager model` changes it.
+  /// The model of a Manager conversation or a group chat without its own. `sb manager model` changes it.
   var managerModel: String
   /// config.json's `issues`. `sb issues source` and `sb issues team` change it.
   var issueSettings: IssueSettings
@@ -393,6 +395,7 @@ public final class Service {
     self.hostCLIRunner = HostCLIRunner(program: sbPath)
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
+    self.defaultAutoMode = config.autoMode
     self.managerModel = config.manager.model
     self.issueSettings = config.issues
     let links = Service.makeHostLinks(config: config, home: home)
@@ -410,6 +413,9 @@ public final class Service {
   /// running claude's queued messages on the state queue.
   public func load() throws {
     loadChosenAccount()
+    for refusal in Account.survey(claudeConfigDirs: config.claudeConfigDirs, codexHomes: config.codexHomes).refusals {
+      logLine("not listing an account: \(refusal)")
+    }
     autoContinueOn = autoContinueSwitch.isOn
     activityOn = activitySwitch.isOn
     loadIssueCache()
@@ -615,7 +621,7 @@ public final class Service {
       return .success(try JSON(encoding: importSessions(request.args)))
     case "triage", "choose", "reply", "summary-set", "item-context":
       return try triageRequest(request, origin: origin)
-    case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard":
+    case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard", "decision-ask":
       return try decisionRequest(request.op, request.args)
     case "plan-attach", "plan-update":
       return .success(try planDocumentRequest(request.op, request.args))
@@ -644,6 +650,9 @@ public final class Service {
     case "quick-ask":
       // A quick ask can run claude for minutes. It runs off the state queue.
       return .success(try quickAsk(request.args, clientGone: hookGone))
+    case "operator-judge":
+      // A judgment can run claude for a minute. It runs off the state queue.
+      return .success(try operatorJudge(request.args, clientGone: hookGone))
     case "manager-skills":
       // A relabel scans the folders and the transcript, so it runs off the state queue.
       return .success(try managerSkills(request.args))
@@ -836,6 +845,8 @@ public final class Service {
       return try chatReadRequest(args)
     case "note", "remove-note", "resolve-note":
       return try noteRequest(op, args, origin: origin)
+    case "link-add", "link-rm":
+      return try sessionLinkRequest(op, args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "rm-retry", "rm-keep", "rm-cancel", "removal-notices", "removal-notice-dismiss":
@@ -856,6 +867,10 @@ public final class Service {
       return try managerHint(args)
     case "manager-model":
       return try managerModelRequest(args)
+    case "operator-model":
+      return try operatorModelRequest(args)
+    case "auto-mode":
+      return try autoModeRequest(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -900,7 +915,7 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try site(of: id).screen(paneName(id, pane), colors: args["colors"]?.bool == true))
-    case "accounts", "account-use", "account-move":
+    case "accounts", "account-use", "account-move", "account-add":
       return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())
@@ -953,10 +968,14 @@ public final class Service {
   /// `caller`. The refusal says that the session can't do `action`.
   func lookupOther(_ args: JSON, refusing action: String) throws -> String {
     let id = try lookup(args)
-    if let caller = args["caller"]?.string, (try? lookup(["session": .string(caller)])) == id {
-      throw APIError("\(entries[id]!.session.name) can't \(action)")
-    }
+    if isCaller(id, args) { throw APIError("\(entries[id]!.session.name) can't \(action)") }
     return id
+  }
+
+  /// True when the request's `caller` names session `id`.
+  func isCaller(_ id: String, _ args: JSON) -> Bool {
+    guard let caller = args["caller"]?.string else { return false }
+    return (try? lookup(["session": .string(caller)])) == id
   }
 
   // MARK: Hooks
@@ -1429,14 +1448,13 @@ public final class Service {
     }
     session.group = try groupOfNew(args.group, parent: session.parent)
     session.setStartModes(
-      auto: args.autoMode, plan: args.planMode, manual: args.manualMode, defaultAuto: config.autoMode)
+      auto: args.autoMode, plan: args.planMode, manual: args.manualMode, defaultAuto: defaultAutoMode)
     session.host = args.host
     session.issue = args.issue
     configure(&session)
     // A conversation shows Claude's terminal alone. The user opens its shell on demand.
     if session.kind.isConversation { session.shellClosed = true }
-    // config.json's `model` is not for Manager conversations. They run `managerModel` at launch.
-    if session.model == nil, session.kind != .manager { session.model = config.model }
+    session.model = SessionModel.stored(kind: session.kind, requested: session.model, workModel: config.model)
     if session.kind != .operator { try refuseOperatorName(session.name) }
     if let host = session.host {
       guard session.kind == .work else { throw APIError("the Manager and a chat run on this Mac, not on \(host)") }
@@ -1462,9 +1480,9 @@ public final class Service {
     return summary(id)
   }
 
-  func update(_ id: String, _ change: (inout Session) -> Void) throws {
+  func update(_ id: String, _ change: (inout Session) throws -> Void) throws {
     guard var session = entries[id]?.session else { throw APIError("no session \(id)") }
-    change(&session)
+    try change(&session)
     entries[id]?.session = session
     try store.save(session)
     // The operator's waits, and whether a session may own an item, decide which sessions show the operator's items.
@@ -1576,7 +1594,10 @@ public final class Service {
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
     }
-    if let model = Manager.launchModel(for: session.kind, stored: session.model, managerModel: managerModel) {
+    if let model = SessionModel.launch(
+      kind: session.kind, stored: session.model, coordinatorModel: managerModel,
+      operatorModel: operatorSettings.model)
+    {
       args += ["--model", model]
     }
     if local { args += config.claudeArgs }
@@ -1892,10 +1913,13 @@ public final class Service {
         }
         return
       }
+      // claude can finish the turn before the paste returns. A test can make the gate after that turn. The paste reads
+      // the gate before it records `pasting`, which keeps that gate from holding it.
+      let holdsDelivered = gateIsClosed("hold-delivered")
       guard queue.sync(execute: { startPaste(id, message) }) else { return }
       do {
         try terminals.paste(name, parts?.text ?? text, attachments: parts?.paths)
-        waitAtGate("hold-delivered")
+        if holdsDelivered { waitAtGate("hold-delivered") }
         queue.async {
           self.record(id, "delivered", ["text": .string(text)])
           // Claude Code runs a built-in command without a turn. No UserPromptSubmit clears its paste.
@@ -1984,8 +2008,12 @@ public final class Service {
   /// gates, and they run on the paste queue or the removal queue, never on
   /// the state queue.
   func waitAtGate(_ gate: String) {
-    guard config.testClock else { return }
-    while FileManager.default.fileExists(atPath: "\(home.path)/\(gate)") { usleep(50_000) }
+    while gateIsClosed(gate) { usleep(50_000) }
+  }
+
+  /// Whether the gate file exists in the home of a test instance.
+  func gateIsClosed(_ gate: String) -> Bool {
+    config.testClock && FileManager.default.fileExists(atPath: "\(home.path)/\(gate)")
   }
 
   /// Defers the session's held questions first, so that their cards stay.
@@ -2966,6 +2994,8 @@ public final class Service {
     if !facts.dependencies.isEmpty { out.dependencies = facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     if !facts.artifacts.isEmpty { out.artifacts = facts.artifacts }
+    let links = s.links(found: facts.links)
+    if !links.isEmpty { out.links = links }
     out.conversationStarted = facts.conversationStarted
     out.docket = s.docket.map { DocketSummary($0, facts.docket) }
     out.mergeError = facts.mergeError

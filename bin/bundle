@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Builds build/Switchboard.app in release mode. Contents/MacOS holds the app,
-# sbd, and sb, because the app and sb find their siblings there. The bundle is
+# sbd, and sb, because the app and sb find their siblings there. Contents/Resources/Prompts
+# holds the model prompts that sbd reads at start. The last step checks that the
+# bundled sbd finds them. The bundle is
 # signed ad hoc, which is enough to run it on this Mac. Info.plist records the
 # commit it built, which bin/install compares before it replaces an app. It
 # holds a machine-wide build slot (bin/lib/build-slot) for the whole run, so
@@ -21,6 +23,7 @@ rm -rf build/Switchboard.app
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$bin/Switchboard" "$bin/sbd" "$bin/sb" "$app/Contents/MacOS/"
 cp assets/icon/AppIcon.icns "$app/Contents/Resources/"
+cp -R prompts "$app/Contents/Resources/Prompts"
 cat >"$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -50,4 +53,5 @@ cat >"$app/Contents/Info.plist" <<PLIST
 PLIST
 codesign --force --sign - "$app/Contents/MacOS/sbd" "$app/Contents/MacOS/sb"
 codesign --force --sign - "$app"
+env -u SB_PROMPTS_DIR "$app/Contents/MacOS/sbd" --check-prompts >&2
 echo "$app"

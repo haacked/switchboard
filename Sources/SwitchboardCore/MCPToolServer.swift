@@ -197,6 +197,10 @@ public struct MCPToolServer: Sendable {
       ]
       if args["todo"]?.bool == true { request["kind"] = .string(Note.Kind.todo.rawValue) }
       return try client.call("note", request)
+    case "add_link":
+      return try client.call("link-add", try ownSessionLink("add_link", pick(args, ["url", "title"])))
+    case "remove_link":
+      return try client.call("link-rm", try ownSessionLink("remove_link", pick(args, ["link"])))
     case "list_groups":
       guard let scoped else { return try client.call("group-ls") }
       return try JSON(encoding: GroupList(groups: [scoped.group], ungrouped: []))
@@ -212,6 +216,14 @@ public struct MCPToolServer: Sendable {
       return try client.call(
         "group-note",
         ["group": try groupID(args, scoped), "text": args["text"] ?? .null, "by": MCPToolServer.byClaude])
+    case "add_group_artifact":
+      return try client.call(
+        "group-link-add",
+        ["group": try groupID(args, scoped), "url": args["url"] ?? .null, "by": MCPToolServer.byClaude])
+    case "remove_group_artifact":
+      return try client.call(
+        "group-link-rm",
+        ["group": try groupID(args, scoped), "link": args["link"] ?? .null, "by": MCPToolServer.byClaude])
     case "suggest_groups":
       return try client.call("group-suggest", pick(args, ["accept"]))
     case "plan_artifact":
@@ -313,6 +325,14 @@ public struct MCPToolServer: Sendable {
   private func sessionOrCaller(_ args: JSON, _ scoped: Scoped?) throws -> JSON {
     if args["session"] == nil, let caller { return .string(caller) }
     return try sessionID(args, scoped)
+  }
+
+  /// The request of a link tool: `request` on the calling session, as Claude. sbd allows it only on that session.
+  private func ownSessionLink(_ tool: String, _ request: [String: JSON]) throws -> [String: JSON] {
+    guard let caller else { throw APIError("\(tool) works only in a session that Switchboard started") }
+    return request.merging(["session": .string(caller), "caller": .string(caller), "by": MCPToolServer.byClaude]) {
+      $1
+    }
   }
 
   private func sessionRef(_ args: JSON) throws -> String {

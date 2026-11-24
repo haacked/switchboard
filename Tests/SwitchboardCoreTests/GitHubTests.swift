@@ -101,6 +101,20 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
     #expect(GitHub.parsePR(node)?.pr.createdAt == "2026-10-20T08:00:00Z")
   }
 
+  @Test func readsTheNumberOfCommitsOnThePR() throws {
+    let node = try editedNode(18303, ["commits": ["totalCount": 7, "nodes": []]])
+    let pr = try #require(GitHub.parsePR(node)?.pr)
+
+    #expect(pr.commitCount == 7)
+    #expect(PRSummary(pr).commitCount == 7)
+  }
+
+  @Test func aNodeWithoutACommitCountLeavesItNil() throws {
+    let node = try editedNode(18303, ["commits": ["nodes": []]])
+
+    #expect(GitHub.parsePR(node)?.pr.commitCount == nil)
+  }
+
   @Test func aNodeWithoutACreationTimeLeavesItNil() throws {
     let node = try editedNode(18303, ["createdAt": nil])
 
@@ -124,6 +138,10 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 
     #expect(words.contains("createdAt"))
     #expect(!words.contains("updatedAt"))
+  }
+
+  @Test func theStatusQueryReadsThePRsCommitCount() {
+    #expect(GitHub.statusQuery.contains("commits(last: 1) { totalCount"))
   }
 
   /// GitHub answers a field it couldn't resolve, such as for a token without

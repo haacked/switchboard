@@ -44,19 +44,36 @@ extension Service {
           by: try Author(parsing: args["by"]?.string))
       }
     case "group-link-add":
-      try requireUser(args, "Only you can add a link to a group. Ask the user to run sb group link add")
+      let by = try Author(parsing: args["by"]?.string)
       return try updateGroup(args) { group in
-        let url = try GroupLink.cleanURL(args["url"]?.string)
-        let title = try GroupLink.cleanTitle(args["title"]?.string, url: url)
-        guard group.addLink(GroupLink(id: shortId("l"), title: title, url: url, by: .you, t: nowMs())) else {
+        let url = try ExternalLink.cleanURL(args["url"]?.string)
+        if by == .claude {
+          guard ArtifactLink.normalized(url) != nil else {
+            throw APIError(
+              "Claude can add only a claude.ai artifact link to a group. Ask the user to run sb group link add")
+          }
+          // A link's title reaches other sessions as text. Claude's link therefore has its URL as its title.
+          guard args["title"]?.string == nil else {
+            throw APIError("Claude can't title a link: its title is its URL. Add it without a title")
+          }
+        }
+        let title = try ExternalLink.cleanTitle(args["title"]?.string, url: url)
+        guard group.addLink(ExternalLink(id: shortId("l"), title: title, url: url, by: LinkAuthor(by), t: nowMs()))
+        else {
           throw APIError("\(group.name) already has a link to \(url)")
         }
       }
     case "group-link-rm":
-      try requireUser(args, "Only you can remove a group's link. Ask the user to run sb group link rm")
+      let by = try Author(parsing: args["by"]?.string)
       return try updateGroup(args) { group in
         let linkId = args["link"]?.string ?? ""
-        guard group.removeLink(id: linkId) else { throw APIError("\(group.name) has no link \(linkId)") }
+        guard let link = group.links?.first(where: { $0.id == linkId }) else {
+          throw APIError("\(group.name) has no link \(linkId)")
+        }
+        guard by == .you || link.by == .claude else {
+          throw APIError("Only you can remove a link you added. Ask the user to run sb group link rm")
+        }
+        _ = group.removeLink(id: linkId)
       }
     case "group-account":
       // Without an account or clear, it answers with the group unchanged.
@@ -72,7 +89,7 @@ extension Service {
             "\(remote.id) of the group is on \(remote.host!): it runs under the Claude login of \(remote.host!). Move it out of the group first"
           )
         }
-        group.account = try resolveAccount(ref).folder
+        group.account = try resolveClaudeAccount(ref).folder
         try saveGroup(group)
         logLine("the group \(id) runs its sessions under \(group.account!)")
       }
@@ -248,7 +265,8 @@ extension Service {
     var summary = GroupSummary(groups[id]!, sessions: members(id).map(\.id))
     summary.plans = planSummaries(group: id, rowFollowups: rowFollowups)
     let live = artifactRows(of: entries.values.filter { artifactGroup(of: $0.session) == id })
-    let artifacts = GroupArtifacts.list(live + (groups[id]?.keptArtifacts ?? []))
+    let linked = (groups[id]?.links ?? []).compactMap(GroupArtifact.init(link:))
+    let artifacts = GroupArtifacts.list(live + (groups[id]?.keptArtifacts ?? []) + linked)
     if !artifacts.isEmpty { summary.artifacts = artifacts }
     return summary
   }

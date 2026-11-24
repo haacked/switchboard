@@ -398,6 +398,20 @@ test_file_selection() {
   esac
 }
 
+# selection_targets
+# Reads select_tests lines on stdin and prints the test targets they name, one
+# per line.
+selection_targets() {
+  awk '$1 == "target" || $1 == "suites" { print $2 }' | sort -u
+}
+
+# filter_targets
+# Reads test_filters patterns on stdin and prints the test targets they name,
+# one per line. Every pattern starts with ^<target>\.
+filter_targets() {
+  sed -n -E 's/^\^([A-Za-z0-9_]+)\\\..*/\1/p' | sort -u
+}
+
 # test_filters
 # Reads select_tests lines on stdin and prints one --filter pattern for each.
 # A file's suites become a pattern only when list_tests shows that it matches

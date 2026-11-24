@@ -144,55 +144,61 @@ private func conversation(
     #expect(sent.args == ["session": "m", "pinned": false])
   }
 
-  // MARK: The toolbar star
+  // MARK: The toolbar's Manager icon
 
-  @Test func theStarIsNeedsMeForAConversationWithASendCard() throws {
+  @Test func theIconIsNeedsMeForAConversationWithASendCard() throws {
     let model = appliedModel([try carded(conversation("m"), kind: .send), conversation("n", unread: 1)])
 
-    #expect(ManagerStar(model.managers) == .needsMe)
+    #expect(ManagerIcon(model.managers) == .needsMe)
   }
 
   @Test(arguments: [Card.Kind.permission, .question, .trust, .send, .mcp])
-  func theStarIsNeedsMeForEveryCardKind(_ kind: Card.Kind) throws {
+  func theIconIsNeedsMeForEveryCardKind(_ kind: Card.Kind) throws {
     let model = appliedModel([try carded(conversation("m"), kind: kind)])
 
-    #expect(ManagerStar(model.managers) == .needsMe)
+    #expect(ManagerIcon(model.managers) == .needsMe)
   }
 
-  @Test func theStarIsUnreadForAConversationWithUnreadReplies() {
+  @Test func theIconIsUnreadForAConversationWithUnreadReplies() {
     let model = appliedModel([conversation("m", unread: 1), conversation("n")])
 
-    #expect(ManagerStar(model.managers) == .unread)
+    #expect(ManagerIcon(model.managers) == .unread)
   }
 
-  /// A conversation goes to Needs you on a plain reply. Once the user read it, the star is an outline.
-  @Test func theStarIsAnOutlineForAReadConversationInNeedsYouFromAReply() {
+  /// A conversation goes to Needs you on a plain reply. Once the user read it, the icon is an outline.
+  @Test func theIconIsAnOutlineForAReadConversationInNeedsYouFromAReply() {
     let model = appliedModel([conversation("m", state: .needsYou)])
 
-    #expect(ManagerStar(model.managers) == .outline)
+    #expect(ManagerIcon(model.managers) == .outline)
   }
 
-  @Test func theStarIsAnOutlineWithoutConversations() {
-    #expect(ManagerStar(appliedModel([needsItem("a")]).managers) == .outline)
+  @Test func theIconIsAnOutlineWithoutConversations() {
+    #expect(ManagerIcon(appliedModel([needsItem("a")]).managers) == .outline)
   }
 
-  /// The star and each row read `ChatMark`, so they agree.
-  @Test func theStarFollowsTheMarksOfTheConversations() throws {
+  /// The icon and each row read `ChatMark`, so they agree.
+  @Test func theIconFollowsTheMarksOfTheConversations() throws {
     let shapes: [SessionSummary] = [
       conversation("m"), conversation("m", unread: 2), conversation("m", unread: 2, state: .working),
       conversation("m", state: .working), try carded(conversation("m"), kind: .send),
       try carded(conversation("m", unread: 2), kind: .permission),
     ]
     for s in shapes {
-      let expected: ManagerStar
+      let expected: ManagerIcon
       switch ChatMark(s) {
       case .needsMe: expected = .needsMe
       case .unread: expected = .unread
       case .none, .working, .idle: expected = .outline
       }
 
-      #expect(ManagerStar([s]) == expected, "\(ChatMark(s))")
+      #expect(ManagerIcon([s]) == expected, "\(ChatMark(s))")
     }
+  }
+
+  /// A misspelled symbol name draws an empty toolbar item.
+  @Test(arguments: [ManagerIcon.needsMe, .unread, .outline])
+  func theIconsSymbolExists(_ icon: ManagerIcon) {
+    #expect(NSImage(systemSymbolName: icon.systemImage, accessibilityDescription: nil) != nil)
   }
 
   @Test func waitingManagerSkipsANeedsYouFromAReplyOnly() {

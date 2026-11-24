@@ -320,11 +320,7 @@ private let sessionText = "Good catch, fixed in the next commit."
   /// The reply keys join the message and Other answer keys, so a prune keeps all three kinds.
   @Test func aRefreshKeepsTheSessionsMessageDraftAndOtherAnswerBesideItsReplyDraft() {
     var s = withDrafts("a", [.ready(replyTarget)])
-    s.triage?.decisions = [1, 2].map {
-      PendingDecision(
-        number: $0, header: "Header \($0)", question: "Question \($0)?",
-        options: [PendingDecision.Option(label: "Yes"), PendingDecision.Option(label: "No")])
-    }
+    s.triage?.decisions = [1, 2].map(yesNoDecision)
     let model = appliedModel([s])
     model.messageDraft(for: s).text = "message"
     model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "other"

@@ -6,8 +6,6 @@ import SwitchboardCore
 struct TriageDetail: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  /// The step that the card's decision view shows. Nil shows the first unanswered decision.
-  @State private var step: DecisionStep?
 
   enum Pane { case terminal, summary }
 
@@ -79,7 +77,7 @@ struct TriageDetail: View {
                 Label("From background follow-through", systemImage: "gearshape.2")
                   .font(.caption).foregroundStyle(.secondary)
               }
-              DecisionCard(session: session, item: item, step: $step)
+              DecisionCard(session: session, item: item, step: step)
             } else {
               working
               reply
@@ -90,7 +88,7 @@ struct TriageDetail: View {
         }
         if let list = session.stepList {
           Divider()
-          DecisionStepBar(session: session, list: list, step: $step)
+          DecisionStepBar(session: session, list: list, step: step)
         }
         Divider()
         if session.waitsToStart {
@@ -106,8 +104,16 @@ struct TriageDetail: View {
       }
     }
     .task(id: Self.replyKey(session)) { model.loadReply(session) }
-    .onChange(of: session.stepList?.ref) { step = nil }
     .referenceRepo(session)
+  }
+
+  /// The step that the card's decision view shows, which `BoardModel` keeps so that it survives leaving the item.
+  private var step: Binding<DecisionStep?> {
+    let id = session.id
+    let ref = session.stepList?.ref
+    return Binding(
+      get: { ref.flatMap { model.decisionStep(session: id, ref: $0) } },
+      set: { step in if let ref { model.setDecisionStep(step, session: id, ref: ref) } })
   }
 
   private var bar: some View {
