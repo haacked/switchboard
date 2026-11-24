@@ -11,7 +11,7 @@ extension Service {
 
   /// The group requests whose `by` records who wrote what they store. A user-written description and the user's links
   /// go into the system prompt of every session in the group.
-  static let groupAuthorOps: Set<String> = [
+  private static let groupAuthorOps: Set<String> = [
     "group-add", "group-describe", "group-note", "group-link-add", "group-link-rm",
   ]
 
@@ -25,10 +25,10 @@ extension Service {
       var args = request.args.object, args["by"]?.string != Author.claude.rawValue
     else { return request }
     let ancestry = pid.flatMap(Processes.ancestors(of:))
-    let fresh = buildSnapshot()
+    let fresh = ancestry == nil ? nil : buildSnapshot()
     let inSession: Bool = queue.sync {
+      guard let ancestry, let fresh else { return true }
       install(fresh)
-      guard let ancestry else { return true }
       let place = callerPlace(ancestry)
       return !place.inside.isEmpty || place.inServer
     }
