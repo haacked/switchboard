@@ -317,6 +317,11 @@ func todoFixture(_ id: String, _ text: String, resolved: Bool = false) -> Note {
   noteFixture(id, text, kind: .todo, resolved: resolved)
 }
 
+func isDelete(_ a: SessionMenuAction) -> Bool {
+  if case .delete = a { return true }
+  return false
+}
+
 /// An issue that the session's PR body links.
 func bodyIssue(_ number: Int, _ repo: String = "PostHog/posthog") -> SessionIssue {
   SessionIssue(repo: repo, number: number, via: .body, url: "https://github.com/\(repo)/issues/\(number)")

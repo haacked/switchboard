@@ -7,7 +7,7 @@ import SwitchboardCore
 struct ManagerStatusStrip: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  @State private var ending: EndConversationText?
+  @State private var ending: ConversationRemovalText?
 
   var body: some View {
     let status = model.managerStatus(for: session)
