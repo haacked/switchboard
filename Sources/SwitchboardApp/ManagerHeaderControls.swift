@@ -5,7 +5,7 @@ import SwitchboardCore
 struct ManagerHeaderControls: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  @State private var ending: EndConversationText?
+  @State private var ending: ConversationRemovalText?
 
   var body: some View {
     Button("New Task", systemImage: "plus") { model.openNewSession(parent: session.id) }
@@ -23,14 +23,14 @@ struct EndConversationButton: View {
   let session: SessionSummary
   /// The confirmation as it was when the user pressed the button. The end drops only the ids that it lists, so a
   /// wait that lands while the dialog is open makes sbd refuse the end instead of dropping the wait unseen.
-  @Binding var ending: EndConversationText?
+  @Binding var ending: ConversationRemovalText?
 
   private static let title = "End Conversation…"
   private static let icon = "stop.circle"
 
   var body: some View {
     Button {
-      ending = EndConversationText(session)
+      ending = ConversationRemovalText(session, .end)
     } label: {
       // A header too narrow for the title shows only the icon.
       ViewThatFits(in: .horizontal) {
@@ -45,14 +45,14 @@ struct EndConversationButton: View {
 extension View {
   /// The confirmation that ends the conversation and opens a new one in its place. SwiftUI closes a dialog whose
   /// view leaves the screen. So attach it to a view that stays on screen while the dialog is open.
-  func endConversationDialog(_ ending: Binding<EndConversationText?>, session: SessionSummary) -> some View {
+  func endConversationDialog(_ ending: Binding<ConversationRemovalText?>, session: SessionSummary) -> some View {
     modifier(EndConversationDialog(ending: ending, session: session))
   }
 }
 
 private struct EndConversationDialog: ViewModifier {
   @EnvironmentObject var model: BoardModel
-  @Binding var ending: EndConversationText?
+  @Binding var ending: ConversationRemovalText?
   let session: SessionSummary
 
   private var isConfirming: Binding<Bool> {
@@ -63,7 +63,7 @@ private struct EndConversationDialog: ViewModifier {
     content.confirmationDialog(
       ending?.title ?? "", isPresented: isConfirming, titleVisibility: .visible, presenting: ending
     ) { text in
-      Button(EndConversationText.button, role: .destructive) { model.endConversation(session, drop: text.drop) }
+      Button(text.button, role: .destructive) { model.endConversation(session, new: true, drop: text.drop) }
     } message: { text in
       Text(text.message)
     }
@@ -71,16 +71,17 @@ private struct EndConversationDialog: ViewModifier {
 }
 
 /// The confirmation that End Conversation shows for a conversation's summary.
-struct EndConversationText: Equatable {
-  static let button = "End Conversation"
+struct ConversationRemovalText: Equatable {
+  enum Mode { case end }
 
   var title: String
   var message: String
+  var button: String
   /// The ids of the conversation's own waits, its pause condition, and its schedules, in the order that the message
   /// lists them. sbd refuses the end while the conversation holds one of these that the request does not name.
   var drop: [String]
 
-  init(_ s: SessionSummary) {
+  init(_ s: SessionSummary, _ mode: Mode) {
     let dropped = s.ownItems
     var parts = [
       "A new conversation opens in its place with the same account, MCP servers, and pin. "
@@ -99,6 +100,7 @@ struct EndConversationText: Equatable {
 
     title = "End \(s.name)?"
     message = parts.joined(separator: "\n\n")
+    button = "End Conversation"
     drop = dropped.map(\.id)
   }
 }

@@ -29,11 +29,13 @@ extension BoardModel {
       })
   }
 
-  /// Ends the conversation, opens a new one in its place, and selects it. `drop` names the conversation's own
-  /// waits, pause condition, and schedules that the user saw in the confirmation. sbd refuses the end when the
-  /// conversation holds an id that `drop` does not name, and the refusal shows in the error banner.
-  func endConversation(_ s: SessionSummary, drop: [String]) {
-    perform("manager-end", ["session": .string(s.id), "new": true, "drop": .array(drop.map(JSON.string))]) { value in
+  /// Ends the conversation. With `new`, it opens a new one in its place and selects it. `drop` names the
+  /// conversation's own waits, pause condition, and schedules that the user saw in the confirmation. sbd refuses the
+  /// end when the conversation holds an id that `drop` does not name, and the refusal shows in the error banner.
+  func endConversation(_ s: SessionSummary, new: Bool, drop: [String]) {
+    var args: [String: JSON] = ["session": .string(s.id), "drop": .array(drop.map(JSON.string))]
+    if new { args["new"] = true }
+    perform("manager-end", args) { value in
       if let id = value["started"]?["id"]?.string { self.selectUnlisted(id) }
     }
   }

@@ -100,39 +100,39 @@ enum EndFixtures {
   // MARK: The confirmation's text
 
   @Test func theTitleNamesTheConversation() {
-    let text = EndConversationText(EndFixtures.conversation())
+    let text = ConversationRemovalText(EndFixtures.conversation(), .end)
 
     #expect(text.title.contains(EndFixtures.name))
   }
 
   @Test func theDestructiveButtonEndsTheConversation() {
-    #expect(EndConversationText.button.hasPrefix("End"))
+    #expect(ConversationRemovalText(EndFixtures.conversation(), .end).button.hasPrefix("End"))
   }
 
   @Test func withNoWaitsTheMessageSaysTheTranscriptStaysOnDiskAndNothingIsDropped() {
-    let text = EndConversationText(EndFixtures.conversation())
+    let text = ConversationRemovalText(EndFixtures.conversation(), .end)
 
     #expect(text.message.localizedCaseInsensitiveContains("transcript"))
     #expect(text.drop == [])
   }
 
   @Test func withNoHandedWaitsTheMessageDoesNotMentionTheOperator() {
-    let text = EndConversationText(EndFixtures.conversation())
+    let text = ConversationRemovalText(EndFixtures.conversation(), .end)
 
     #expect(!text.message.contains(Manager.operatorName))
   }
 
   @Test func oneOwnWaitIsListedByItsLineAndDropped() {
-    let text = EndConversationText(EndFixtures.conversation(waits: [EndFixtures.mergeWait]))
+    let text = ConversationRemovalText(EndFixtures.conversation(waits: [EndFixtures.mergeWait]), .end)
 
     #expect(text.message.contains(EndFixtures.mergeWait.line))
     #expect(text.drop == ["w1"])
   }
 
   @Test func twoOwnWaitsAndAScheduleAreEachListedAndDroppedWaitsFirst() {
-    let text = EndConversationText(
+    let text = ConversationRemovalText(
       EndFixtures.conversation(
-        waits: [EndFixtures.mergeWait, EndFixtures.dateWait], schedules: [EndFixtures.schedule]))
+        waits: [EndFixtures.mergeWait, EndFixtures.dateWait], schedules: [EndFixtures.schedule]), .end)
 
     #expect(text.message.contains(EndFixtures.mergeWait.line))
     #expect(text.message.contains(EndFixtures.dateWait.line))
@@ -141,8 +141,8 @@ enum EndFixtures {
   }
 
   @Test func handedWaitsAreCountedAsTheOperatorsAndNotListedOrDropped() {
-    let text = EndConversationText(
-      EndFixtures.conversation(handed: [EndFixtures.handedWait, EndFixtures.secondHandedWait]))
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(handed: [EndFixtures.handedWait, EndFixtures.secondHandedWait]), .end)
 
     #expect(text.drop == [])
     #expect(text.message.contains(Manager.operatorName))
@@ -152,28 +152,29 @@ enum EndFixtures {
   }
 
   @Test func ownAndHandedWaitsDropOnlyTheOwnOne() {
-    let text = EndConversationText(
-      EndFixtures.conversation(waits: [EndFixtures.mergeWait], handed: [EndFixtures.handedWait]))
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(waits: [EndFixtures.mergeWait], handed: [EndFixtures.handedWait]), .end)
 
     #expect(text.drop == ["w1"])
   }
 
   @Test func aPauseConditionIsListedByThePausesLine() {
-    let text = EndConversationText(EndFixtures.conversation(pause: EndFixtures.conditionalPause))
+    let text = ConversationRemovalText(EndFixtures.conversation(pause: EndFixtures.conditionalPause), .end)
 
     #expect(text.message.contains(EndFixtures.conditionalPause.line))
   }
 
   @Test func aPauseConditionIsDroppedAfterTheWaitsAndBeforeTheSchedules() {
-    let text = EndConversationText(
+    let text = ConversationRemovalText(
       EndFixtures.conversation(
-        waits: [EndFixtures.mergeWait], pause: EndFixtures.conditionalPause, schedules: [EndFixtures.schedule]))
+        waits: [EndFixtures.mergeWait], pause: EndFixtures.conditionalPause, schedules: [EndFixtures.schedule]), .end)
 
     #expect(text.drop == ["w1", "p1", "s1"])
   }
 
   @Test func aPauseWithoutAConditionDropsNothing() {
-    let text = EndConversationText(EndFixtures.conversation(pause: Pause(by: .you, reason: "Lunch", since: 1)))
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(pause: Pause(by: .you, reason: "Lunch", since: 1)), .end)
 
     #expect(text.drop == [])
   }
@@ -183,21 +184,21 @@ enum EndFixtures {
       try cardFixture(1, session: "m", kind: .permission), try cardFixture(2, session: "m", kind: .question),
     ]
 
-    let text = EndConversationText(EndFixtures.conversation(cards: cards))
+    let text = ConversationRemovalText(EndFixtures.conversation(cards: cards), .end)
 
     #expect(text.message.contains("2 open requests"))
   }
 
   @Test func oneOpenCardIsCountedInTheSingular() throws {
-    let text = EndConversationText(
-      EndFixtures.conversation(cards: [try cardFixture(1, session: "m", kind: .mcp)]))
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(cards: [try cardFixture(1, session: "m", kind: .mcp)]), .end)
 
     #expect(text.message.contains("1 open request"))
     #expect(!text.message.contains("1 open requests"))
   }
 
   @Test func withNoCardsTheMessageDoesNotMentionOpenRequests() {
-    let text = EndConversationText(EndFixtures.conversation())
+    let text = ConversationRemovalText(EndFixtures.conversation(), .end)
 
     #expect(!text.message.contains("open request"))
   }
@@ -210,7 +211,7 @@ enum EndFixtures {
     let session = EndFixtures.session(shape)
     let guarded = session.ownItems.map(\.id)
 
-    let text = EndConversationText(EndFixtures.summary(of: session, handed: shape.handed))
+    let text = ConversationRemovalText(EndFixtures.summary(of: session, handed: shape.handed), .end)
 
     #expect(text.drop == guarded)
   }
@@ -218,14 +219,16 @@ enum EndFixtures {
   // MARK: Ending
 
   @Test func endConversationSendsManagerEndWithNewAndTheDropIds() async {
-    let sent = await firstRequest { $0.endConversation(EndFixtures.conversation(), drop: ["w1", "p1", "s1"]) }
+    let sent = await firstRequest {
+      $0.endConversation(EndFixtures.conversation(), new: true, drop: ["w1", "p1", "s1"])
+    }
 
     #expect(sent.op == "manager-end")
     #expect(sent.args == ["session": "m", "new": true, "drop": ["w1", "p1", "s1"]])
   }
 
   @Test func endConversationWithNothingToDropNamesNoIdsAndNoCaller() async {
-    let sent = await firstRequest { $0.endConversation(EndFixtures.conversation(), drop: []) }
+    let sent = await firstRequest { $0.endConversation(EndFixtures.conversation(), new: true, drop: []) }
 
     #expect(sent.op == "manager-end")
     #expect(sent.args["session"] == "m")
@@ -244,7 +247,7 @@ enum EndFixtures {
     model.send = { op, _ in op == "manager-end" ? answer : .null }
     model.selection = "m"
 
-    model.endConversation(conversation, drop: [])
+    model.endConversation(conversation, new: true, drop: [])
 
     await settle { model.selection == "m2" }
     #expect(model.selection == "m2")
@@ -259,7 +262,7 @@ enum EndFixtures {
     model.apply(.success([conversation]), followups: nil)
     model.selection = "m"
 
-    model.endConversation(conversation, drop: [])
+    model.endConversation(conversation, new: true, drop: [])
     await settle { model.actionError != nil }
 
     #expect(model.actionError?.contains(refusal) == true)
