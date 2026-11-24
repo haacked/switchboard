@@ -1108,14 +1108,12 @@ check_group() {
   local shots="$home/shots/group" group rfc notes result
   mkdir "$shots"
   echo "Checking a group's description author, links, and notes on the Board…"
-  # sb records Claude as the author when CLAUDECODE is set, as it is when a Claude session runs this script.
-  you() { env -u CLAUDECODE "$bin_dir/sb" "$@"; }
   new_session group-work
-  group=$(you group add group-context "$session" --json | jq -r '.id')
+  group=$(sb group add group-context "$session" --json | jq -r '.id')
   CLAUDECODE=1 sb group describe "$group" "Ship the flag cache." >/dev/null
-  you group note "$group" "Ask Ana before the deploy." >/dev/null
-  you group note "$group" "The cache lives in Redis." >/dev/null
-  you group link add "$group" https://example.com/rfc --title RFC >/dev/null
+  sb group note "$group" "Ask Ana before the deploy." >/dev/null
+  sb group note "$group" "The cache lives in Redis." >/dev/null
+  sb group link add "$group" https://example.com/rfc --title RFC >/dev/null
   group_json() { sb group ls --json | jq -c --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
   rfc=$(group_json '.links[0].id' | tr -d '"')
   notes=$(group_json '[.notes[].id | "group-note-" + . + ":in"] | sort | join(",")' | tr -d '"')
