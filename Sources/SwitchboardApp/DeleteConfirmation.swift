@@ -35,7 +35,7 @@ enum DeleteConfirmation {
   @MainActor func confirm(_ model: BoardModel) {
     switch self {
     case .work(let s, let todos): model.deleteSession(s, resolve: todos.ids)
-    case .conversation(let s, let text): model.endConversation(s, new: false, drop: text.drop, resolve: text.resolve)
+    case .conversation(let s, let text): text.confirm(model, s)
     }
   }
 }

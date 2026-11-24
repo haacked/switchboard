@@ -63,11 +63,9 @@ private struct EndConversationDialog: ViewModifier {
     content.confirmationDialog(
       ending?.title ?? "", isPresented: isConfirming, titleVisibility: .visible, presenting: ending
     ) { text in
-      Button(text.button, role: .destructive) {
-        model.endConversation(session, new: true, drop: text.drop, resolve: text.resolve)
-      }
+      Button(text.button, role: .destructive) { text.confirm(model, session) }
     } message: { text in
-      Text(text.message)
+      Text(model.sessionNames.replacingIDs(in: text.message))
     }
   }
 }
@@ -94,6 +92,7 @@ struct ConversationRemovalText: Equatable {
   /// The title of the context menu item that opens the delete confirmation.
   static let deleteTitle = "Delete the conversation…"
 
+  var mode: Mode
   var title: String
   var message: String
   var button: String
@@ -106,6 +105,7 @@ struct ConversationRemovalText: Equatable {
   init(_ s: SessionSummary, _ mode: Mode) {
     let dropped = s.ownItems
     let todos = TodoDeletion(s)
+    self.mode = mode
     var parts = [mode.outcome]
     if !dropped.isEmpty {
       parts.append("\(mode.gerund) drops:\n" + dropped.map { "• \($0.line)" }.joined(separator: "\n"))
@@ -123,5 +123,10 @@ struct ConversationRemovalText: Equatable {
     button = todos.button(mode.button)
     drop = dropped.map(\.id)
     resolve = todos.ids
+  }
+
+  /// Sends the removal that the dialog describes. End opens a new conversation in its place. Delete does not.
+  @MainActor func confirm(_ model: BoardModel, _ s: SessionSummary) {
+    model.endConversation(s, new: mode == .end, drop: drop, resolve: resolve)
   }
 }

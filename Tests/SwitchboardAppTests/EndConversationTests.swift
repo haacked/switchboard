@@ -358,6 +358,17 @@ enum EndFixtures {
     #expect(sent.args == ["session": "m", "new": true, "drop": ["w1"], "resolve": ["n1", "n2"]])
   }
 
+  /// End's dialog sends the drop and resolve ids that it lists, with `new`.
+  @Test func confirmingEndSendsTheListedDropAndResolveIdsAndNew() async throws {
+    let session = try EndFixtures.everything()
+    let text = ConversationRemovalText(session, .end)
+
+    let sent = await firstRequest { text.confirm($0, session) }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args == ["session": "m", "new": true, "drop": ["w1", "w2", "p1", "s1"], "resolve": ["n1", "n2"]])
+  }
+
   /// A delete sends no `new` key, not `new: false`, and no caller.
   @Test func aDeleteSendsManagerEndWithTheDropAndResolveIdsAndNoNew() async {
     let sent = await firstRequest {

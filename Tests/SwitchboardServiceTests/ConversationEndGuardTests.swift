@@ -737,7 +737,7 @@ private func refusal(_ body: () throws -> Void) -> String? {
     }
   }
 
-  // MARK: Resolving to-dos (Risk 3)
+  // MARK: Resolving to-dos
 
   /// Gives the idle conversation open to-dos n1 and n2. An open to-do refuses every shape below before `remove`
   /// stops anything, so these tests run in-process without tmux.
