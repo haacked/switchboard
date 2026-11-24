@@ -60,8 +60,6 @@ struct ContentView: View {
     model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
   }
 
-  private var deleteConfirmation: DeleteConfirmation? { model.confirmingDelete.map(DeleteConfirmation.init) }
-
   private var isShowingDoneRemoval: Binding<Bool> {
     Binding(get: { model.showingDoneRemoval }, set: { if !$0 { model.doneRemoval = nil } })
   }
@@ -71,7 +69,8 @@ struct ContentView: View {
   }
 
   var body: some View {
-    NavigationSplitView {
+    let deleteConfirmation = model.confirmingDelete.map(DeleteConfirmation.init)
+    return NavigationSplitView {
       Sidebar()
         .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: Self.sidebarIdealWidth, max: 420)
     } detail: {

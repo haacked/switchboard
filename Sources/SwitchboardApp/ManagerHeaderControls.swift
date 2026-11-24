@@ -63,32 +63,52 @@ private struct EndConversationDialog: ViewModifier {
     content.confirmationDialog(
       ending?.title ?? "", isPresented: isConfirming, titleVisibility: .visible, presenting: ending
     ) { text in
-      Button(text.button, role: .destructive) { model.endConversation(session, new: true, drop: text.drop) }
+      Button(text.button, role: .destructive) {
+        model.endConversation(session, new: true, drop: text.drop, resolve: text.resolve)
+      }
     } message: { text in
       Text(text.message)
     }
   }
 }
 
-/// The confirmation that End Conversation shows for a conversation's summary.
+/// The confirmation that End Conversation and a conversation's Delete show for its summary.
 struct ConversationRemovalText: Equatable {
-  enum Mode { case end }
+  enum Mode {
+    case end, delete
+
+    var verb: String { self == .end ? "End" : "Delete" }
+    var gerund: String { self == .end ? "Ending" : "Deleting" }
+    var button: String { self == .end ? "End Conversation" : "Delete" }
+    var outcome: String {
+      switch self {
+      case .end:
+        "A new conversation opens in its place with the same account, MCP servers, and pin. "
+          + "The transcript stays on disk."
+      case .delete:
+        "Claude stops and the conversation leaves the sidebar. The transcript stays on disk."
+      }
+    }
+  }
+
+  /// The title of the context menu item that opens the delete confirmation.
+  static let deleteTitle = "Delete the conversation…"
 
   var title: String
   var message: String
   var button: String
   /// The ids of the conversation's own waits, its pause condition, and its schedules, in the order that the message
-  /// lists them. sbd refuses the end while the conversation holds one of these that the request does not name.
+  /// lists them. sbd refuses the removal while the conversation holds one of these that the request does not name.
   var drop: [String]
+  /// The ids of the open to-dos that the message lists and that the removal resolves.
+  var resolve: [String]
 
   init(_ s: SessionSummary, _ mode: Mode) {
     let dropped = s.ownItems
-    var parts = [
-      "A new conversation opens in its place with the same account, MCP servers, and pin. "
-        + "The transcript stays on disk."
-    ]
+    let todos = TodoDeletion(s)
+    var parts = [mode.outcome]
     if !dropped.isEmpty {
-      parts.append("Ending drops:\n" + dropped.map { "• \($0.line)" }.joined(separator: "\n"))
+      parts.append("\(mode.gerund) drops:\n" + dropped.map { "• \($0.line)" }.joined(separator: "\n"))
     }
     if let handed = s.handedWaits, !handed.isEmpty {
       let waits = handed.count == 1 ? "1 wait" : "\(handed.count) waits"
@@ -98,9 +118,10 @@ struct ConversationRemovalText: Equatable {
       parts.append(s.cards.count == 1 ? "1 open request closes." : "\(s.cards.count) open requests close.")
     }
 
-    title = "End \(s.name)?"
-    message = parts.joined(separator: "\n\n")
-    button = "End Conversation"
+    title = "\(mode.verb) \(s.name)?"
+    message = todos.message(before: parts.joined(separator: "\n\n"))
+    button = todos.button(mode.button)
     drop = dropped.map(\.id)
+    resolve = todos.ids
   }
 }

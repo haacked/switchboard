@@ -29,15 +29,23 @@ extension BoardModel {
       })
   }
 
-  /// Ends the conversation. With `new`, it opens a new one in its place and selects it. `drop` names the
-  /// conversation's own waits, pause condition, and schedules that the user saw in the confirmation. sbd refuses the
-  /// end when the conversation holds an id that `drop` does not name, and the refusal shows in the error banner.
-  func endConversation(_ s: SessionSummary, new: Bool, drop: [String]) {
+  /// Ends the conversation. With `new`, it opens a new one in its place and selects it. Without it, the
+  /// conversation leaves the selection. `drop` names the conversation's own waits, pause condition, and schedules.
+  /// `resolve` names its open to-dos. The user saw both lists in the confirmation. sbd refuses the end when the
+  /// conversation holds an id that they do not name. The refusal shows in the error banner.
+  func endConversation(_ s: SessionSummary, new: Bool, drop: [String], resolve: [String] = []) {
+    guard deleting.insert(s.id).inserted else { return }
     var args: [String: JSON] = ["session": .string(s.id), "drop": .array(drop.map(JSON.string))]
     if new { args["new"] = true }
-    perform("manager-end", args) { value in
-      if let id = value["started"]?["id"]?.string { self.selectUnlisted(id) }
-    }
+    perform(
+      "manager-end", Self.resolving(args, resolve),
+      then: { value in
+        if let id = value["started"]?["id"]?.string {
+          self.selectUnlisted(id)
+        } else {
+          self.deselect([s.id])
+        }
+      }, finally: { self.deleting.remove(s.id) })
   }
 
   /// Hides the conversation's end hint until the hint's key changes, as when another spawned session reaches Done.

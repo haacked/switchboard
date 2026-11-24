@@ -57,6 +57,11 @@ private func withSessions(_ body: (Service) throws -> Void) throws {
   }
 }
 
+/// `extra` with `session` set to the conversation.
+private func conversationArgs(_ extra: [String: JSON]) -> JSON {
+  JSON.object(extra.merging(["session": .string(conversation)]) { $1 })
+}
+
 /// The error that `body` throws, or nil.
 private func refusal(_ body: () throws -> Void) -> String? {
   do {
@@ -614,8 +619,7 @@ private func refusal(_ body: () throws -> Void) -> String? {
   }
 
   private func end(_ service: Service, caller: Caller, _ extra: [String: JSON] = [:]) -> String? {
-    let args = JSON.object(extra.merging(["session": .string(conversation)]) { $1 })
-    return refusal { _ = try service.managerEnd(args, caller: caller) }
+    refusal { _ = try service.managerEnd(conversationArgs(extra), caller: caller) }
   }
 
   private var me: Caller { .client(pid: Int(getpid())) }
@@ -730,6 +734,76 @@ private func refusal(_ body: () throws -> Void) -> String? {
       let error = end(service, caller: me)
 
       #expect(error?.contains("sb stop") == true, "\(error ?? "nil")")
+    }
+  }
+
+  // MARK: Resolving to-dos (Risk 3)
+
+  /// Gives the idle conversation open to-dos n1 and n2. An open to-do refuses every shape below before `remove`
+  /// stops anything, so these tests run in-process without tmux.
+  private func withOpenTodos(_ body: (Service) throws -> Void) throws {
+    try withSessions { service in
+      service.queue.sync {
+        service.entries[conversation]?.session.notes = [
+          Note(id: "n1", text: "tell Alex in #flags", by: .you, t: created, kind: .todo),
+          Note(id: "n2", text: "bump the SDK", by: .you, t: created, kind: .todo),
+        ]
+      }
+      try body(service)
+    }
+  }
+
+  /// Requires that a refused request left the conversation, its open to-dos, and no drop allowance.
+  private func expectKept(_ service: Service, sourceLocation: SourceLocation = #_sourceLocation) {
+    let entry = service.queue.sync { service.entries[conversation] }
+    #expect(entry != nil, sourceLocation: sourceLocation)
+    #expect(entry?.session.openTodos.map(\.id) == ["n1", "n2"], sourceLocation: sourceLocation)
+    #expect(service.queue.sync { service.endingDrops[conversation] } == nil, sourceLocation: sourceLocation)
+  }
+
+  /// A `resolve` and `by` shape that `rm` refuses before anything stops, and a phrase that the refusal contains.
+  struct ResolveShape: Sendable, CustomTestStringConvertible {
+    let label: String
+    let args: [String: JSON]
+    var says: String? = nil
+    var testDescription: String { label }
+  }
+
+  static let refusedResolves: [ResolveShape] = [
+    ResolveShape(label: "no resolve", args: [:]),
+    ResolveShape(label: "a null resolve", args: ["resolve": .null]),
+    ResolveShape(label: "an empty resolve", args: ["resolve": []]),
+    ResolveShape(label: "a partial resolve", args: ["resolve": ["n1"]], says: "n2"),
+    ResolveShape(label: "a stray id", args: ["resolve": ["n1", "n2", "n9"]], says: "n9 is not an open to-do"),
+    ResolveShape(label: "only a stray id", args: ["resolve": ["n9"]]),
+    ResolveShape(label: "a partial resolve by you", args: ["resolve": ["n2"], "by": "you"]),
+    ResolveShape(
+      label: "one to-do by claude", args: ["resolve": ["n1"], "by": "claude"], says: "Only you can resolve a to-do."),
+    ResolveShape(
+      label: "every to-do by claude", args: ["resolve": ["n1", "n2"], "by": "claude"],
+      says: "Only you can resolve a to-do."),
+    ResolveShape(label: "an empty resolve by claude", args: ["resolve": [], "by": "claude"]),
+    ResolveShape(label: "an invalid by", args: ["resolve": ["n1", "n2"], "by": "robot"]),
+    ResolveShape(label: "a string resolve", args: ["resolve": "n1"], says: "resolve is a list of note ids"),
+    ResolveShape(label: "a number in resolve", args: ["resolve": [1]], says: "resolve is a list of note ids"),
+    ResolveShape(label: "a mixed resolve", args: ["resolve": ["n1", 2]], says: "resolve is a list of note ids"),
+    ResolveShape(label: "an object resolve", args: ["resolve": ["ids": ["n1"]]], says: "resolve is a list of note ids"),
+    ResolveShape(label: "a bool resolve", args: ["resolve": .bool(true)], says: "resolve is a list of note ids"),
+  ]
+
+  /// `manager-end` forwards `resolve` and `by` to `rm`, so the two refuse each shape with the same message.
+  @Test(arguments: refusedResolves)
+  func managerEndRefusesEachResolveShapeAsRmDoes(_ shape: ResolveShape) throws {
+    try withOpenTodos { service in
+      let viaRm = refusal { _ = try service.remove(conversationArgs(shape.args), caller: .inProcess) }
+      let viaEnd = end(service, caller: .inProcess, shape.args)
+
+      let text = try #require(viaRm)
+      #expect(viaEnd == text)
+      if let says = shape.says {
+        #expect(text.contains(says), Comment(rawValue: text))
+      }
+      expectKept(service)
     }
   }
 }

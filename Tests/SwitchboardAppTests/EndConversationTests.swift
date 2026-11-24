@@ -62,10 +62,13 @@ enum EndFixtures {
     return w
   }
 
-  /// Conversation `m` named `name`, with the given own waits, pause, schedules, handed waits, and cards.
+  static let firstTodo = todoFixture("n1", "tell Alex in #flags")
+  static let secondTodo = todoFixture("n2", "bump the SDK")
+
+  /// Conversation `m` named `name`, with the given own waits, pause, schedules, handed waits, cards, and notes.
   static func conversation(
     waits: [Wait] = [], pause: Pause? = nil, schedules: [Schedule]? = nil, handed: [Wait]? = nil,
-    cards: [Card] = []
+    cards: [Card] = [], notes: [Note] = []
   ) -> SessionSummary {
     var s = needsItem("m", manager: true, state: .waiting)
     s.name = name
@@ -74,7 +77,16 @@ enum EndFixtures {
     s.schedules = schedules
     s.handedWaits = handed
     s.cards = cards
+    s.notes = notes
     return s
+  }
+
+  /// A conversation that holds one of each item that the confirmation lists or counts.
+  static func everything() throws -> SessionSummary {
+    conversation(
+      waits: [mergeWait, dateWait], pause: conditionalPause, schedules: [schedule], handed: [handedWait],
+      cards: [try cardFixture(1, session: "m", kind: .permission), try cardFixture(2, session: "m", kind: .question)],
+      notes: [firstTodo, secondTodo])
   }
 
   /// The session as sbd stores it for `shape`.
@@ -103,6 +115,12 @@ enum EndFixtures {
     let text = ConversationRemovalText(EndFixtures.conversation(), .end)
 
     #expect(text.title.contains(EndFixtures.name))
+  }
+
+  @Test func theEndMessageSaysANewConversationOpensInItsPlace() {
+    let text = ConversationRemovalText(EndFixtures.conversation(), .end)
+
+    #expect(text.message.localizedCaseInsensitiveContains("new conversation"))
   }
 
   @Test func theDestructiveButtonEndsTheConversation() {
@@ -206,14 +224,117 @@ enum EndFixtures {
   /// sbd's guard refuses the end unless `drop` names every id in the session's `ownItems`. The app reads the
   /// summary's `ownItems`, which has to hold exactly those ids, so it neither drops a handed wait nor leaves the
   /// guard an id to refuse on.
-  @Test(arguments: EndShape.allCases)
-  func dropMatchesTheIdsThatSbdsGuardRefusesOn(_ shape: EndShape) {
+  @Test(arguments: EndShape.allCases, [ConversationRemovalText.Mode.end, .delete])
+  func dropMatchesTheIdsThatSbdsGuardRefusesOn(_ shape: EndShape, _ mode: ConversationRemovalText.Mode) {
     let session = EndFixtures.session(shape)
     let guarded = session.ownItems.map(\.id)
 
-    let text = ConversationRemovalText(EndFixtures.summary(of: session, handed: shape.handed), .end)
+    let text = ConversationRemovalText(EndFixtures.summary(of: session, handed: shape.handed), mode)
 
     #expect(text.drop == guarded)
+  }
+
+  // MARK: Open to-dos (Decision 9)
+
+  @Test(arguments: [ConversationRemovalText.Mode.end, .delete])
+  func withNoOpenTodoNothingIsResolved(_ mode: ConversationRemovalText.Mode) {
+    let text = ConversationRemovalText(EndFixtures.conversation(notes: [noteFixture("n9", "plain")]), mode)
+
+    #expect(text.resolve == [])
+    #expect(!text.message.contains("to-do"))
+  }
+
+  @Test(arguments: [ConversationRemovalText.Mode.end, .delete])
+  func openTodosAreListedAndResolved(_ mode: ConversationRemovalText.Mode) {
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(notes: [EndFixtures.firstTodo, EndFixtures.secondTodo]), mode)
+
+    #expect(text.resolve == ["n1", "n2"])
+    #expect(text.message.contains(EndFixtures.firstTodo.text))
+    #expect(text.message.contains(EndFixtures.secondTodo.text))
+  }
+
+  @Test(arguments: [ConversationRemovalText.Mode.end, .delete])
+  func aResolvedTodoIsNeitherListedNorResolved(_ mode: ConversationRemovalText.Mode) {
+    let done = todoFixture("n3", "ship the fix", resolved: true)
+
+    let text = ConversationRemovalText(EndFixtures.conversation(notes: [EndFixtures.firstTodo, done]), mode)
+
+    #expect(text.resolve == ["n1"])
+    #expect(!text.message.contains(done.text))
+  }
+
+  @Test func endsButtonNamesOneTodoItResolves() {
+    let text = ConversationRemovalText(EndFixtures.conversation(notes: [EndFixtures.firstTodo]), .end)
+
+    #expect(text.button == "Resolve 1 To-do and End Conversation")
+  }
+
+  @Test func endsButtonWithoutTodosIsEndConversation() {
+    #expect(ConversationRemovalText(EndFixtures.conversation(), .end).button == "End Conversation")
+  }
+
+  // MARK: The delete confirmation's text
+
+  @Test func theDeleteTitleNamesTheConversation() {
+    let text = ConversationRemovalText(EndFixtures.conversation(), .delete)
+
+    #expect(text.title == "Delete \(EndFixtures.name)?")
+  }
+
+  @Test func theDeleteMessageSaysTheTranscriptStaysOnDisk() {
+    let text = ConversationRemovalText(EndFixtures.conversation(), .delete)
+
+    #expect(text.message.localizedCaseInsensitiveContains("transcript"))
+  }
+
+  @Test func theDeleteMessageSaysClaudeStops() {
+    let text = ConversationRemovalText(EndFixtures.conversation(), .delete)
+
+    #expect(text.message.localizedCaseInsensitiveContains("claude"))
+  }
+
+  /// Decision 1: a conversation has no worktree or branch, and a delete opens nothing in its place.
+  @Test func theDeleteMessageNeverSaysANewConversationOpensOrNamesAWorktree() {
+    let text = ConversationRemovalText(EndFixtures.conversation(notes: [EndFixtures.firstTodo]), .delete)
+
+    #expect(!text.message.localizedCaseInsensitiveContains("new conversation"))
+    #expect(!text.message.localizedCaseInsensitiveContains("in its place"))
+    #expect(!text.message.localizedCaseInsensitiveContains("worktree"))
+    #expect(!text.message.localizedCaseInsensitiveContains("branch"))
+  }
+
+  @Test func theDeleteButtonWithoutTodosIsDelete() {
+    #expect(ConversationRemovalText(EndFixtures.conversation(), .delete).button == "Delete")
+  }
+
+  @Test func theDeleteButtonNamesTheTodosItResolves() {
+    let text = ConversationRemovalText(
+      EndFixtures.conversation(notes: [EndFixtures.firstTodo, EndFixtures.secondTodo]), .delete)
+
+    #expect(text.button == "Resolve 2 To-dos and Delete")
+  }
+
+  @Test func theDeleteMessageListsEveryDropHandedWaitAndCardAsEndDoes() throws {
+    let text = ConversationRemovalText(try EndFixtures.everything(), .delete)
+
+    #expect(text.message.contains(EndFixtures.mergeWait.line))
+    #expect(text.message.contains(EndFixtures.dateWait.line))
+    #expect(text.message.contains(EndFixtures.conditionalPause.line))
+    #expect(text.message.contains("Loop: \(EndFixtures.schedule.prompt)"))
+    #expect(text.message.contains("\(Manager.operatorName) keeps following 1 wait"))
+    #expect(!text.message.contains(EndFixtures.handedWait.line))
+    #expect(text.message.contains("2 open requests"))
+  }
+
+  @Test func deleteAndEndDropAndResolveTheSameIds() throws {
+    let s = try EndFixtures.everything()
+
+    let end = ConversationRemovalText(s, .end)
+    let delete = ConversationRemovalText(s, .delete)
+
+    #expect(delete.drop == end.drop)
+    #expect(delete.resolve == end.resolve)
   }
 
   // MARK: Ending
@@ -225,6 +346,97 @@ enum EndFixtures {
 
     #expect(sent.op == "manager-end")
     #expect(sent.args == ["session": "m", "new": true, "drop": ["w1", "p1", "s1"]])
+  }
+
+  /// Decision 9: End resolves the to-dos its confirmation lists and still opens a conversation in its place.
+  @Test func endWithTodosSendsResolveAndNew() async {
+    let sent = await firstRequest {
+      $0.endConversation(EndFixtures.conversation(), new: true, drop: ["w1"], resolve: ["n1", "n2"])
+    }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args == ["session": "m", "new": true, "drop": ["w1"], "resolve": ["n1", "n2"]])
+  }
+
+  /// A delete sends no `new` key, not `new: false`, and no caller.
+  @Test func aDeleteSendsManagerEndWithTheDropAndResolveIdsAndNoNew() async {
+    let sent = await firstRequest {
+      $0.endConversation(EndFixtures.conversation(), new: false, drop: ["w1", "s1"], resolve: ["n1", "n2"])
+    }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args == ["session": "m", "drop": ["w1", "s1"], "resolve": ["n1", "n2"]])
+  }
+
+  @Test func aDeleteWithNoTodosSendsNoResolve() async {
+    let sent = await firstRequest {
+      $0.endConversation(EndFixtures.conversation(), new: false, drop: ["w1"], resolve: [])
+    }
+
+    #expect(sent.args == ["session": "m", "drop": ["w1"]])
+  }
+
+  @Test(arguments: [true, false])
+  func theConversationIsInDeletingWhileTheRequestRuns(_ new: Bool) async {
+    let conversation = EndFixtures.conversation()
+    let (model, release, _) = heldModel([conversation])
+
+    model.endConversation(conversation, new: new, drop: [])
+
+    #expect(model.deleting.contains("m"))
+    release.signal()
+    await settle { !model.deleting.contains("m") }
+    #expect(!model.deleting.contains("m"))
+  }
+
+  @Test(arguments: [true, false])
+  func aSecondEndWhileTheFirstRunsSendsNothing(_ new: Bool) async {
+    let sent = await firstRequest { model in
+      let conversation = EndFixtures.conversation()
+      model.endConversation(conversation, new: new, drop: [])
+      model.endConversation(conversation, new: new, drop: [])
+      #expect(model.deleting == ["m"])
+    }
+
+    #expect(sent.count == 1)
+  }
+
+  @Test func aSuccessfulDeleteDeselectsTheConversation() async {
+    let conversation = EndFixtures.conversation()
+    let (model, _) = recordingModel([conversation, needsItem("a")])
+    model.selection = "m"
+
+    model.endConversation(conversation, new: false, drop: [])
+    await settle { model.selection == nil }
+
+    #expect(model.selection == nil)
+  }
+
+  /// The Inbox can select another item while the delete runs. The deselect touches only the deleted id.
+  @Test func aSuccessfulDeleteLeavesAnotherSelectionAlone() async {
+    let conversation = EndFixtures.conversation()
+    let (model, sent) = recordingModel([conversation, needsItem("a")])
+    model.selection = "a"
+
+    model.endConversation(conversation, new: false, drop: [])
+    await sent.wait(for: "manager-end")
+    await settle { !model.deleting.contains("m") }
+
+    #expect(model.selection == "a")
+  }
+
+  @Test func aRefusedDeleteClearsDeletingAndKeepsTheSelection() async {
+    let refusal = "Cache work is in a turn or runs a background job."
+    let conversation = EndFixtures.conversation()
+    let (model, _) = recordingModel([conversation]) { op, _ in op == "manager-end" ? refusal : nil }
+    model.selection = "m"
+
+    model.endConversation(conversation, new: false, drop: [])
+    await settle { model.actionError != nil && !model.deleting.contains("m") }
+
+    #expect(model.actionError?.contains(refusal) == true)
+    #expect(!model.deleting.contains("m"))
+    #expect(model.selection == "m")
   }
 
   @Test func endConversationWithNothingToDropNamesNoIdsAndNoCaller() async {

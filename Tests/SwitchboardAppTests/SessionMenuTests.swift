@@ -38,11 +38,6 @@ private func expectedDelete(_ s: SessionSummary) -> SessionMenuAction {
   .delete("Delete \(BoardModel.deletePlan(s).summary)…")
 }
 
-private func isDelete(_ a: SessionMenuAction) -> Bool {
-  if case .delete = a { return true }
-  return false
-}
-
 private func isDeleteSelection(_ a: SessionMenuAction) -> Bool {
   if case .deleteSelection = a { return true }
   return false
@@ -221,8 +216,8 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
     #expect(SessionMenu.actions(for: liveWork(), selectionCount: nil).last == .delete("Delete the session…"))
   }
 
-  @Test(arguments: [SessionKind.manager, .chat, .operator])
-  func offersNoDeleteForASessionThatIsNotWork(_ kind: SessionKind) {
+  @Test(arguments: [SessionKind.chat, .operator])
+  func offersNoDeleteForAChatOrTheOperator(_ kind: SessionKind) {
     let actions = SessionMenu.actions(for: ofKind(kind), selectionCount: nil)
 
     #expect(!actions.contains(where: isDelete))
@@ -260,6 +255,82 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
     s.followup?.started = 1
 
     #expect(SessionMenu.actions(for: s, selectionCount: nil).contains(expectedDelete(s)))
+  }
+}
+
+/// A Manager conversation's row offers "Delete the conversation…", which deletes it through `manager-end`.
+@Suite struct SessionMenuConversationDelete {
+  private static let conversationDelete = SessionMenuAction.delete("Delete the conversation…")
+
+  @Test(arguments: [true, false])
+  func offersDeleteTheConversationLastAfterTheDivider(_ live: Bool) {
+    let actions = SessionMenu.actions(for: ofKind(.manager, live: live), selectionCount: nil)
+
+    #expect(actions.last == Self.conversationDelete)
+    #expect(actions.dropLast().last == .divider)
+  }
+
+  @Test func offersDeleteForAPausedConversation() {
+    var s = ofKind(.manager)
+    s.pause = paused
+
+    #expect(SessionMenu.actions(for: s, selectionCount: nil).contains(Self.conversationDelete))
+  }
+
+  /// Decision 12: the menu copies none of sbd's refusals, so a conversation in a turn still offers Delete.
+  @Test(arguments: [AttentionState.working, .needsYou, .waiting, .done])
+  func offersDeleteForAConversationInAnyState(_ state: AttentionState) {
+    var s = ofKind(.manager)
+    s.state = state
+
+    #expect(SessionMenu.actions(for: s, selectionCount: nil).contains(Self.conversationDelete))
+  }
+
+  /// Decision 13: a conversation in a multi-selection keeps the selection delete, whose count covers work only.
+  @Test func offersTheSelectionDeleteForAConversationInAMultiSelection() {
+    let actions = SessionMenu.actions(for: ofKind(.manager), selectionCount: 2)
+
+    #expect(actions.last == .deleteSelection(count: 2))
+  }
+
+  /// The removal states of the matrix: none, or one of sbd's removal job states.
+  enum RemovalShape: CaseIterable, Sendable, CustomTestStringConvertible {
+    case none, queued, running, failed
+
+    var testDescription: String { "\(self)" }
+
+    var removal: Removal? {
+      let state: Removal.State
+      switch self {
+      case .none: return nil
+      case .queued: state = .queued
+      case .running: state = .running
+      case .failed: state = .failed
+      }
+      var r = Removal(requested: 0, notBefore: 0, worktree: false, branch: false, remoteBranch: false, resolve: [])
+      r.state = state
+      return r
+    }
+  }
+
+  /// Risk 1: `.delete` shows only for a work session under today's rule and for a Manager conversation, and only
+  /// with no removal outside a multi-selection. A group chat and the Operator never get it.
+  @Test(
+    arguments: [SessionKind.work, .manager, .chat, .operator], RemovalShape.allCases)
+  func offersDeleteOnlyForWorkAndConversationsWithNoRemovalOutsideASelection(
+    _ kind: SessionKind, _ removal: RemovalShape
+  ) {
+    for selectionCount in [nil, 3] as [Int?] {
+      var s = ofKind(kind)
+      s.removal = removal.removal
+
+      let deletes = SessionMenu.actions(for: s, selectionCount: selectionCount).filter(isDelete)
+
+      let offered = removal == .none && selectionCount == nil && (kind == .work || kind == .manager)
+      let expected: [SessionMenuAction] =
+        !offered ? [] : kind == .manager ? [Self.conversationDelete] : [expectedDelete(s)]
+      #expect(deletes == expected, "\(kind) \(removal) selection \(String(describing: selectionCount))")
+    }
   }
 }
 
@@ -353,9 +424,11 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
       SessionMenu.actions(for: chatItem("c1", group: "g1"), selectionCount: nil) == [.copyLink, .notes, .pause, .stop])
   }
 
-  @Test func showsOnlyPauseForAManagerConversationThatIsNotRunning() {
+  @Test func showsPauseAndDeleteForAManagerConversationThatIsNotRunning() {
     #expect(
-      SessionMenu.actions(for: ofKind(.manager, live: false), selectionCount: nil) == [.copyLink, .notes, .pause])
+      SessionMenu.actions(for: ofKind(.manager, live: false), selectionCount: nil) == [
+        .copyLink, .notes, .pause, .divider, .delete("Delete the conversation…"),
+      ])
   }
 
   @Test func separatesCleanUpAndDeleteFromSnoozeAndPauseWithADivider() {
@@ -425,6 +498,8 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
     pausedWork.pause = paused
     var liveCleanup = cleanupSession(CleanupStatus(state: .ready))
     liveCleanup.live = true
+    var pausedManager = ofKind(.manager)
+    pausedManager.pause = paused
     return [
       ("live work", liveWork(), nil),
       ("stopped work", stoppedWork(), nil),
@@ -436,6 +511,9 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
       ("live chat", chatItem("c1", group: "g1"), nil),
       ("queued chat", queuedChat, nil),
       ("stopped manager", ofKind(.manager, live: false), nil),
+      ("live manager", ofKind(.manager), nil),
+      ("paused manager", pausedManager, nil),
+      ("multi-selected manager", ofKind(.manager), 2),
       ("live operator", ofKind(.operator), nil),
     ]
   }()
