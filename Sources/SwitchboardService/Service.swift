@@ -532,6 +532,7 @@ public final class Service {
   func route(_ request: Request, origin: RequestOrigin, caller: Caller, hookGone: @escaping @Sendable () -> Bool) throws
     -> Response
   {
+    let request = withCallerAuthor(request, origin: origin, caller: caller)
     switch request.op {
     case "hook":
       return try handleHook(request.args, hookGone: hookGone)

@@ -94,9 +94,9 @@ import Testing
   @Test(arguments: [LinkAuthor.claude, .found])
   func aLinkThatTheUserDidNotAddIsLeftOut(author: LinkAuthor) {
     let artifact = "https://claude.ai/artifact/abc123"
-    let s = summary(links: [link(Self.rfc, title: "Flag evaluations RFC"), link(artifact, title: artifact, by: author)])
+    let g = group(links: [link(Self.rfc, title: "Flag evaluations RFC"), link(artifact, title: artifact, by: author)])
 
-    let text = block(s)
+    let text = block(g)
 
     #expect(text.contains(Self.rfc), "\(text)")
     #expect(!text.contains(artifact), "\(text)")
@@ -104,12 +104,12 @@ import Testing
 
   @Test(arguments: [LinkAuthor.claude, .found])
   func aLinkThatTheUserDidNotAddLeavesTheFingerprintAlone(author: LinkAuthor) {
-    var group = SessionGroup(id: Self.id, name: Self.name, created: 0)
-    let before = GroupContext.fingerprint(group)
+    var g = group()
+    let before = GroupContext.fingerprint(g)
 
-    group.links = [link("https://claude.ai/artifact/abc123", title: "x", by: author)]
+    g.links = [link("https://claude.ai/artifact/abc123", title: "x", by: author)]
 
-    #expect(GroupContext.fingerprint(group) == before)
+    #expect(GroupContext.fingerprint(g) == before)
   }
 
   @Test func theLinksKeepTheirOrder() throws {
