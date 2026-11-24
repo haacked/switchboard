@@ -22,7 +22,7 @@ extension Service {
         let triage = triageAccount(for: op)
         return (triage.key, headlessEnv(session: op, account: triage.account))
       }
-      let account = config.triage.account.map(ClaudeAccount.init(folder:)) ?? activeAccount
+      let account = triageClaudeAccount ?? activeAccount
       return (account.folder, headlessEnv(session: nil, account: account))
     }
     guard quota.hasBudget(account: account) else { throw APIError("no quota is left for \(account)") }

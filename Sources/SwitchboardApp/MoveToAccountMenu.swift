@@ -14,7 +14,8 @@ struct MoveToAccountMenuItems: View {
       Divider()
     }
     ForEach(
-      SessionAccountMenu.entries(for: session, accounts: model.accounts, usage: model.usage, groups: model.groups)
+      SessionAccountMenu.entries(
+        for: session, accounts: model.sessionAccounts, usage: model.usage, groups: model.groups)
     ) { entry in
       Button {
         model.requestAccountMove(session.id, to: entry.folder)
@@ -41,7 +42,7 @@ struct SessionAccountControl: View {
     if let folder = session.account {
       let label = GroupAccountMenu.label(folder, accounts: model.accounts, usage: model.usage)
       Group {
-        if SessionAccountMenu.shows(session, accountCount: model.accounts.count) {
+        if SessionAccountMenu.shows(session, accountCount: model.sessionAccounts.count) {
           Menu {
             MoveToAccountMenuItems(session: session)
           } label: {

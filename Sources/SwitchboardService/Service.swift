@@ -418,6 +418,9 @@ public final class Service {
   /// running claude's queued messages on the state queue.
   public func load() throws {
     loadChosenAccount()
+    for refusal in Account.survey(claudeConfigDirs: config.claudeConfigDirs, codexHomes: config.codexHomes).refusals {
+      logLine("not listing an account: \(refusal)")
+    }
     autoContinueOn = autoContinueSwitch.isOn
     activityOn = activitySwitch.isOn
     loadIssueCache()
@@ -920,7 +923,7 @@ public final class Service {
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
       return .string(try site(of: id).screen(paneName(id, pane), colors: args["colors"]?.bool == true))
-    case "accounts", "account-use", "account-move":
+    case "accounts", "account-use", "account-move", "account-add":
       return try accountRequest(op, args)
     case "mcp":
       return try JSON(encoding: mcpStatus())

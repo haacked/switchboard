@@ -50,7 +50,13 @@ let usage = """
                                   runs it on this Mac. Without --host, it runs
                                   on its parent's host. A remote host takes
                                   no --followup or --account
-    account                       list the Claude accounts and the active one
+    account                       list the Claude and Codex accounts, each with
+                                  its agent, and the active one, which is a
+                                  Claude account. Sessions run only on Claude
+                                  accounts for now
+    account add <name> --agent claude|codex
+                                  make ~/.claude-<name> or ~/.codex-<name> and
+                                  print the command that signs it in
     account use <name|folder> [--move | --new-only]
                                   run new sessions under this account. --move
                                   moves the sessions whose claude is stopped
@@ -627,7 +633,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input",
+      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -748,7 +754,7 @@ func printSession(_ s: SessionSummary) {
     print("  group:   \(s.groupName ?? group) (\(group))\(description)".printable)
   }
   print("  folder:  \(s.cwd)")
-  if let account = s.account { print("  account: \(ClaudeAccount(folder: account).name)") }
+  if let account = s.account { print("  account: \(Account.name(ofFolder: account))") }
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let note = s.branchSwitchNote { print("  warning: \(note)".printable) }

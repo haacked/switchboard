@@ -9,9 +9,12 @@ func usageCommand(_ a: Args) {
   for (i, reading) in readings.enumerated() {
     if i > 0 { print("") }
     let folder = (reading.folder as NSString).abbreviatingWithTildeInPath
-    print(([reading.name, reading.email].compactMap { $0 } + [folder]).joined(separator: " · "))
+    print(
+      ([reading.name, reading.agent.rawValue, reading.email].compactMap { $0 } + [folder]).joined(separator: " · "))
     if let error = reading.error { print("  ✗ \(error)") }
     for limit in reading.limits { print(usageRow(limit)) }
+    if let note = reading.noLimitsNote { print("  \(note)") }
+    if let reported = reading.reported() { print("  \(reported)") }
   }
 }
 

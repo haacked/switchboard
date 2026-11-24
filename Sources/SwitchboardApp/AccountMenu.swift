@@ -16,9 +16,15 @@ struct AccountRow: Identifiable, Equatable {
   var signedOut: Bool { usage?.signedOut == true }
   /// The account's name in a menu that moves sessions to it, which names a signed-out account as such.
   var choiceTitle: String { signedOut ? "\(account.name) (not signed in)" : account.name }
-  /// A click on the row makes the account the one for new sessions.
-  var canChoose: Bool { !account.active && !signedOut }
-  var disabledReason: String? { signedOut ? "New sessions can't use it until it signs in." : nil }
+  /// A click on the row makes the account the one for new sessions. Only an account whose agent runs sessions
+  /// can become that account.
+  var canChoose: Bool { account.agent.runsSessions && !account.active && !signedOut }
+  var disabledReason: String? {
+    guard account.agent.runsSessions else {
+      return "A \(account.agent.displayName) account. \(Agent.onlyClaudeRunsSessions)."
+    }
+    return signedOut ? "New sessions can't use it until it signs in." : nil
+  }
 }
 
 /// The toolbar item for the account that new sessions use. Its tooltip names
@@ -152,7 +158,7 @@ private struct AccountList: View {
     VStack(alignment: .leading, spacing: 6) {
       if let plan = model.movable, !plan.moved.isEmpty {
         let n = plan.moved.count
-        Button("Move \(n) Stopped Session\(n == 1 ? "" : "s") to \(ClaudeAccount(folder: plan.account).name)…") {
+        Button("Move \(n) Stopped Session\(n == 1 ? "" : "s") to \(Account.name(ofFolder: plan.account))…") {
           model.offerMove(plan)
         }
       }
@@ -205,6 +211,7 @@ private struct AccountBlock: View {
       VStack(alignment: .leading, spacing: 3) {
         HStack(spacing: 6) {
           Text(row.account.name).fontWeight(.semibold).foregroundStyle(row.signedOut ? .secondary : .primary)
+          Text(row.account.agent.displayName).foregroundStyle(.secondary)
           if let email = row.usage?.email { Text(email).foregroundStyle(.secondary) }
           if let sessions = row.sessionCount {
             Spacer(minLength: 6)
@@ -234,6 +241,8 @@ private struct AccountBlock: View {
           let text = AccountMenu.limitRow(limit, now: now)
           if limit.isSpent(now: now) { warning(text) } else { Text(text).foregroundStyle(.secondary) }
         }
+        if let note = usage.noLimitsNote { Text(note).foregroundStyle(.secondary) }
+        if let reported = usage.reported(now: now) { Text(reported).foregroundStyle(.secondary) }
         if let error = usage.error {
           Group {
             if usage.failedWithoutLimits { warning(error) } else { Text("✗ \(error)").foregroundStyle(.secondary) }

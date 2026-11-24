@@ -162,6 +162,15 @@ import os
     #expect(prompts.disabledReason == "New sessions can't use it until it signs in.")
   }
 
+  @Test func aCodexAccountCannotBeChosenAndSaysWhy() {
+    let codex = AccountInfo(name: "codex-work", folder: "/c", active: false, sessions: 0, agent: .codex)
+
+    let row = AccountMenu.rows(accounts: accounts + [codex], usage: [])[3]
+
+    #expect(!row.canChoose)
+    #expect(row.disabledReason?.contains(Agent.onlyClaudeRunsSessions) == true)
+  }
+
   @Test func aSignedOutActiveAccountStaysCheckedAndSaysWhy() {
     let usage = [AccountUsage(name: "automation", folder: "/a", error: "not signed in", signedOut: true)]
 
@@ -348,6 +357,18 @@ final class OpLog: Sendable {
 
     model.usage = []
     model.accounts[1].sessions = 0
+    #expect(model.moveTarget == nil)
+  }
+
+  /// Sessions on a Codex account never move to a Claude account, so they offer no move.
+  @Test func sessionsOnACodexAccountOfferNoMove() {
+    let model = offlineModel()
+    model.accounts = [
+      AccountInfo(name: "a", folder: "/a", active: true, sessions: 0),
+      AccountInfo(name: "codex", folder: "/c", active: false, sessions: 2, agent: .codex),
+    ]
+
+    #expect(model.sessionAccounts.map(\.folder) == ["/a"])
     #expect(model.moveTarget == nil)
   }
 }

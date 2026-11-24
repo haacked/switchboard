@@ -30,10 +30,12 @@ struct HoverCardContent: Equatable {
     let repo = s.pr?.repo ?? s.repoFolder.map { ($0 as NSString).lastPathComponent }
     let branch = s.branch == s.name ? nil : s.branch
     let issues = s.issues ?? []
-    let account = s.account.map(ClaudeAccount.init(folder:))
     let meta = [
       s.groupName,
-      account.flatMap { $0 == ClaudeAccount(folder: activeAccount) ? nil : "\($0.name) account" },
+      s.account.flatMap {
+        ClaudeAccount.normalize($0) == ClaudeAccount.normalize(activeAccount)
+          ? nil : "\(Account.name(ofFolder: $0)) account"
+      },
       s.waitsToStart || s.lastActivity <= 0 ? nil : "active \(ago(s.lastActivity, now: now)) ago",
     ]
     details = [

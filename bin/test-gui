@@ -135,7 +135,8 @@ sb() { "$bin_dir/sb" "$@"; }
 
 jq -n --arg claude "$root/Tests/GUI/received-bytes-stub" --arg home "$home" \
   '{claude: $claude, idleStopSeconds: 600, tickSeconds: 0.2, worktreeRoot: "\($home)/worktrees",
-    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}, sessionNames: {enabled: false}}' \
+    shell: "/bin/sh", github: {pollSeconds: 0}, triage: {systemPrompt: ""}, sessionNames: {enabled: false},
+    codexHomes: []}' \
   >"$home/config.json"
 mkdir "$home/work" "$home/shots"
 : >"$home/sbd.log"

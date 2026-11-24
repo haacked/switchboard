@@ -84,6 +84,7 @@ enum PlannedScope {
     "removal-notices", "removal-notice-dismiss", "import", "importable", "accounts",
     "account-use",
     "account-move",
+    "account-add",
     "usage", "mcp",
     "hosts",
     "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",

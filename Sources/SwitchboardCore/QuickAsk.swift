@@ -74,14 +74,16 @@ public enum QuickAsk {
     rest += ["Inbox:"] + (items.isEmpty ? ["- empty"] : items)
     rest.append("Accounts:")
     rest += accounts.map { a in
-      "- \(a.name)\(a.active ? " (active: new sessions use it)" : ""): \(a.folder), \(a.sessions) sessions"
+      let agent = a.agent.runsSessions ? "" : " (\(a.agent.displayName): no session runs on it yet)"
+      return
+        "- \(a.name)\(a.active ? " (active: new sessions use it)" : "")\(agent): \(a.folder), \(a.sessions) sessions"
     }
     rest.append("Groups:")
     if groups.isEmpty { rest.append("- none") }
     rest += groups.map { g in
       var parts = [g.name]
       if let description = g.description.flatMap(firstLine) { parts.append(oneLine(description, max: noteLength)) }
-      if let account = g.account { parts.append("account \(ClaudeAccount(folder: account).name)") }
+      if let account = g.account { parts.append("account \(Account.name(ofFolder: account))") }
       let members = g.sessions.map { names[$0] ?? $0 }
       parts.append(members.isEmpty ? "no sessions" : "sessions: " + members.joined(separator: ", "))
       return "- " + parts.joined(separator: " · ")
@@ -123,7 +125,7 @@ public enum QuickAsk {
     }
     if let pr = s.pr { parts.append("PR #\(pr.number) \(oneLine(pr.title, max: noteLength))") }
     if let group = s.groupName { parts.append("group \(group)") }
-    if let account = s.account { parts.append("account \(ClaudeAccount(folder: account).name)") }
+    if let account = s.account { parts.append("account \(Account.name(ofFolder: account))") }
     if !s.reason.isEmpty { parts.append("reason: \(oneLine(s.reason, max: reasonLength))") }
     if let reply = s.lastReply.flatMap(firstLine) { parts.append("last reply: \(oneLine(reply, max: replyLength))") }
     for note in s.notes {

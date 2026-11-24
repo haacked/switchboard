@@ -90,7 +90,7 @@ extension Service {
             "\(remote.id) of the group is on \(remote.host!): it runs under the Claude login of \(remote.host!). Move it out of the group first"
           )
         }
-        group.account = try resolveAccount(ref).folder
+        group.account = try resolveClaudeAccount(ref).folder
         try saveGroup(group)
         logLine("the group \(id) runs its sessions under \(group.account!)")
       }

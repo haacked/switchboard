@@ -212,6 +212,9 @@
 # dialog before SessionStart, unless the account's .claude.json trusts the
 # folder. See trust_dialog.
 # With STUB_HOOKS=off it runs no hooks, as when every hook fails.
+# Each `claude -p` run appends its CLAUDE_CONFIG_DIR, empty when unset, with a
+# NUL after it to $SB_HOME/headless-accounts.log before it reads the prompt's
+# kind. A -p run does not go to stub-calls.log.
 # Each run appends one record to $SB_HOME/stub-calls.log in one write:
 # CLAUDE_CONFIG_DIR, SSH_AUTH_SOCK, CLAUDE_CODE_AUTO_COMPACT_WINDOW and the
 # arguments, split by tabs. A NUL ends the record, because a prompt can hold
@@ -309,6 +312,7 @@ slack_threads() {
 }
 if [ "${1-}" = -p ]; then
   input=$(cat)
+  printf '%s\0' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/headless-accounts.log"
   # The Slack inputs start with their tags and hold only JSON, so they come first.
   if [[ $input == "<slack-self>"* ]]; then
     printf '%s\0' "$@" >>"$SB_HOME/slack-self-calls.log"

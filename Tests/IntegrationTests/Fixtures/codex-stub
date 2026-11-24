@@ -1,0 +1,58 @@
+#!/bin/bash
+# A stand-in for the codex CLI in sbd's integration tests. It answers only
+# these commands:
+#   codex login status   exits 1 and prints "Not logged in" when
+#                        $CODEX_HOME/stub-signed-out exists, else exits 0
+#                        and prints "Logged in using ChatGPT". It never reads
+#                        auth.json, because a keyring login leaves none.
+#                        When $CODEX_HOME/stub-slow exists, it sleeps 30 s
+#                        first, as a codex that never answers.
+#   codex --version      prints "codex-cli 0.161.0".
+# Anything else, such as the interactive `codex login`, prints a message and
+# exits 2.
+#
+# It requires CODEX_HOME. It refuses a CODEX_HOME in the real user's home, so
+# that a test never reads or writes the user's ~/.codex. The real home comes
+# from the password database, which HOME and CFFIXED_USER_HOME don't change.
+#
+# Each run appends one record to $SB_HOME/codex-calls.log, or to
+# $CODEX_HOME/stub-codex-calls.log when SB_HOME is unset: CODEX_HOME and the
+# arguments, split by a tab. A NUL ends the record.
+
+if [ -z "$CODEX_HOME" ]; then
+  echo "codex-stub: CODEX_HOME is not set" >&2
+  exit 3
+fi
+real_home=$(eval echo "~$(id -un)")
+case "$CODEX_HOME" in
+"$real_home"/.codex | "$real_home"/.codex/* | "$real_home"/.codex-*)
+  echo "codex-stub: refusing the user's own $CODEX_HOME" >&2
+  exit 3
+  ;;
+esac
+
+log="${SB_HOME:+$SB_HOME/codex-calls.log}"
+log="${log:-$CODEX_HOME/stub-codex-calls.log}"
+printf '%s\t%s\0' "$CODEX_HOME" "$*" >>"$log"
+
+case "$*" in
+"login status")
+  if [ -e "$CODEX_HOME/stub-slow" ]; then
+    exec sleep 30
+  fi
+  if [ -e "$CODEX_HOME/stub-signed-out" ]; then
+    echo "Not logged in" >&2
+    exit 1
+  fi
+  echo "Logged in using ChatGPT" >&2
+  exit 0
+  ;;
+"--version")
+  echo "codex-cli 0.161.0"
+  exit 0
+  ;;
+*)
+  echo "codex-stub: unsupported: $*" >&2
+  exit 2
+  ;;
+esac

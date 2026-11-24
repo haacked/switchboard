@@ -136,7 +136,7 @@ private func printLinks(_ g: GroupSummary) {
 }
 
 /// Such as `account: personal (/Users/me/.claude-personal)`.
-private func accountLine(_ folder: String) -> String { "account: \(ClaudeAccount(folder: folder).name) (\(folder))" }
+private func accountLine(_ folder: String) -> String { "account: \(Account.name(ofFolder: folder)) (\(folder))" }
 
 private func printGroups(_ list: GroupList) {
   if list.groups.isEmpty && list.ungrouped.isEmpty {

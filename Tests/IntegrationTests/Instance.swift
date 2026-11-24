@@ -40,6 +40,7 @@ final class Instance {
     override ?? URL(fileURLWithPath: testBundle).deletingLastPathComponent().path
   }
   static let stub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/claude-stub").path
+  static let codexStub = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/codex-stub").path
   static let slowShell = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/slow-shell").path
   static let reap = root.appendingPathComponent("Tests/IntegrationTests/Fixtures/reap").path
 
@@ -91,12 +92,16 @@ final class Instance {
   /// panes run /bin/sh by default, because a login shell with the user's
   /// setup can take 1.5 s to start, and the tests start dozens of panes at once.
   /// Each account is a Claude config folder that this creates in the home.
+  /// Each Codex account is an empty folder that this creates in the home.
   /// The config lists only those, so a test never reads the user's accounts.
+  /// The config names the codex stub as `codex`, so a test never runs the
+  /// user's codex.
   /// The GitHub poller and the usage reader run only when a test asks, and the
   /// Depot poller is off.
   init(
     idleStopSeconds: Int = 600, testClock: Bool = true, shell: String = "/bin/sh", accounts: [String] = [],
-    inheriting: Inherited = .scratch, config extra: [String: JSON] = [:], startingSbd: Bool = true
+    codexAccounts: [String] = [], inheriting: Inherited = .scratch, config extra: [String: JSON] = [:],
+    startingSbd: Bool = true
   ) throws {
     Blocking.requireSlot()
     _ = Instance.watcher
@@ -117,11 +122,16 @@ final class Instance {
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
       FileManager.default.createFile(atPath: "\(folder)/.claude.json", contents: Data("{}".utf8))
     }
+    let codexFolders = codexAccounts.map { "\(path)/\($0)" }
+    for folder in codexFolders {
+      try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    }
     let config: [String: JSON] = [
       "claude": .string(Instance.stub), "idleStopSeconds": .number(Double(idleStopSeconds)),
       "tickSeconds": .number(Instance.tickSeconds),
       "worktreeRoot": .string("\(home.path)/worktrees"), "testClock": .bool(testClock), "shell": .string(shell),
       "claudeConfigDirs": .array(folders.map(JSON.string)), "github": ["pollSeconds": 0],
+      "codexHomes": .array(codexFolders.map(JSON.string)), "codex": .string(Instance.codexStub),
       // No test reaches the real Depot API. DepotTests point sbd at a FakeDepot.
       "depot": ["enabled": false],
       // No test polls Slack threads by accident. SlackThreadPollTests turn the poll on.
@@ -182,6 +192,8 @@ final class Instance {
     // sbd inherits an account, as it does from a user who exports one. A test
     // can then tell the account that sbd sets from the one it inherited.
     env["CLAUDE_CONFIG_DIR"] = inheritedAccount
+    // A runner's own CODEX_HOME must never reach sbd or a stub.
+    env["CODEX_HOME"] = nil
     // A fixed agent lets a test tell sbd's own SSH agent from a terminal's.
     env["SSH_AUTH_SOCK"] = sbdAgent
     // A runner that exports its own window would otherwise reach every stub claude.
@@ -277,6 +289,7 @@ final class Instance {
     env["SB_HOME"] = home.path
     env["CLAUDECODE"] = nil
     env["SB_SESSION_ID"] = nil
+    env["CODEX_HOME"] = nil
     env.merge(extra) { $1 }
     return env
   }

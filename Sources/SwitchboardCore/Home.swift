@@ -90,6 +90,8 @@ public struct Home: Sendable {
 public struct Config: Codable, Equatable, Sendable {
   /// The claude command. A test points it at a stub.
   public var claude: String = "claude"
+  /// The codex command, which sbd runs for `codex login status`. A test points it at a stub.
+  public var codex: String = "codex"
   /// How long a session sits idle after its turn ends before sbd stops claude.
   public var idleStopSeconds: Int = 900
   /// The most claude processes that may run at once. Further starts queue.
@@ -171,6 +173,9 @@ public struct Config: Codable, Equatable, Sendable {
   /// The Claude config folders whose sessions `sb import` lists, or nil for
   /// `ClaudeAccount.discover()`. ~/.claude means Claude's default account.
   public var claudeConfigDirs: [String]?
+  /// The Codex homes that sbd lists as Codex accounts, or nil for each
+  /// ~/.codex and ~/.codex-* folder. An entry need not be named like ~/.codex-*.
+  public var codexHomes: [String]?
   public var github = GitHubSettings()
   public var depot = DepotSettings()
   public var trunk = TrunkSettings()
@@ -196,12 +201,14 @@ public struct Config: Codable, Equatable, Sendable {
   public init() {}
 
   enum CodingKeys: String, CodingKey {
-    case claude, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell, claudeArgs,
+    case claude, codex, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell,
+      claudeArgs,
       autoMode, env
     case testClock, machineLog, hostWaitSeconds, pasteSettleSeconds, stopWaitSeconds, reviewTimeoutSeconds, mcpServers,
       ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
       cleanupDeletes, supacode, removalDelaySeconds, conversationHintTokens
-    case claudeConfigDirs, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket, slack, planUpdates,
+    case claudeConfigDirs, codexHomes, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket,
+      slack, planUpdates,
       quickAsk, managerSkills, sessionNames
     case manager
     case issues, `operator`
@@ -243,6 +250,7 @@ public struct Config: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = Config()
     claude = try c.decodeIfPresent(String.self, forKey: .claude) ?? d.claude
+    codex = try c.decodeIfPresent(String.self, forKey: .codex) ?? d.codex
     idleStopSeconds = try c.decodeIfPresent(Int.self, forKey: .idleStopSeconds) ?? d.idleStopSeconds
     tickSeconds = try c.decodeIfPresent(Double.self, forKey: .tickSeconds) ?? d.tickSeconds
     liveCap = try c.decodeIfPresent(Int.self, forKey: .liveCap) ?? d.liveCap
@@ -301,6 +309,7 @@ public struct Config: Codable, Equatable, Sendable {
     testTrashOtherVolume =
       try c.decodeIfPresent(Bool.self, forKey: .testTrashOtherVolume) ?? d.testTrashOtherVolume
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
+    codexHomes = try c.decodeIfPresent([String].self, forKey: .codexHomes)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
     depot = try c.decodeIfPresent(DepotSettings.self, forKey: .depot) ?? d.depot
     trunk = try c.decodeIfPresent(TrunkSettings.self, forKey: .trunk) ?? d.trunk

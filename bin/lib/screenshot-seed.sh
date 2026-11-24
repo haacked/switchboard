@@ -36,7 +36,7 @@ STUB
 
   jq -n --arg home "$home" --arg account "$CLAUDE_CONFIG_DIR" --argjson port "$(cat "$home/usage.port")" '{
     claude: "\($home)/bin/claude", shell: "/bin/sh", env: {CLAUDE_CONFIG_DIR: $account},
-    claudeConfigDirs: ($ARGS.positional | map("\($home)/.claude-\(.)")),
+    claudeConfigDirs: ($ARGS.positional | map("\($home)/.claude-\(.)")), codexHomes: [],
     worktreeRoot: "\($home)/worktrees", repoRoots: ["\($home)/dev"],
     followupsFile: "\($home)/followups.md", idleStopSeconds: 86400, snapshotEvery: 0,
     github: {pollSeconds: 0, gh: "/usr/bin/false", url: "http://127.0.0.1:9"},

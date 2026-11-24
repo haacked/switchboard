@@ -9,9 +9,10 @@ import SwitchboardCore
 extension Service {
   static let rememberMs: Int64 = 24 * 3600 * 1000
 
-  /// The accounts whose sessions sbd lists.
+  /// The accounts that `claudeConfigDirs` and `codexHomes` list, or that discovery finds. sbd lists the Claude
+  /// accounts' sessions.
   var accounts: [Account] {
-    (config.claudeConfigDirs?.map(ClaudeAccount.init(folder:)) ?? ClaudeAccount.discover()).map(Account.claude)
+    Account.listed(claudeConfigDirs: config.claudeConfigDirs, codexHomes: config.codexHomes)
   }
 
   /// The sessions that Switchboard doesn't have and that run in a linked

@@ -68,7 +68,7 @@ struct GeneralSettings: View {
         .font(.caption).foregroundStyle(.secondary)
       }
       Section {
-        let rows = AccountMenu.rows(accounts: model.accounts, usage: model.usage)
+        let rows = AccountMenu.rows(accounts: model.sessionAccounts, usage: model.usage)
         if rows.isEmpty {
           LabeledContent("Account for new sessions") { Text("Not listed yet").foregroundStyle(.secondary) }
         } else {

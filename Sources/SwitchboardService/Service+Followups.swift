@@ -135,18 +135,21 @@ extension Service {
   /// so `rm`, `followup rm`, another start, and the trigger leave the
   /// follow-up alone.
   func startFollowup(_ args: JSON) throws -> SessionSummary {
-    let session: Session = try queue.sync {
+    let (session, account): (Session, String) = try queue.sync {
       let id = try lookup(args)
       let s = entries[id]!.session
       guard s.waitsToStart else { throw APIError("\(mention(id)) isn't a follow-up that waits to start") }
+      let account = followupAccount(s)
+      if let name = codexName(account) { throw APIError(Self.codexRefusal(name)) }
       guard starting.insert(id).inserted else { throw APIError("\(mention(id)) is starting") }
-      return s
+      return (s, account)
     }
     defer { _ = queue.sync { starting.remove(session.id) } }
-    return try start(session, args)
+    return try start(session, account: account, args)
   }
 
-  private func start(_ session: Session, _ args: JSON) throws -> SessionSummary {
+  /// Starts the follow-up under `account`, which `startFollowup` checked.
+  private func start(_ session: Session, account: String, _ args: JSON) throws -> SessionSummary {
     let repo =
       try args["path"]?.string.map { ($0.expandingTilde as NSString).standardizingPath }
       ?? checkout(of: session.followup?.repository)
@@ -169,7 +172,7 @@ extension Service {
         s.branch = folder.branch
         s.repo = folder.repo
         s.model = SessionModel.stored(kind: s.kind, requested: s.model, workModel: config.model)
-        s.claudeConfigDir = accountGroupForNew(s)?.account ?? s.claudeConfigDir ?? activeAccount.folder
+        s.claudeConfigDir = account
         s.done = false
         s.followup?.started = nowMs()
       }

@@ -34,7 +34,7 @@ See [Groups](docs/groups.md) and [The Manager](docs/manager.md).
 
 ### Usage across Claude accounts
 
-The toolbar's gauge button names the active account and its 5-hour and weekly usage in its tooltip, and opens the account menu. The menu lists every signed-in account with its sessions and limits, and a click makes it the account for new sessions. A session keeps its account until you move it.
+The toolbar's gauge button names the active account and its 5-hour and weekly usage in its tooltip, and opens the account menu. The menu lists every signed-in account with its sessions and limits, and a click makes it the account for new sessions. A session keeps its account until you move it. Codex accounts (`~/.codex` and `~/.codex-*`) are listed too, with the limits from their newest Codex session. `sb account add <name> --agent codex` makes one and prints the command that signs it in. Sessions run only on Claude accounts for now.
 
 ![The account menu, listing three Claude accounts with their session counts and their 5-hour and weekly usage](docs/images/accounts.png)
 
