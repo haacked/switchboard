@@ -36,6 +36,8 @@ private let replyURL = LinkFixtures.slackReply
 private let ch = LinkFixtures.channel
 private let rootTs = LinkFixtures.rootTs
 private let replyTs = LinkFixtures.replyTs
+/// The time that the `openTime` tests take as now. Test arguments can't read a suite's static members.
+private let openNow: Int64 = 1_800_000_000_000
 
 /// How `SessionFacts.apply` folds prompts and Slack sends into `links`: one entry per target key, in first-sighting
 /// order, each with the first sighting's URL and time.
@@ -514,12 +516,64 @@ extension SessionLinkFactsTests {
       #expect(f.links.isEmpty)
     }
 
+    /// sbd records the Open after the app's queue sends it, so the event's `at` holds the time of the click.
+    @Test func anOpenCountsAtItsClickTime() {
+      let f = facts([event("link-opened", 2000, ["link": "l1", "key": .string(Self.key), "at": 1500])])
+
+      #expect(f.linkOpened[Self.key] == 1500)
+    }
+
+    @Test func aLaterEventWithAnOlderClickKeepsTheNewerOpen() {
+      let older: [String: JSON] = ["link": "l1", "key": .string(Self.key), "at": 1800]
+      let f = facts([opened(2000), event("link-opened", 3000, older)])
+
+      #expect(f.linkOpened[Self.key] == 2000)
+    }
+
+    @Test(arguments: [JSON.string("1500"), 1500.5, .null])
+    func anOpenWhoseAtIsNotAWholeNumberCountsAtTheEventsTime(_ at: JSON) {
+      let f = facts([event("link-opened", 2000, ["link": "l1", "key": .string(Self.key), "at": at])])
+
+      #expect(f.linkOpened[Self.key] == 2000)
+    }
+
     @Test func theOpensSurviveEncoding() throws {
       let f = facts([opened(2000), opened(3000, key: Self.otherKey, link: "l2")])
 
       let decoded = try JSONCoding.decode(SessionFacts.self, from: try JSONCoding.encode(f))
 
       #expect(decoded.linkOpened == f.linkOpened)
+    }
+  }
+
+  /// `ExternalLink.openTime` bounds a `link-open` request's `at` to the `openSkewMs` before now.
+  @Suite struct OpenTime {
+    @Test func noAtGivesNow() throws {
+      #expect(try ExternalLink.openTime(nil, now: openNow) == openNow)
+    }
+
+    @Test(arguments: [Int64(0), 2_000, ExternalLink.openSkewMs])
+    func anAtWithinTheSkewIsKept(_ before: Int64) throws {
+      let at = openNow - before
+
+      #expect(try ExternalLink.openTime(.number(Double(at)), now: openNow) == at)
+    }
+
+    @Test(arguments: [ExternalLink.openSkewMs + 1, 365 * 24 * 3_600_000, openNow, openNow + 1])
+    func anAtBeforeTheSkewGivesTheSkewsStart(_ before: Int64) throws {
+      let at = JSON.number(Double(openNow - before))
+
+      #expect(try ExternalLink.openTime(at, now: openNow) == openNow - ExternalLink.openSkewMs)
+    }
+
+    @Test(arguments: [Int64(1), 3_600_000, 1_000_000_000_000_000])
+    func anAtAfterNowGivesNow(_ after: Int64) throws {
+      #expect(try ExternalLink.openTime(.number(Double(openNow + after)), now: openNow) == openNow)
+    }
+
+    @Test(arguments: [JSON.string("1800000000000"), 1_800_000_000_000.5, 1e300, .null, .bool(true), [:]])
+    func anAtThatIsNotAWholeNumberThrows(_ at: JSON) {
+      #expect(throws: APIError.self) { try ExternalLink.openTime(at, now: openNow) }
     }
   }
 

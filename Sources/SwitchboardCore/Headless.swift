@@ -180,10 +180,18 @@ public enum Headless {
   /// `--output-format stream-json` ends with it on the last line, as an object whose `type` is `result`.
   public static func envelope(_ output: String) -> [String: JSON]? {
     if let whole = JSON.parse(output)?.object { return whole }
-    guard let last = output.split(whereSeparator: \.isNewline).last(where: { !$0.allSatisfy(\.isWhitespace) }),
+    guard let last = lines(output).last(where: { !$0.allSatisfy(\.isWhitespace) }),
       let line = JSON.parse(String(last))?.object, line["type"]?.string == "result"
     else { return nil }
     return line
+  }
+
+  /// The lines of `claude -p` output, split at each line feed as `readStdout` splits them, without a carriage return
+  /// before the line feed. JSON leaves U+2028, U+2029, and U+0085 raw inside a string, so a split at every Unicode
+  /// line break would cut a line in two.
+  static func lines(_ output: String) -> [Substring] {
+    // Swift reads a carriage return and a line feed as one Character.
+    output.split(whereSeparator: { $0 == "\n" || $0 == "\r\n" })
   }
 
   /// The JSON object that the envelope of `claude -p` answers with.

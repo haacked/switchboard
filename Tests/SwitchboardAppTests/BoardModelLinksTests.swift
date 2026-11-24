@@ -81,8 +81,8 @@ private let groupSlackLink = ExternalLink(
     model.openLink(row)
     await sent.wait(for: "link-open")
 
-    let expected: [String: JSON] = ["session": "s1", "link": .string(link.id), "by": "you"]
-    #expect(sent.value.first { $0.op == "link-open" }?.args == expected)
+    let args = try #require(sent.value.first { $0.op == "link-open" }?.args)
+    #expect(args.filter { $0.key != "at" } == ["session": "s1", "link": .string(link.id), "by": "you"])
   }
 
   @Test func openOnAGroupListsSessionRowSendsLinkOpenWithTheRowsSession() async throws {
@@ -92,7 +92,22 @@ private let groupSlackLink = ExternalLink(
     model.openLink(row)
     await sent.wait(for: "link-open")
 
-    #expect(sent.value.first { $0.op == "link-open" }?.args == ["session": "s2", "link": "fabc12", "by": "you"])
+    let args = try #require(sent.value.first { $0.op == "link-open" }?.args)
+    #expect(args.filter { $0.key != "at" } == ["session": "s2", "link": "fabc12", "by": "you"])
+  }
+
+  /// The request waits on the model's queue, so it carries the time of the click for sbd to record.
+  @Test func openSendsTheTimeOfTheClick() async throws {
+    let row = try #require(LinkRows(session: session("s1", links: [Self.found]), now: now).rows.first)
+    let (model, sent) = recordingModel()
+
+    let before = nowMs()
+    model.openLink(row)
+    let after = nowMs()
+    await sent.wait(for: "link-open")
+
+    let at = try #require(sent.value.first { $0.op == "link-open" }?.args["at"]?.int)
+    #expect((before...after).contains(Int64(at)))
   }
 
   @Test func openOnASessionRowSendsOneRequest() async throws {

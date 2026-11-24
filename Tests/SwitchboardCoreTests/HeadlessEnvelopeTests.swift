@@ -54,6 +54,20 @@ private let assistantLine = """
 /// the envelope as the last line.
 private func stream(_ envelope: String) -> String { "\(initLine)\n\(assistantLine)\n\(envelope)" }
 
+/// The line breaks that JSON leaves raw inside a string.
+private let lineBreaks = "\u{2028}\u{2029}\u{85}"
+
+/// A tool_result line whose text holds the raw line breaks.
+private let lineBreakLine = """
+  {"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","content":"a\(lineBreaks)b"}]}}
+  """
+
+/// An envelope whose answer holds the raw line breaks.
+private let lineBreakEnvelope = """
+  {"type":"result","subtype":"success","is_error":false,"result":"{\\"a\\":\\"x\(lineBreaks)y\\"}",\
+  "structured_output":{"a":"x\(lineBreaks)y"},"usage":{"input_tokens":2,"output_tokens":3}}
+  """
+
 /// Every envelope shape that the existing callers read.
 private let envelopes = [withModelUsage, withOnlyUsage, isError, withEscapedText]
 
@@ -112,6 +126,22 @@ private let outputs = envelopes + [notJSON]
     let parsed = try #require(JSON.parse(isError)?.object)
 
     #expect(Headless.envelope(stream(withModelUsage) + isError) == parsed)
+  }
+
+  /// A split at every Unicode line break would cut both the tool_result line and the envelope.
+  @Test func anEnvelopeHoldingUnicodeLineBreaksAfterALineHoldingThemIsTheEnvelope() throws {
+    let parsed = try #require(JSON.parse(lineBreakEnvelope)?.object)
+    let text = "\(initLine)\n\(lineBreakLine)\n\(lineBreakEnvelope)\n"
+
+    #expect(Headless.envelope(text) == parsed)
+    #expect(try Headless.answer(text)["a"] == .string("x\(lineBreaks)y"))
+  }
+
+  @Test func aStreamWithCarriageReturnsGivesTheEnvelope() throws {
+    let parsed = try #require(JSON.parse(withModelUsage)?.object)
+    let text = "\(initLine)\r\n\(assistantLine)\r\n\(withModelUsage)\r\n"
+
+    #expect(Headless.envelope(text) == parsed)
   }
 
   @Test func aStreamWhoseLastLineIsNotAResultGivesNil() {

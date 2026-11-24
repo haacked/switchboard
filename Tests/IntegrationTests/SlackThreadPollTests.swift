@@ -410,6 +410,32 @@ extension Instance {
     #expect(try status(sbd, s.id)?["newReply"]?.bool == true)
   }
 
+  /// The app sends `link-open` through a queue with `at`, the time of the click. A reply posted between the click and
+  /// the request still counts as new.
+  @Test func anOpenCountsFromTheClick() throws {
+    let sbd = try Instance(config: Self.config)
+    let s = try sbd.new(name: "flags-cache")
+    let link = try addLink(sbd, s.id, SlackExample.root)
+    let linkId = try #require(link["id"]?.string)
+    let first = SlackReply(ts: Self.ts(try time(link) + 60_000), user: Self.other, name: "Alice")
+    try sbd.writeSlackThread([first])
+    _ = try pollAndRead(sbd, s.id)
+    let now = try sbd.now()
+    let between = SlackReply(ts: Self.ts(now - 30_000), user: Self.other, name: "Alice")
+    try sbd.writeSlackThread([first, between])
+
+    _ = try sbd.client.call(
+      "link-open",
+      ["session": .string(s.id), "link": .string(linkId), "by": "you", "at": .number(Double(now - 60_000))])
+    let read = try pollAndRead(sbd, s.id)
+
+    #expect(read["replies"]?.int == 2)
+    #expect(read["newReply"]?.bool == true)
+    let refusal = failure(
+      sbd, "link-open", ["session": .string(s.id), "link": .string(linkId), "by": "you", "at": "soon"])
+    #expect(refusal.contains("at must be"), "\(refusal)")
+  }
+
   @Test func acknowledgingClearsTheMark() throws {
     // The idle stop stays past the clock moves, so the session keeps its Inbox item.
     let sbd = try Instance(idleStopSeconds: 7200, config: Self.config)

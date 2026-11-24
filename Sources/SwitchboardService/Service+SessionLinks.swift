@@ -34,16 +34,21 @@ extension Service {
   }
 
   /// `link-open` records that the user opened one of the session's links from Switchboard. A Slack link's new-reply
-  /// mark then stays off until a newer reply. Only the user acts, so a session can't hide its own marks.
+  /// mark then stays off until a newer reply. Only the user acts, so a session can't hide its own marks. `at` is the
+  /// time of the click, which `ExternalLink.openTime` bounds. The event keeps it in its data, because a time below
+  /// the session's last event would break the order of the session's event times.
   func linkOpenRequest(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
     try requireUser(args, "Only you can open a link.")
+    let at = try ExternalLink.openTime(args["at"], now: nowMs())
     let e = entries[id]!
     let linkId = args["link"]?.string ?? ""
     guard let link = e.session.links(found: e.facts.links).first(where: { $0.id == linkId }) else {
       throw APIError("\(e.session.name) has no link \(linkId)")
     }
-    record(id, "link-opened", ["link": .string(link.id), "key": .string(ExternalLink.pageKey(link.url))])
+    record(
+      id, "link-opened",
+      ["link": .string(link.id), "key": .string(ExternalLink.pageKey(link.url)), "at": .number(Double(at))])
     return try JSON(encoding: summary(id, for: origin))
   }
 }

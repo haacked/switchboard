@@ -348,6 +348,31 @@ private enum PollFx {
 /// The suites nest under one name, so `--filter SlackPollTests` runs them all.
 @Suite struct SlackPollTests {}
 
+extension SlackPollTests {
+  /// `slack` in config.json. sbd turns `pollSeconds` into whole milliseconds, so a value past the longest interval
+  /// keeps the default 1200 and leaves the other keys alone.
+  @Suite struct Settings {
+    func config(_ seconds: String) throws -> Config {
+      try JSONCoding.decode(
+        Config.self, from: #"{"liveCap": 7, "slack": {"pollSeconds": \#(seconds), "model": "sonnet"}}"#)
+    }
+
+    @Test(arguments: [("0", 0.0), ("30", 30), ("1200", 1200), ("259200", 259_200), ("-5", -5), ("null", 1200)])
+    func aValueUpToTheLongestIntervalIsKept(_ text: String, _ expected: Double) throws {
+      #expect(try config(text).slack.pollSeconds == expected)
+    }
+
+    @Test(arguments: ["259201", "1e16", "1e20", "1e308"])
+    func aValuePastTheLongestIntervalKeepsTheDefaultAndTheRestOfTheConfig(_ text: String) throws {
+      let config = try config(text)
+
+      #expect(config.slack.pollSeconds == 1200)
+      #expect(config.slack.model == "sonnet")
+      #expect(config.liveCap == 7)
+    }
+  }
+}
+
 // MARK: - arguments
 
 extension SlackPollTests {
@@ -948,6 +973,24 @@ extension SlackPollTests {
 
       let name = try #require(got.read?.name)
       #expect(!name.contains { $0.isNewline }, "\(name.debugDescription)")
+    }
+
+    /// JSON leaves U+2028, U+2029, and U+0085 raw inside a string, so they must not cut the tool_result's line.
+    @Test func aReplyHoldingUnicodeLineBreaksIsRead() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, body: "one\u{2028}two\u{2029}three\u{85}four")
+      let line = PollFx.toolResult(id: b.id, text: b.resultText)
+      try #require(["\u{2028}", "\u{2029}", "\u{85}"].allSatisfy { line.unicodeScalars.contains($0) }, "\(line)")
+
+      #expect(try PollFx.outcomeOfB(b) == .read(PollFx.readA))
+    }
+
+    @Test func aStreamWithCarriageReturnsIsRead() throws {
+      let output = PollFx.stream([PollFx.goodA(), PollFx.goodB()]).replacingOccurrences(of: "\n", with: "\r\n")
+
+      let got = try PollFx.outcomes(output, asked: [PollFx.askA, PollFx.askB])
+
+      #expect(got == [PollFx.keyA: .read(PollFx.readA), PollFx.keyB: .read(PollFx.readA)])
     }
 
     @Test func aLongNameIsCutToEightyCharacters() throws {

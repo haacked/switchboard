@@ -6,6 +6,9 @@ public struct SlackSettings: Codable, Equatable, Sendable {
   public var pollSeconds: Double = 1200
   /// The model of the poll and the profile call.
   public var model: String = "haiku"
+  /// The longest `pollSeconds`, the length of a thread's watch. A longer interval could let a whole watch pass with
+  /// no read.
+  public static let maxPollSeconds = Double(SlackWatch.windowMs / 1000)
 
   public init() {}
 
@@ -13,6 +16,12 @@ public struct SlackSettings: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = SlackSettings()
     pollSeconds = try c.decodeIfPresent(Double.self, forKey: .pollSeconds) ?? d.pollSeconds
+    // sbd turns the value into whole milliseconds, which stops the process for a value that is not finite or is
+    // past Int64's range.
+    if !pollSeconds.isFinite || pollSeconds > Self.maxPollSeconds {
+      logLine("skipping slack.pollSeconds: its value must be a number of seconds up to \(Int(Self.maxPollSeconds))")
+      pollSeconds = d.pollSeconds
+    }
     model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
   }
 }
@@ -264,7 +273,7 @@ public enum SlackPoll {
       var order: [String] = []
       var uses: [String: (name: String, input: [String: JSON])] = [:]
       var results: [String: String] = [:]
-      for line in output.split(whereSeparator: \.isNewline) {
+      for line in Headless.lines(output) {
         guard let o = JSON.parse(String(line))?.object else { continue }
         let blocks = o["message"]?["content"]?.array ?? []
         switch o["type"]?.string {
