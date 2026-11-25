@@ -101,7 +101,7 @@ enum PlannedScope {
     "followup-rm", "followup-import", "docket-start", "merge", "review", "ack", "resolved-todos",
     "dependency-resolved", "activity", "activity-report", "activity-clear", "live-next", "draft-post", "draft-check",
     "issues", "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm",
-    "issues-settings", "issues-dismiss",
+    "issues-settings", "issues-dismiss", "link-open",
   ]
 
   /// The ops that `handleHostRequest` sends on their own path before the table: `hook` to `handleHostHook`, and

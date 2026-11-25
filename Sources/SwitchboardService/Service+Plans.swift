@@ -186,7 +186,8 @@ extension Service {
   /// The generated table for the plan.
   func planTable(_ plan: PlanDocument) -> String {
     let rowFollowups = planRowFollowups()
-    return Plans.table(planSessions(plan).map { summary($0.id, rowFollowups: rowFollowups) })
+    let watched = watchedSlackKeys(now: nowMs())
+    return Plans.table(planSessions(plan).map { summary($0.id, rowFollowups: rowFollowups, watchedSlack: watched) })
   }
 
   /// The plans of a group, or nil when it has none. `rowFollowups` defaults to

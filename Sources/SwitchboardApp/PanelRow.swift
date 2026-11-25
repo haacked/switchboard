@@ -12,6 +12,8 @@ struct PanelRow<Actions: View>: View {
     var url: URL
     var help: String
     var label: String
+    /// The Open button runs it before it opens the URL.
+    var action: (() -> Void)? = nil
   }
 
   var icon: Icon?
@@ -35,10 +37,13 @@ struct PanelRow<Actions: View>: View {
           .help(titleHelp ?? "")
         Spacer(minLength: 0)
         if let open {
-          Button("Open") { NSWorkspace.shared.open(open.url) }
-            .buttonStyle(.link)
-            .help(open.help)
-            .accessibilityLabel(open.label)
+          Button("Open") {
+            open.action?()
+            NSWorkspace.shared.open(open.url)
+          }
+          .buttonStyle(.link)
+          .help(open.help)
+          .accessibilityLabel(open.label)
         }
       }
       HStack(alignment: .firstTextBaseline, spacing: 8) {

@@ -16,6 +16,8 @@ public enum Prompt: String, CaseIterable, Sendable {
   case sessionNamer = "session-namer"
   case planUpdates = "plan-updates"
   case triageCard = "triage-card"
+  case slackThreads = "slack-threads"
+  case slackSelf = "slack-self"
 
   public var fileName: String { rawValue + ".md" }
 
@@ -40,6 +42,10 @@ public enum Prompt: String, CaseIterable, Sendable {
       return ["ciFailureMaxMessage": String(OperatorJudge.CIFailure.maxMessage)]
     case .planUpdates:
       return ["planUpdatesCellLength": String(PlanUpdates.cellLength)]
+    case .slackThreads:
+      return ["slackPollReadTool": SlackPoll.readTool]
+    case .slackSelf:
+      return ["slackPollProfileTool": SlackPoll.profileTool]
     case .triageCard:
       return Self.triageLimits.merging([
         "pendingDecisionDetailLength": String(PendingDecision.detailLength),

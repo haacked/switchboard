@@ -55,6 +55,22 @@ struct ContentView: View {
   static func viewLabel(_ name: String, _ count: Int) -> String { count > 0 ? "\(name) \(count)" : name }
 
   @EnvironmentObject var model: BoardModel
+  @State private var sidebar = SidebarFit(ruleHidLastRun: UserDefaults.standard.bool(forKey: SidebarFit.autoHiddenKey))
+  @State private var windowWidth: CGFloat = 0
+
+  private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
+    Binding(get: { sidebar.visibility }, set: { sidebar.userSet($0) })
+  }
+
+  /// Shows or hides the sidebar for the window's width and the detail column's view. The change does not animate. A
+  /// view switch in a narrow window therefore does not slide the sidebar each time.
+  private func fitSidebar() {
+    var transaction = Transaction()
+    transaction.disablesAnimations = true
+    withTransaction(transaction) {
+      sidebar.update(windowWidth: windowWidth, isListDetail: model.showsListDetail)
+    }
+  }
 
   private var confirmingCleanupOffer: CleanupOffer? {
     model.board.first { $0.id == model.confirmingCleanup }.flatMap(CleanupOffer.init)
@@ -69,8 +85,9 @@ struct ContentView: View {
   }
 
   var body: some View {
+    let column = model.detailColumn
     let deleteConfirmation = model.confirmingDelete.map(DeleteConfirmation.init)
-    return NavigationSplitView {
+    return NavigationSplitView(columnVisibility: sidebarVisibility) {
       Sidebar()
         .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: Self.sidebarIdealWidth, max: 420)
     } detail: {
@@ -81,21 +98,15 @@ struct ContentView: View {
         if let error = model.actionError {
           WarningBanner(error) { Button("Dismiss") { model.actionError = nil } }
         }
-        if model.showsMultiSelectionPane {
-          MultiSelectionView()
-        } else if let s = model.selected, let f = s.followup, f.started == nil {
-          FollowupView(session: s, followup: f).id(s.id)
-        } else if let s = model.selected, let d = s.docket {
-          DocketView(session: s, docket: d).id(s.id)
-        } else if let s = model.selected {
-          SessionView(session: s).id(s.id)
-        } else {
-          switch model.mainView {
-          case .inbox: InboxView()
-          case .board: BoardView()
-          case .issues: IssuesView()
-          case .loops: LoopsView()
-          }
+        switch column {
+        case .multiSelection: MultiSelectionView()
+        case .followup(let s, let f): FollowupView(session: s, followup: f).id(s.id)
+        case .docket(let s, let d): DocketView(session: s, docket: d).id(s.id)
+        case .session(let s): SessionView(session: s).id(s.id)
+        case .main(.inbox): InboxView()
+        case .main(.board): BoardView()
+        case .main(.issues): IssuesView()
+        case .main(.loops): LoopsView()
         }
       }
       // The delete dialog is on the split view. Two dialogs on one view can hide each other.
@@ -110,6 +121,15 @@ struct ContentView: View {
       .mainToolbar()
     }
     .removingToolbarTitle()
+    // The rule reads only whether the window is narrower than `collapseBelow`. Wider widths need no update.
+    .onGeometryChange(for: CGFloat.self) {
+      min($0.size.width, SidebarFit.collapseBelow)
+    } action: {
+      windowWidth = $0
+      fitSidebar()
+    }
+    .onChange(of: model.showsListDetail) { fitSidebar() }
+    .onChange(of: sidebar.autoHidden) { UserDefaults.standard.set($1, forKey: SidebarFit.autoHiddenKey) }
     .confirmationDialog(
       deleteConfirmation?.title ?? "Delete this session?", isPresented: model.isPresent(\.confirmingDelete),
       presenting: deleteConfirmation
@@ -152,6 +172,11 @@ struct ContentView: View {
     .sheet(isPresented: model.isPresent(\.editingNotes)) {
       if let id = model.editingNotes {
         NotesSheet(id: id) { model.editingNotes = nil }.environmentObject(model)
+      }
+    }
+    .sheet(isPresented: model.isPresent(\.shortcutsOverlay)) {
+      if let request = model.shortcutsOverlay {
+        ShortcutsOverlay(request: request).environmentObject(model)
       }
     }
     .sheet(isPresented: model.isPresent(\.loopEditor)) {
@@ -246,8 +271,8 @@ struct Sidebar: View {
       return .handled
     }
     .onKeyPress(keys: [.delete]) { press in
-      guard press.modifiers.intersection([.command, .option, .control, .shift]) == .command,
-        model.showsMultiSelection, removableSelection > 0, !model.showingDoneRemoval
+      guard SelectionKey.action(press.key, modifiers: press.modifiers) == .delete, model.showsMultiSelection,
+        removableSelection > 0, !model.showingDoneRemoval
       else { return .ignored }
       model.checkSelectionRemoval()
       return .handled
@@ -278,6 +303,24 @@ struct Sidebar: View {
     } message: { move in
       Text(move.message)
     }
+    // The overlay comes before the bottom safe area inset, so the empty state fills only the space above it and
+    // never covers New Group.
+    .overlay {
+      if model.sidebarIsEmpty {
+        ContentUnavailableView {
+          Label("No sessions", systemImage: "rectangle.stack")
+        } description: {
+          Text("Start a session, or import ones that are already running.")
+        } actions: {
+          // Side by side, the two buttons overflow the sidebar at its minimum width.
+          VStack {
+            Button("Start a Session…") { model.openNewSession() }
+            Button("Import Sessions…") { model.showingImport = true }
+          }
+        }
+        .padding(.horizontal)
+      }
+    }
     // A toolbar search field would push New Session into the overflow menu at the minimum window width.
     .searchable(text: $model.sidebarQuery, placement: .sidebar, prompt: "Search Sessions")
     .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -291,18 +334,9 @@ struct Sidebar: View {
         .buttonStyle(.borderless)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
-        .help("Create an empty group on the Board (⇧⌘G)")
+        .help(AppShortcut.newGroup.help("Create an empty group on the Board"))
         .accessibilityIdentifier("sidebar-new-group")
         RemovalStatusView()
-      }
-    }
-    .overlay {
-      if model.sidebarIsEmpty {
-        VStack(spacing: 8) {
-          Text("No sessions").font(.headline)
-          Button("Start a Session…") { model.openNewSession() }
-          Button("Import Sessions…") { model.showingImport = true }
-        }
       }
     }
   }
@@ -372,13 +406,14 @@ struct ManagerButton: View {
     switch icon {
     case .needsMe:
       guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
-        return "A Manager conversation needs you (⇧⌘M)"
+        return AppShortcut.openManager.help("A Manager conversation needs you")
       }
-      return "\(waiting.name) needs you: \(reason) (⇧⌘M)"
-    case .unread: return "A Manager conversation has unread replies (⇧⌘M)"
+      return AppShortcut.openManager.help("\(waiting.name) needs you: \(reason)")
+    case .unread: return AppShortcut.openManager.help("A Manager conversation has unread replies")
     case .outline:
       return managers.isEmpty
-        ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
+        ? AppShortcut.openManager.help("Start a session that manages the others through sb")
+        : AppShortcut.openManager.help("Open the latest Manager conversation")
     }
   }
 }
@@ -452,6 +487,7 @@ struct SessionRow: View {
               .help(pause.line).accessibilityLabel("Paused")
           }
           Spacer()
+          if session.hasNewReply { NewReplyMark() }
           IssueBadge(session: session)
           if let pr = session.pr, let url = pr.link {
             HStack(spacing: 3) {
@@ -598,13 +634,14 @@ struct BoardView: View {
     if empty && model.filterHidesAllWork {
       FilterHidesAll().frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if empty {
-      VStack(spacing: 12) {
-        Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
-        Text("Start a session to see it here").foregroundStyle(.secondary)
+      ContentUnavailableView {
+        Label("No sessions", systemImage: MainView.board.symbol)
+      } description: {
+        Text("Start a session to see it here.")
+      } actions: {
         Button("New Session…") { model.openNewSession() }
         Button("New Group") { model.startNewGroup() }
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       GeometryReader { geometry in
         let fittedWidth = Self.fittedColumnWidth(available: geometry.size.width, columns: layout.columns.count)
@@ -1164,6 +1201,7 @@ struct BoardCard: View {
           MergeNote(session: s)
           // A Board column is too narrow for the badge beside the PR number.
           HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if s.hasNewReply { NewReplyMark() }
             if let pr = s.pr { QueueBadge(pr: pr) }
             if let holder = s.holderBadge { HolderBadge(holder: holder) }
             if let until = s.snoozedUntil { SnoozeMark(until: until) }

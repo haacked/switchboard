@@ -7,6 +7,9 @@ struct PaneStop {
   var claudePid: Int?
   /// The panes' processes and every process below them.
   var processes: Set<Int>
+  /// Every pane's process on this Mac, each of their ancestors, and sbd's tmux servers. A stop of leftovers never
+  /// signals them, because their exit ends sessions.
+  var spared: Set<Int> = []
 }
 
 /// Who sent a request.
@@ -76,16 +79,18 @@ extension Service {
       try stopClaude(id, pid)
       claudePid = pid
     }
-    return PaneStop(claudePid: claudePid, processes: processes)
+    return PaneStop(claudePid: claudePid, processes: processes, spared: paneAncestry())
   }
 
   /// Returns once claude has exited, the Claude pane is closed, every process
   /// that `stop` recorded has exited, and no process uses the session's folder
   /// as `Processes.using` defines it. It runs off the state queue. A claude
   /// that has not exited `stopWaitSeconds` after SIGTERM throws, and its pane stays open, so
-  /// that a later call finds it. A process that still runs or still uses the
-  /// folder `stopWaitSeconds` after the pane closes throws. sbd does not signal those
-  /// processes, because the user may want to keep them.
+  /// that a later call finds it. When every recorded process has exited and each process that
+  /// still uses the folder is a leftover, as `leftovers` defines it, of a session on this Mac,
+  /// sbd stops the leftovers as `stopLeftovers` describes. A process that still runs or still
+  /// uses the folder `stopWaitSeconds` after the pane closes, or after the leftovers' stop, throws.
+  /// sbd signals no process other than a leftover, because the user may want to keep it.
   /// `again` is the clause, in lower case, that tells the user how to try again.
   func finishPaneStop(_ session: Session, _ stop: PaneStop, again: String) throws {
     // A process can write to the folder until it exits. `worktree remove` deletes ignored files.
@@ -97,9 +102,25 @@ extension Service {
     let deadline = Date().addingTimeInterval(config.stopWaitSeconds)
     let running = try waitForExit(stop.processes, seconds: deadline.timeIntervalSinceNow, at: site)
     var users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
-    while running.isEmpty, !users.isEmpty, Date() < deadline {
+    let local = site.hostName == nil
+    var leftovers: [Int: Int64]?
+    while running.isEmpty, !users.isEmpty {
+      if local {
+        let found = Self.leftovers(
+          users, in: try site.processes(), sessionId: session.id, startedSince: session.created,
+          sparing: stop.spared)
+        if users.allSatisfy({ found[$0.pid] != nil }) {
+          leftovers = found
+          break
+        }
+      }
+      guard Date() < deadline else { break }
       Thread.sleep(forTimeInterval: 0.25)
       users = try site.folderUsers(session.cwd).filter { !running.contains($0.pid) }
+    }
+    if let leftovers {
+      try stopLeftovers(leftovers, of: session, at: site)
+      users = try site.folderUsers(session.cwd)
     }
     guard !running.isEmpty || !users.isEmpty else { return }
     let processes = (try? site.processes()) ?? ProcessTable()
@@ -118,6 +139,59 @@ extension Service {
     let terminals = try site.terminals()
     guard site.hostName != nil else { return terminals.kill(name) }
     try site.confirmed("the close of \(name)") { _ in try terminals.close(name) }
+  }
+
+  /// Every pane's process on this Mac and each of its ancestors, and the tmux server of every pane, read from the
+  /// snapshot. It runs on the state queue.
+  func paneAncestry() -> Set<Int> {
+    let table = mac.snapshot.processes
+    var found: Set<Int> = []
+    for pane in mac.snapshot.panes.values {
+      found.insert(pane.server)
+      var pid = pane.pid
+      while Processes.isValidPid(pid), found.insert(pid).inserted, let row = table.row(pid) { pid = row.ppid }
+    }
+    return found
+  }
+
+  /// The start time, in microseconds since the epoch, of each user that is a leftover of the session. A leftover's
+  /// parent is pid 1, so no process waits on it. It is not a zombie, and it started at or after `since`, which is in
+  /// milliseconds since the epoch. Its environment holds the session's `SB_SESSION_ID`, so the session started it.
+  /// The Bash tool runs each command in a new POSIX session, so the environment is the only link between the
+  /// session and a watcher that a Bash command starts. A process whose environment the kernel leaves out, as
+  /// `ProcessTable.environment(of:)` describes, is never a leftover. A pid in `sparing` is never a leftover. A table
+  /// parsed from `ps` holds start time 0, so it gives no leftover.
+  static func leftovers(
+    _ users: [FolderUser], in table: ProcessTable, sessionId: String, startedSince since: Int64,
+    sparing: Set<Int> = [], environment: (Int) -> [String] = { ProcessTable.environment(of: pid_t($0)) }
+  ) -> [Int: Int64] {
+    let marker = "SB_SESSION_ID=\(sessionId)"
+    var found: [Int: Int64] = [:]
+    for user in users where !sparing.contains(user.pid) {
+      guard let row = table.row(user.pid), row.ppid == 1, !row.isZombie, row.startTime > 0,
+        row.startTime >= since * 1000, environment(user.pid).contains(marker)
+      else { continue }
+      found[user.pid] = row.startTime
+    }
+    return found
+  }
+
+  /// Sends SIGTERM to each leftover on this Mac, waits up to `stopWaitSeconds` for them to exit, then sends
+  /// SIGKILL to each that still runs. A pid whose start time differs from the recorded one names another
+  /// process, so it gets no signal.
+  private func stopLeftovers(_ leftovers: [Int: Int64], of session: Session, at site: any SessionSite) throws {
+    let signal = { (sig: Int32) throws in
+      let table = try site.processes()
+      for (pid, start) in leftovers where table.row(pid)?.startTime == start {
+        logLine("sending signal \(sig) to leftover \(pid) (\(table.command(of: pid) ?? "?")) of \(session.id)")
+        site.machine.signal(pid, sig)
+      }
+    }
+    try signal(SIGTERM)
+    let pids = Set(leftovers.keys)
+    guard try !waitForExit(pids, seconds: config.stopWaitSeconds, at: site).isEmpty else { return }
+    try signal(SIGKILL)
+    _ = try waitForExit(pids, seconds: 1, at: site)
   }
 
   /// Waits up to `seconds` for every pid to exit at the site. Returns the pids that still run.

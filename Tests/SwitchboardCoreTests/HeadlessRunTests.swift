@@ -14,11 +14,24 @@ private func neverEnds(pidFile: String) -> String { "echo $$ > '\(pidFile)'; exe
 /// Runs the script with `/bin/sh -c` through `Headless.run`, in `folder`.
 private func run(
   _ script: String, input: String = "", env: [String: String] = ProcessInfo.processInfo.environment,
-  folder: String, timeout: Double = 30, cancelled: @escaping @Sendable () -> Bool = { false }
+  folder: String, timeout: Double = 30, cancelled: @escaping @Sendable () -> Bool = { false },
+  onLine: ((String) -> String?)? = nil
 ) throws -> String {
   try Headless.run(
     claude: "/bin/sh", arguments: ["-c", script], input: input, env: env, folder: folder, timeout: timeout,
-    cancelled: cancelled)
+    cancelled: cancelled, onLine: onLine)
+}
+
+/// A line handler that records each line it sees and refuses none.
+private final class LineLog: Sendable {
+  private let seen = OSAllocatedUnfairLock<[String]>(initialState: [])
+
+  var lines: [String] { seen.withLock { $0 } }
+
+  func handle(_ line: String) -> String? {
+    seen.withLock { $0.append(line) }
+    return nil
+  }
 }
 
 /// The pid that a script wrote to the file, or nil when it wrote none.
@@ -33,6 +46,17 @@ private func exists(_ pid: pid_t) -> Bool { kill(pid, 0) == 0 }
 
 /// The seconds since `start`.
 private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
+
+/// Scripts whose output a line handler must leave as it is: lines, a last line without a newline, no output, a
+/// character split across two reads, a line split across two reads, and many reads.
+private let parityScripts = [
+  #"printf 'a\nb\nc\n'"#,
+  "printf 'no newline'",
+  "true",
+  #"printf '\303'; sleep 0.2; printf '\251\n'"#,
+  #"printf '{"half":'; sleep 0.2; printf '"rest"}\n'"#,
+  "yes 'a line of output' | head -n 20000",
+]
 
 /// The process runner behind the triage summary, the merge brief, the plan update, and the quick ask.
 @Suite(.timeLimit(.minutes(1))) struct HeadlessRunTests {
@@ -220,5 +244,244 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
     usleep(300_000)
 
     #expect(output == "done\n")
+  }
+
+  // MARK: The line handler: refusal
+
+  /// /bin/sh runs `sleep` as a child, and that child keeps stdout open after sh ends.
+  /// A run that reads stdout to its end after a refusal therefore waits the full 30 s.
+  @Test func aRefusalOnTheFirstLineThrowsRefusedWithinTwoSeconds() throws {
+    let folder = try scratchFolder()
+    let start = Date()
+
+    #expect(throws: Headless.Refused.self) {
+      try run("echo first; sleep 30", folder: folder, onLine: { _ in "wrong tools" })
+    }
+
+    #expect(since(start) < 2 * scale)
+  }
+
+  /// The trailing `true` makes sh fork `sleep` instead of running it with exec, so the orphan keeps stdout open.
+  @Test func aRefusalDoesNotWaitForAChildThatKeepsStdoutOpen() throws {
+    let folder = try scratchFolder()
+    let start = Date()
+
+    #expect(throws: Headless.Refused.self) {
+      try run("echo first; sleep 30; true", folder: folder, onLine: { _ in "wrong tools" })
+    }
+
+    #expect(since(start) < 2 * scale)
+  }
+
+  /// An ignored signal stays ignored across exec, so only SIGKILL ends this process.
+  @Test func aRefusalEndsAProcessThatIgnoresSIGTERM() throws {
+    let folder = try scratchFolder()
+    let pidFile = "\(folder)/pid"
+    let start = Date()
+
+    #expect(throws: Headless.Refused.self) {
+      try run(
+        "trap '' TERM; echo $$ > '\(pidFile)'; echo first; exec sleep 30", folder: folder,
+        onLine: { _ in "wrong tools" })
+    }
+
+    #expect(since(start) < 2 * scale)
+    let pid = try #require(writtenPid(pidFile))
+    #expect(!exists(pid))
+  }
+
+  @Test func aRefusalCarriesTheHandlersReason() throws {
+    let folder = try scratchFolder()
+
+    let error = #expect(throws: Headless.Refused.self) {
+      try run("echo first; exec sleep 30", folder: folder, onLine: { _ in "wrong tools" })
+    }
+
+    #expect(error?.reason == "wrong tools")
+  }
+
+  @Test func aRefusalsDescriptionHoldsTheReason() throws {
+    let folder = try scratchFolder()
+
+    let error = #expect(throws: Headless.Refused.self) {
+      try run("echo first; exec sleep 30", folder: folder, onLine: { _ in "wrong tools" })
+    }
+
+    #expect(error?.description.contains("wrong tools") == true, "\(String(describing: error))")
+  }
+
+  /// One read can deliver more than the refused line, so the output only has to start with the lines up to it.
+  @Test func aRefusalsOutputHoldsWhatTheScriptPrintedUpToTheRefusedLine() throws {
+    let folder = try scratchFolder()
+
+    let error = #expect(throws: Headless.Refused.self) {
+      try run(
+        "echo first; echo second; exec sleep 30", folder: folder, onLine: { $0 == "second" ? "second line" : nil })
+    }
+
+    #expect(error?.output.hasPrefix("first\nsecond") == true, "\(String(describing: error?.output))")
+  }
+
+  @Test func aRefusalLeavesNoProcess() throws {
+    let folder = try scratchFolder()
+    let pidFile = "\(folder)/pid"
+
+    _ = try? run("echo $$ > '\(pidFile)'; echo first; exec sleep 30", folder: folder, onLine: { _ in "wrong tools" })
+
+    let pid = try #require(writtenPid(pidFile))
+    #expect(!exists(pid))
+  }
+
+  /// One read can deliver all three lines. The handler refuses each one, and only the first refusal counts.
+  @Test func theFirstRefusalIsTheOneThatIsThrown() throws {
+    let folder = try scratchFolder()
+
+    let error = #expect(throws: Headless.Refused.self) {
+      try run(#"printf 'a\nb\nc\n'; exec sleep 30"#, folder: folder, onLine: { "refused at \($0)" })
+    }
+
+    #expect(error?.reason == "refused at a")
+  }
+
+  /// claude exits with status 1 after an error envelope. A refusal of a line still reaches the caller as a refusal.
+  @Test func aRefusedLineFromAScriptThatThenExitsNonZeroThrowsRefused() throws {
+    let folder = try scratchFolder()
+
+    #expect(throws: Headless.Refused.self) {
+      try run("echo bad; exit 3", folder: folder, onLine: { $0 == "bad" ? "bad line" : nil })
+    }
+  }
+
+  @Test func aRefusedLastLineWithoutANewlineThrowsRefused() throws {
+    let folder = try scratchFolder()
+
+    #expect(throws: Headless.Refused.self) {
+      try run("printf bad", folder: folder, onLine: { $0 == "bad" ? "bad line" : nil })
+    }
+  }
+
+  // MARK: The line handler: lines
+
+  @Test func theHandlerSeesEveryLineInOrder() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run(#"printf 'a\nb\nc\n'"#, folder: folder, onLine: log.handle)
+
+    #expect(log.lines == ["a", "b", "c"])
+  }
+
+  @Test func aLastLineWithoutANewlineReachesTheHandler() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run(#"printf 'a\nb'"#, folder: folder, onLine: log.handle)
+
+    #expect(log.lines == ["a", "b"])
+  }
+
+  @Test func anOutputThatEndsInANewlineGivesNoExtraLine() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run(#"printf 'a\n'"#, folder: folder, onLine: log.handle)
+
+    #expect(log.lines == ["a"])
+  }
+
+  @Test func aScriptThatPrintsNothingNeverCallsTheHandler() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run("true", folder: folder, onLine: log.handle)
+
+    #expect(log.lines.isEmpty)
+  }
+
+  /// The sleep makes the two halves arrive in two reads of the pipe.
+  @Test func aLineSplitAcrossTwoReadsArrivesWhole() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run(#"printf '{"half":'; sleep 0.2; printf '"rest"}\n'"#, folder: folder, onLine: log.handle)
+
+    #expect(log.lines == [#"{"half":"rest"}"#])
+  }
+
+  /// The two bytes of "é" arrive in two reads. A runner that decodes each read on its own replaces both bytes.
+  @Test func aCharacterSplitAcrossTwoReadsArrivesWhole() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run(#"printf '\303'; sleep 0.2; printf '\251\n'"#, folder: folder, onLine: log.handle)
+
+    #expect(log.lines == ["é"])
+  }
+
+  /// 20,000 lines fill many reads of the pipe, so lines cross read boundaries at many offsets.
+  @Test func manyLinesAcrossManyReadsReachTheHandlerOneForOne() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run("yes 'a line of output' | head -n 20000", folder: folder, onLine: log.handle)
+
+    #expect(log.lines.count == 20000)
+  }
+
+  @Test func manyLinesAcrossManyReadsEachArriveWhole() throws {
+    let folder = try scratchFolder()
+    let log = LineLog()
+
+    _ = try run("yes 'a line of output' | head -n 20000", folder: folder, onLine: log.handle)
+
+    #expect(log.lines.allSatisfy { $0 == "a line of output" })
+  }
+
+  // MARK: The line handler: parity with no handler
+
+  /// A handler that refuses nothing leaves the returned output as it is without a handler.
+  @Test(arguments: parityScripts)
+  func aHandlerThatRefusesNothingReturnsTheSameOutputAsNoHandler(_ script: String) throws {
+    let folder = try scratchFolder()
+
+    let withHandler = try run(script, folder: folder, onLine: LineLog().handle)
+    let withoutHandler = try run(script, folder: folder)
+
+    #expect(withHandler == withoutHandler)
+  }
+
+  @Test func aHandlerThatRefusesNothingStillGivesTheExitError() throws {
+    let folder = try scratchFolder()
+
+    let error = #expect(throws: Headless.ExitError.self) {
+      try run("echo partial answer; exit 3", folder: folder, onLine: LineLog().handle)
+    }
+
+    #expect(error?.output == "partial answer\n")
+  }
+
+  @Test func aHandlerThatRefusesNothingStillTimesOut() throws {
+    let folder = try scratchFolder()
+    let pidFile = "\(folder)/pid"
+    let start = Date()
+
+    #expect(throws: Headless.TimedOut.self) {
+      try run(neverEnds(pidFile: pidFile), folder: folder, timeout: 0.5, onLine: LineLog().handle)
+    }
+
+    #expect(since(start) < 2 * scale)
+  }
+
+  @Test func aHandlerThatRefusesNothingStillCancels() throws {
+    let folder = try scratchFolder()
+    let pidFile = "\(folder)/pid"
+    let start = Date()
+
+    #expect(throws: APIError.self) {
+      try run(
+        neverEnds(pidFile: pidFile), folder: folder, cancelled: { since(start) > 0.3 }, onLine: LineLog().handle)
+    }
+
+    #expect(since(start) < 2 * scale)
   }
 }

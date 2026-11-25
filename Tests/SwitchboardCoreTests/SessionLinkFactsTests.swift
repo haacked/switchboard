@@ -36,6 +36,8 @@ private let replyURL = LinkFixtures.slackReply
 private let ch = LinkFixtures.channel
 private let rootTs = LinkFixtures.rootTs
 private let replyTs = LinkFixtures.replyTs
+/// The time that the `openTime` tests take as now. Test arguments can't read a suite's static members.
+private let openNow: Int64 = 1_800_000_000_000
 
 /// How `SessionFacts.apply` folds prompts and Slack sends into `links`: one entry per target key, in first-sighting
 /// order, each with the first sighting's URL and time.
@@ -465,5 +467,166 @@ private let replyTs = LinkFixtures.replyTs
     #expect(refreshed.outcome == .replay("snapshot is from another build", events: history().count))
     #expect(refreshed.snapshot.replay.facts.links.map(\.url) == expectedURLs)
     #expect(refreshed.snapshot.replay.facts.links.map(\.id) == old.snapshot.replay.facts.links.map(\.id))
+  }
+}
+
+/// The suites nest under `SessionLinkFactsTests`, so its filter runs them.
+extension SessionLinkFactsTests {
+  /// A `link-opened` event records when the user opened a link from Switchboard, keyed by the link's page (H3).
+  @Suite struct Opened {
+    static let key = LinkFixtures.slackRootKey
+    static let otherKey = LinkFixtures.otherThreadKey
+
+    func opened(_ t: Int64, key: String = Self.key, link: String = "l1") -> Event {
+      LinkFixtures.opened(t, key: key, link: link)
+    }
+
+    @Test func aNewSessionHasNoOpens() {
+      #expect(SessionFacts().linkOpened.isEmpty)
+    }
+
+    @Test func anOpenRecordsItsTimeUnderItsKey() {
+      let f = facts([linkPrompt(1000, "Review \(rootURL)"), opened(2000)])
+
+      #expect(f.linkOpened == [Self.key: 2000])
+    }
+
+    @Test func aLaterOpenWins() {
+      let f = facts([opened(2000), opened(3000)])
+
+      #expect(f.linkOpened[Self.key] == 3000)
+    }
+
+    @Test func anOpenOfAnotherKeyLeavesThisKeyAlone() {
+      let f = facts([opened(2000), opened(3000, key: Self.otherKey, link: "l2")])
+
+      #expect(f.linkOpened == [Self.key: 2000, Self.otherKey: 3000])
+    }
+
+    @Test(arguments: [[String: JSON](), ["link": "l1"], ["link": "l1", "key": 7]])
+    func anOpenWithoutAKeyRecordsNothing(_ data: [String: JSON]) {
+      let f = facts([event("link-opened", 2000, data)])
+
+      #expect(f.linkOpened.isEmpty)
+    }
+
+    @Test func anOpenAddsNoLink() {
+      let f = facts([opened(2000)])
+
+      #expect(f.links.isEmpty)
+    }
+
+    /// sbd records the Open after the app's queue sends it, so the event's `at` holds the time of the click.
+    @Test func anOpenCountsAtItsClickTime() {
+      let f = facts([event("link-opened", 2000, ["link": "l1", "key": .string(Self.key), "at": 1500])])
+
+      #expect(f.linkOpened[Self.key] == 1500)
+    }
+
+    @Test func aLaterEventWithAnOlderClickKeepsTheNewerOpen() {
+      let older: [String: JSON] = ["link": "l1", "key": .string(Self.key), "at": 1800]
+      let f = facts([opened(2000), event("link-opened", 3000, older)])
+
+      #expect(f.linkOpened[Self.key] == 2000)
+    }
+
+    @Test(arguments: [JSON.string("1500"), 1500.5, .null])
+    func anOpenWhoseAtIsNotAWholeNumberCountsAtTheEventsTime(_ at: JSON) {
+      let f = facts([event("link-opened", 2000, ["link": "l1", "key": .string(Self.key), "at": at])])
+
+      #expect(f.linkOpened[Self.key] == 2000)
+    }
+
+    @Test func theOpensSurviveEncoding() throws {
+      let f = facts([opened(2000), opened(3000, key: Self.otherKey, link: "l2")])
+
+      let decoded = try JSONCoding.decode(SessionFacts.self, from: try JSONCoding.encode(f))
+
+      #expect(decoded.linkOpened == f.linkOpened)
+    }
+  }
+
+  /// `ExternalLink.openTime` bounds a `link-open` request's `at` to the `openSkewMs` before now.
+  @Suite struct OpenTime {
+    @Test func noAtGivesNow() throws {
+      #expect(try ExternalLink.openTime(nil, now: openNow) == openNow)
+    }
+
+    @Test(arguments: [Int64(0), 2_000, ExternalLink.openSkewMs])
+    func anAtWithinTheSkewIsKept(_ before: Int64) throws {
+      let at = openNow - before
+
+      #expect(try ExternalLink.openTime(.number(Double(at)), now: openNow) == at)
+    }
+
+    @Test(arguments: [ExternalLink.openSkewMs + 1, 365 * 24 * 3_600_000, openNow, openNow + 1])
+    func anAtBeforeTheSkewGivesTheSkewsStart(_ before: Int64) throws {
+      let at = JSON.number(Double(openNow - before))
+
+      #expect(try ExternalLink.openTime(at, now: openNow) == openNow - ExternalLink.openSkewMs)
+    }
+
+    @Test(arguments: [Int64(1), 3_600_000, 1_000_000_000_000_000])
+    func anAtAfterNowGivesNow(_ after: Int64) throws {
+      #expect(try ExternalLink.openTime(.number(Double(openNow + after)), now: openNow) == openNow)
+    }
+
+    @Test(arguments: [JSON.string("1800000000000"), 1_800_000_000_000.5, 1e300, .null, .bool(true), [:]])
+    func anAtThatIsNotAWholeNumberThrows(_ at: JSON) {
+      #expect(throws: APIError.self) { try ExternalLink.openTime(at, now: openNow) }
+    }
+  }
+
+  /// The inputs of "last looked" come from replay, so a snapshot and the events after it give what a full replay
+  /// gives, wherever the snapshot cuts the log.
+  @Suite struct LookedAtSnapshot {
+    let session = Session(id: "s1", name: "one", cwd: "/tmp/a", branch: "main", claudeSessionId: "u1", created: 5)
+    static let key = LinkFixtures.slackRootKey
+
+    func history() -> [Event] {
+      let opened: [String: JSON] = ["link": .string(hashedFoundId(Self.key)), "key": .string(Self.key)]
+      let ack: [String: JSON] = ["state": "needs_you", "reason": "read its last reply and decide what's next"]
+      return [
+        linkPrompt(700, "Review \(rootURL)"),
+        event("link-opened", 800, opened),
+        event("Stop", 900, ["last_assistant_message": "Done."]),
+        event("ack", 1000, ack),
+        event("ack", 1100, ack),
+        event("unack", 1200),
+        event("link-opened", 1300, opened),
+        linkPrompt(1400, "Keep going"),
+        event("Stop", 1500, ["last_assistant_message": "Done again."]),
+      ]
+    }
+
+    /// What the history leaves, so a parity check over two empty values can't pass.
+    @Test func aFullReplayBuildsTheExpectedOpensAndAcknowledgment() {
+      let f = SessionReplay.replaying(history(), session: session).facts
+
+      #expect(f.linkOpened == [Self.key: 1300])
+      #expect(f.lastAcknowledged == 1000)
+    }
+
+    @Test func theSnapshotAndTheTailBuildWhatAFullReplayBuildsAtEveryCut() throws {
+      let dir = try tempFolder()
+      defer { try? FileManager.default.removeItem(atPath: dir) }
+      let store = try Store(path: "\(dir)/sb.db")
+      let events = history()
+      for cut in 1..<events.count {
+        try store.delete(session: SessionRemoval(id: session.id, name: session.name))
+        try store.save(session)
+        for e in events[..<cut] { try store.append(e) }
+        try Snapshots.refresh(store, session, build: "b1")
+        for e in events[cut...] { try store.append(e) }
+
+        let second = try Snapshots.refresh(store, session, build: "b1")
+
+        let full = SessionReplay.replaying(try store.events(session: session.id), session: session)
+        #expect(second.snapshot.replay.facts.linkOpened == full.facts.linkOpened, "cut \(cut)")
+        #expect(second.snapshot.replay.facts.lastAcknowledged == full.facts.lastAcknowledged, "cut \(cut)")
+        #expect(second.snapshot.replay.facts.linkOpened == [Self.key: 1300], "cut \(cut)")
+        #expect(second.snapshot.replay.facts.lastAcknowledged == 1000, "cut \(cut)")
+      }
+    }
   }
 }

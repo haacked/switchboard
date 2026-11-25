@@ -1,37 +1,6 @@
 import AppKit
 import SwiftUI
 
-/// The shortcuts that find sessions and move between the app's lists and terminals. The Go menu lists them.
-///
-/// Each one carries ⌘, because a focused terminal keeps every other key. SwiftTerm offers a ⌘ key to the
-/// menu bar before the terminal's program, as long as `shouldSendCommandKeyToTerminal` stays nil.
-enum NavShortcuts {
-  /// A US keyboard sends ⇧⌘] as "}" with ⌘ and ⇧. A menu item that stores "]" with ⇧⌘ does not match that
-  /// event, so these store the shifted characters, as Safari's Show Next Tab does.
-  static let nextSession = KeyboardShortcut("}", modifiers: .command)
-  static let previousSession = KeyboardShortcut("{", modifiers: .command)
-  static let focusList = KeyboardShortcut("l", modifiers: .command)
-  static let focusTerminal = KeyboardShortcut("t", modifiers: .command)
-  static let searchSessions = KeyboardShortcut("k", modifiers: .command)
-  /// An unshifted ⌘[ sends "[", so it can't match Previous Session's "{".
-  static let back = KeyboardShortcut("[", modifiers: .command)
-  static let forward = KeyboardShortcut("]", modifiers: .command)
-  static let showRecentPlaces = KeyboardShortcut("y", modifiers: .command)
-  /// File > New Conversation. It stays out of `all`, because it starts a Manager conversation.
-  static let newConversation = KeyboardShortcut("n", modifiers: [.command, .option])
-  /// Session > Message Claude. It stays out of `all`, because it moves focus into a field that `bin/test-gui shell`
-  /// does not expect.
-  static let messageField = KeyboardShortcut("e", modifiers: [.command, .shift])
-  /// Go > Ask Switchboard. It stays out of `all`, because it opens a sheet that `bin/test-gui shell` does not
-  /// expect.
-  static let quickAsk = KeyboardShortcut("k", modifiers: [.command, .shift])
-
-  /// `bin/test-gui shell` sends these in order. Search Sessions is last, because it opens a sheet.
-  static let all = [
-    nextSession, previousSession, focusList, focusTerminal, back, forward, showRecentPlaces, searchSessions,
-  ]
-}
-
 enum BoardDirection: Equatable {
   case up, down, left, right
 }

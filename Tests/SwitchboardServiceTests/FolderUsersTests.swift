@@ -37,14 +37,6 @@ import Testing
     Issue.record("\(p.processIdentifier) never exec'd sleep")
   }
 
-  /// Copies /bin/sleep to `path`. macOS kills a copy of a system program that keeps Apple's signature, so the copy
-  /// gets an ad hoc signature.
-  private func copySleep(to path: String) throws {
-    try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
-    let signed = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
-    try #require(signed.status == 0, "codesign failed: \(signed.stderr)")
-  }
-
   private static let muxTitle = "ssh: /tmp/x/sock [mux]"
 
   /// A copy of /bin/sleep named `ssh`, outside `folder`, so that its program path doesn't match.

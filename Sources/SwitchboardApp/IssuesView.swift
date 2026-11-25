@@ -36,7 +36,7 @@ struct IssuesView: View {
       } else {
         // Computing the sections filters, groups, and sorts every issue. Each render computes them once.
         let sections = model.issueSections
-        ListDetailSplit {
+        ListDetailSplit(widthKey: "listWidth.issues") {
           VStack(spacing: 0) {
             IssueListHeader()
             Divider()
@@ -304,8 +304,10 @@ struct IssueStart: View {
         }
         .fixedSize()
         .disabled(starting || current == nil)
-        .keyboardShortcut(.return, modifiers: .command)
-        .help("Start a session on the issue with this preset (⌘Return). The arrow offers the others")
+        .shortcut(.startIssueSession)
+        .help(
+          "Start a session on the issue with this preset (\(AppShortcut.startIssueSession.glyphs)). The arrow offers the others"
+        )
         Picker("Group", selection: Binding(get: { model.issueGroup(row) }, set: { model.issueGroupPicks[row.id] = $0 }))
         {
           Text("No Group").tag(String?.none)

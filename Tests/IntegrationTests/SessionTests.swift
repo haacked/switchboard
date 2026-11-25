@@ -169,6 +169,20 @@ import Testing
     #expect(try sbd.get(s.id).state != .working)
   }
 
+  @Test func showsATurnThatAnExpiredLoginStoppedInNeedsYouWithTheFailureMessage() throws {
+    let sbd = try Instance()
+    let s = try sbd.new(prompt: "hello")
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+
+    try sbd.sb("send", s.id, "fail authentication_failed")
+
+    let failed = try sbd.waitFor(s.id, "the failed login") { $0.state == .needsYou && $0.reason.contains("expired") }
+    let account = ClaudeAccount(folder: try #require(failed.account)).name
+    #expect(failed.reason.contains(account), "\(failed.reason)")
+    #expect(failed.reason.contains("/login"), "\(failed.reason)")
+    #expect(failed.lastReply == "Login reached its time limit · Please run /login")
+  }
+
   @Test func stopsAnIdleSessionAndResumesItWithTheNextMessage() throws {
     let sbd = try Instance(idleStopSeconds: 2)
     let s = try sbd.new(prompt: "hello")

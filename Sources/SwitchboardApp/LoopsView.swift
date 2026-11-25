@@ -43,7 +43,7 @@ struct LoopsView: View {
         NewLoopButton()
       }
     } else {
-      ListDetailSplit {
+      ListDetailSplit(widthKey: "listWidth.loops") {
         VStack(spacing: 0) {
           LoopListHeader()
           Divider()

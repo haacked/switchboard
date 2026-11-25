@@ -46,9 +46,9 @@ import Testing
 
   /// ⌘Return sends the message field, and a bare Return could merge by accident.
   @Test func thePrimaryShortcutIsCommandShiftReturn() {
-    #expect(OptionButton.primaryShortcut == KeyboardShortcut(.return, modifiers: [.command, .shift]))
-    #expect(OptionButton.primaryShortcut != KeyboardShortcut(.return, modifiers: [.command]))
-    #expect(OptionButton.primaryShortcut != KeyboardShortcut(.return, modifiers: []))
+    #expect(AppShortcut.primaryAction.binding == KeyboardShortcut(.return, modifiers: [.command, .shift]))
+    #expect(AppShortcut.primaryAction.binding != KeyboardShortcut(.return, modifiers: [.command]))
+    #expect(AppShortcut.primaryAction.binding != KeyboardShortcut(.return, modifiers: []))
   }
 }
 

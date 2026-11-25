@@ -412,6 +412,58 @@ filter_targets() {
   sed -n -E 's/^\^([A-Za-z0-9_]+)\\\..*/\1/p' | sort -u
 }
 
+# pattern_targets <package-json> <pattern>
+# Prints, one per line, the test targets that can hold a test that the
+# swift test --filter regular expression <pattern> matches. A test's name is
+# <target>.<suite>/<test>(), and its source location can add
+# <target>/<file>:<line>:<column>.
+# Fails when it cannot show where the matches live. It shows that for two
+# shapes of pattern:
+#   ^<target>\.<rest>  Every match lies inside <target> when each | in <rest>
+#                      sits inside parentheses, as in test_filters' patterns.
+#                      <rest> may hold only name characters, /, |, (, ), and
+#                      \.. So every ( and ) opens or closes a group. An escape
+#                      or a bracket could make a parenthesis literal and let a
+#                      top-level | pass the depth count.
+#   <identifier>       A match cannot cross the dots, slashes, colons, and
+#                      parentheses of a name. The identifier holds a letter or
+#                      an underscore, which no line or column number holds. So
+#                      the match lies inside the target's name, a file path,
+#                      or a name that the target's source declares. A
+#                      mention in a comment builds one bundle more than needed.
+pattern_targets() {
+  local targets name dir rc target rest depth=0 i
+  targets=$(jq -r '.targets[] | select(.type == "test")
+    | [.name, ((.path // ("Tests/" + .name)) | rtrimstr("/"))] | @tsv' <<<"$1") || return 1
+  if [[ $2 =~ ^\^([A-Za-z0-9_]+)\\\.(([A-Za-z0-9_/|()]|\\\.)*)$ ]]; then
+    target=${BASH_REMATCH[1]} rest=${BASH_REMATCH[2]//\\./}
+    for ((i = 0; i < ${#rest}; i++)); do
+      case ${rest:i:1} in
+      '(') depth=$((depth + 1)) ;;
+      ')') depth=$((depth - 1)); [ "$depth" -ge 0 ] || return 1 ;;
+      '|') [ "$depth" -gt 0 ] || return 1 ;;
+      esac
+    done
+    cut -f1 <<<"$targets" | grep -qxF "$target" || return 1
+    echo "$target"
+    return 0
+  fi
+  [[ $2 =~ ^[A-Za-z0-9_]+$ && $2 =~ [A-Za-z_] ]] || return 1
+  while IFS=$'\t' read -r name dir; do
+    if [[ $name == *"$2"* ]] || [ -n "$(find "$dir" -name '*.swift' -path "*$2*" -print -quit)" ]; then
+      echo "$name"
+      continue
+    fi
+    rc=0
+    grep -rqF --include='*.swift' -e "$2" "$dir" || rc=$?
+    case $rc in
+    0) echo "$name" ;;
+    1) ;;
+    *) return 1 ;;
+    esac
+  done <<<"$targets"
+}
+
 # test_filters
 # Reads select_tests lines on stdin and prints one --filter pattern for each.
 # A file's suites become a pattern only when list_tests shows that it matches

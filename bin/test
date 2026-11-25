@@ -2,6 +2,10 @@
 # With no arguments, or with --changed, runs only the tests that the files
 # changed against origin/main can affect, as bin/lib/test-selection.sh picks
 # them. Changed files include commits, uncommitted edits, and untracked files.
+# With only --filter options, it builds only the test bundles that can hold
+# the tests the filters match (pattern_targets in bin/lib/test-selection.sh),
+# and skips the tests of the other bundles. When it cannot tell which bundles
+# those are, and with any other arguments, swift test builds every bundle.
 # With --all, runs every unit and integration test. With --claude first, it
 # also runs the tests that drive the installed claude with Haiku, which take
 # minutes and use some of your Claude quota. With --shards N, it splits the
@@ -153,6 +157,30 @@ if [ "${1:-}" = --claude ]; then
   fi
 fi
 
+# Sets `json` to the text that swift package dump-package prints and
+# `test_targets` to the package's test targets, one per line. Fails when it
+# cannot read them.
+read_package() {
+  json=$(swift package dump-package) && jq -e .targets <<<"$json" >/dev/null 2>&1 &&
+    test_targets=$(jq -r '.targets[] | select(.type == "test") | .name' <<<"$json")
+}
+
+# build_bundles <test-target>…
+# Builds the named test targets' bundles and sets `built` to those targets, one
+# per line. When a test target has no bundle of its own, it builds every bundle
+# and sets `built` to every test target (test_bundles_exist). Reads
+# `test_targets`, which read_package sets.
+build_bundles() {
+  if test_bundles_exist $test_targets; then
+    built=$(printf '%s\n' "$@" | sort -u)
+    build_test_bundles $built
+  else
+    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
+    build_tests
+    built=$test_targets
+  fi
+}
+
 # Builds the bundles of the tests it selects and sets `run` to the swift test
 # arguments that filter them to the selection. It never selects all of a
 # ci-only target (bin/lib/test-selection.sh), which CI runs on every push. Exits
@@ -165,8 +193,8 @@ fi
 # has no bundle of its own, it builds every bundle (test_bundles_exist).
 targeted() {
   source bin/lib/test-selection.sh
-  local base changed json selection filters filter target built missing
-  if ! json=$(swift package dump-package) || ! jq -e .targets <<<"$json" >/dev/null 2>&1; then
+  local base changed json test_targets selection filters filter target built missing
+  if ! read_package; then
     for target in $ci_only_targets; do
       echo "bin/test: could not read the package's targets, so every test outside $target runs. CI runs $target on every push." >&2
       run+=(--skip "^$target\\.")
@@ -184,23 +212,67 @@ targeted() {
     echo "bin/test: no test reads the files changed against origin/main. bin/test --all runs every test." >&2
     exit 0
   fi
-  if test_bundles_exist $(jq -r '.targets[] | select(.type == "test") | .name' <<<"$json"); then
-    built=$(selection_targets <<<"$selection")
-    build_test_bundles $built
-    filters=$(test_filters <<<"$selection")
-    missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
-    if [ -n "$missing" ]; then build_test_bundles $missing; fi
-  else
-    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
-    build_tests
-    filters=$(test_filters <<<"$selection")
-  fi
+  build_bundles $(selection_targets <<<"$selection")
+  filters=$(test_filters <<<"$selection")
+  missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
+  if [ -n "$missing" ]; then build_test_bundles $missing; fi
   run=(--skip-build)
   while IFS= read -r filter; do
     echo "bin/test: runs the tests that match $filter" >&2
     run+=(--filter "$filter")
   done <<<"$filters"
   echo "bin/test: CI runs every other test on every push, so a local run does not need them" >&2
+}
+
+# filter_bundles <arg>…
+# Succeeds when the arguments are only --filter options and pattern_targets
+# shows which test targets hold every test that they match, and those are not
+# every test target. It then sets `targets` to them, one per line, and sets
+# what read_package sets. Otherwise it fails, and swift test builds every test
+# bundle in one build. Callers run it as a condition, which turns off set -e.
+# So it checks each status itself.
+filter_bundles() {
+  local patterns=() pattern found
+  while [ $# -gt 0 ]; do
+    case $1 in
+    --filter) [ $# -ge 2 ] || return 1; patterns+=("$2"); shift 2 ;;
+    --filter=*) patterns+=("${1#--filter=}"); shift ;;
+    *) return 1 ;;
+    esac
+  done
+  source bin/lib/test-selection.sh
+  if ! read_package; then
+    echo "bin/test: could not read the package's targets, so every test bundle builds" >&2
+    return 1
+  fi
+  targets=
+  for pattern in "${patterns[@]}"; do
+    if ! found=$(pattern_targets "$json" "$pattern") || [ -z "$found" ]; then
+      echo "bin/test: could not tell which test bundles hold the tests that match $pattern, so every test bundle builds" >&2
+      return 1
+    fi
+    targets+=${targets:+$'\n'}$found
+  done
+  targets=$(sort -u <<<"$targets")
+  if [ "$targets" = "$(sort <<<"$test_targets")" ]; then
+    echo "bin/test: every test bundle can hold tests that match the filters, so every test bundle builds" >&2
+    return 1
+  fi
+}
+
+# Builds only the bundles that can hold the tests that the --filter arguments
+# match, and sets `run` to run without a build. It also skips every test of
+# the other bundles, which can predate the change. Leaves `run` empty when
+# filter_bundles fails.
+filtered() {
+  local target targets json test_targets built
+  filter_bundles "$@" || return 0
+  echo "bin/test: only the bundles of $(paste -sd' ' - <<<"$targets") can hold tests that match the filters" >&2
+  build_bundles $targets
+  run=(--skip-build)
+  for target in $(comm -23 <(sort <<<"$test_targets") <(sort <<<"$built")); do
+    run+=(--skip "^$target\\.")
+  done
 }
 
 run=()
@@ -212,5 +284,6 @@ case ${1:-} in
   targeted
   ;;
 "") targeted ;;
+*) filtered "$@" ;;
 esac
 exec bin/lib/swiftpm test ${args[@]+"${args[@]}"} ${run[@]+"${run[@]}"} "$@"
