@@ -98,8 +98,8 @@ enum KeySelfTest {
   }
 
   private static func find(_ target: String, in view: NSView) -> NSView? {
-    if target == prompt, let text = view as? NSTextView, !text.isFieldEditor, text.isEditable { return text }
-    if let field = view as? NSTextField, field.placeholderString == target { return field }
+    guard target == prompt else { return TerminalSelfTest.textField(placeholder: target, in: view) }
+    if let text = view as? NSTextView, !text.isFieldEditor, text.isEditable { return text }
     return view.subviews.lazy.compactMap { find(target, in: $0) }.first
   }
 
