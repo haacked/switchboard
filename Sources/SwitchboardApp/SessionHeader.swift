@@ -1,115 +1,117 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The top of a session view: the session's name, state, links, and folder, and its actions.
+/// The top of a session view: the name and state, the reason, and one line of links. The session's actions are in
+/// the window toolbar, which `SessionToolbarItems` fills.
 struct SessionHeader: View {
-  @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  @ObservedObject var ui: SessionViewState
-  @Binding var showsSidePanel: Bool
-  let requestRemoval: () -> Void
 
   var body: some View {
-    HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 8) {
-          Text(session.name).font(.title3.bold())
-            .contextMenu { CopyLinkMenuItem(session: session) }
-          StateBadge(state: session.state)
-          Text(session.live ? "claude running" : "claude stopped")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          if let mode = session.permissionMode {
-            Text("\(PermissionMode.title(mode)) mode")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-        InlineText(plain: session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-        if let pr = session.pr, let url = pr.link {
-          HStack(spacing: 4) {
-            Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
-            if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
-            if let count = pr.commitCount {
-              Text("\(count) \(count == 1 ? "commit" : "commits")").font(.caption).foregroundStyle(.secondary)
-            }
-          }
-        }
-        IssueBadge(session: session)
-        CleanupNote(session: session)
-        BranchSwitchNote(session: session)
-        // The title row wraps the session's name at 1024 pt when the account sits in it.
-        HStack(spacing: 8) {
+    VStack(alignment: .leading, spacing: 4) {
+      HStack(spacing: 8) {
+        Text(session.name).font(.title3.bold())
+          .lineLimit(1)
+          .truncationMode(.tail)
+          .help(session.name)
+          .contextMenu { CopyLinkMenuItem(session: session) }
+        StateBadge(state: session.state).fixedSize()
+        Text(SessionHeaderLine.caption(for: session))
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize()
+        Spacer(minLength: 8)
+        Group {
+          // The toolbar has no room for Notes at 1024 pt.
+          NotesButton(session: session, always: true)
           SessionAccountControl(session: session)
           if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
           if session.kind == .manager { ManagerHeaderControls(session: session) }
-          if let repo = RepoLabels.label(for: session) {
-            Text(repo).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-              .help("The repo this session works in")
-          }
-          Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .textSelection(.enabled)
         }
+        .fixedSize()
       }
-      Spacer()
-      HStack {
-        ForEach(SessionActions.list(for: session), id: \.self) { button($0) }
+      InlineText(plain: session.reason).foregroundStyle(.secondary)
+        .lineLimit(1)
+        .truncationMode(.tail)
+        .help(session.reason)
+        .textSelection(.enabled)
+      HStack(spacing: 8) {
+        ForEach(SessionHeaderLine.links(for: session), id: \.kind) { link($0) }
       }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      CleanupNote(session: session)
+      BranchSwitchNote(session: session)
     }
-    .padding(12)
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .padding(.horizontal, 12)
+    .padding(.vertical, 8)
+    .clickAnchor("session-header")
   }
 
-  @ViewBuilder private func button(_ action: SessionAction) -> some View {
-    switch action {
-    case .run(.resumePaused):
-      Button("Resume") { model.resume(session.id) }
-        .help(PauseBanner.resumeHelp)
-    case .run(.stop):
-      Button("Stop") { model.stop(session.id) }
-        .help(BoardModel.stopHelp)
-    case .run(.startNow):
-      Button("Start Now") { model.startNow(session.id) }
-        .disabled(model.startingNow.contains(session.id))
-        .help(BoardModel.startNowHelp)
-    case .run(.restart):
-      Button("Resume") { model.resume(session.id) }
-        .help("Restart claude in this session. It continues the conversation.")
-    case .pause:
-      PauseMenuItems(id: session.id)
-        .fixedSize()
-        .help("Stop claude until you resume it, or until a time you pick.")
-    case .done(let marked):
-      Button(marked ? "Not Done" : "Done") { model.setDone(session.id, !marked) }
-        .help(
-          marked
-            ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
-            : "Mark the session done. It leaves the Inbox and moves to Done on the board.")
-    case .notes:
-      NotesButton(session: session, always: true)
-    case .sidePanel:
-      Button {
-        showsSidePanel.toggle()
-      } label: {
-        Image(systemName: "sidebar.right")
+  /// The branch or folder truncates first, then the PR's line. The repo and the issue never truncate.
+  @ViewBuilder private func link(_ item: SessionHeaderLine.Item) -> some View {
+    switch item.kind {
+    case .repo:
+      Text(item.text).fontWeight(.medium).lineLimit(1).fixedSize().help(item.help)
+    case .pr:
+      HStack(spacing: 4) {
+        if let url = item.url { Link(item.text, destination: url).lineLimit(1).help(item.help) }
+        if let owners = session.pr?.codeOwners { CodeOwnerShield(status: owners).fixedSize() }
+        if let count = session.pr?.commitCount {
+          Text("\(count) \(count == 1 ? "commit" : "commits")").fixedSize()
+        }
       }
-      .accessibilityLabel(showsSidePanel ? "Hide Waits and Notes" : "Show Waits and Notes")
-      .disabled(!ui.sidePanelFits)
-      .help(
-        "Show or hide the session's waits, schedules, and notes beside the terminals. The panel hides itself, and this button is off, while the view is too narrow for it."
-      )
-    case .cleanUp:
-      Button("Clean Up…") { model.confirmingCleanup = session.id }
-        .disabled(model.cleaningUp.contains(session.id))
-        .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
-    case .delete:
-      Button(role: .destructive, action: requestRemoval) {
-        Image(systemName: "trash")
-      }
-      .help("Remove the session. Asks you to confirm first.")
+      .layoutPriority(1)
+    case .issue:
+      IssueBadge(session: session).fixedSize()
+    case .branch, .folder:
+      Text(item.text)
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .help(item.help)
+        .textSelection(.enabled)
     }
+  }
+}
+
+/// What the header shows beside the name and on its line of links.
+enum SessionHeaderLine {
+  struct Item: Equatable {
+    enum Kind: Hashable { case repo, pr, issue, branch, folder }
+    var kind: Kind
+    var text: String
+    var help: String
+    var url: URL?
+  }
+
+  /// Whether claude runs, and the permission mode when sbd knows it.
+  static func caption(for s: SessionSummary) -> String {
+    let run = s.live ? "claude running" : "claude stopped"
+    return s.permissionMode.map { "\(run) · \(PermissionMode.title($0)) mode" } ?? run
+  }
+
+  /// The repo, the PR, the issue, and the branch, in that order. The folder shows in place of a missing branch, and
+  /// names itself in the branch's help otherwise. A PR whose url is not https has no link, so it is left out.
+  static func links(for s: SessionSummary) -> [Item] {
+    var items: [Item] = []
+    if let repo = RepoLabels.label(for: s) {
+      items.append(Item(kind: .repo, text: repo, help: "The repo this session works in"))
+    }
+    if let pr = s.pr, let url = pr.link {
+      items.append(Item(kind: .pr, text: pr.line, help: "\(pr.repo): \(pr.title)", url: url))
+    }
+    if let issues = s.issues, !issues.isEmpty {
+      let prRepo = s.pr?.repo
+      items.append(
+        Item(
+          kind: .issue, text: IssueBadge.label(for: issues, prRepo: prRepo),
+          help: IssueBadge.tooltip(for: issues, prRepo: prRepo)))
+    }
+    if let branch = s.branch {
+      items.append(Item(kind: .branch, text: branch, help: "Folder: \(s.cwd)"))
+    } else {
+      items.append(Item(kind: .folder, text: s.cwd, help: "The session's folder"))
+    }
+    return items
   }
 }

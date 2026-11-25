@@ -23,7 +23,6 @@ enum SessionAction: Hashable {
   case run(SessionRunControl)
   case pause
   case done(marked: Bool)
-  case notes
   case sidePanel
   case cleanUp
   case delete
@@ -34,7 +33,7 @@ enum SessionActions {
   static func list(for s: SessionSummary) -> [SessionAction] {
     var actions: [SessionAction] = [.run(.of(s))]
     if s.canPause { actions.append(.pause) }
-    actions += [.done(marked: s.markedDone), .notes, .sidePanel]
+    actions += [.done(marked: s.markedDone), .sidePanel]
     if CleanupOffer.canCleanUp(s) { actions.append(.cleanUp) }
     actions.append(.delete)
     return actions

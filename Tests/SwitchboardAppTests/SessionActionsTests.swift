@@ -44,8 +44,7 @@ private func isRun(_ a: SessionAction) -> Bool {
   return false
 }
 
-/// The input shapes of the plan's Risks 3 and 4, each with the run control that the header's old `if`/`else if`
-/// chain chose for it: paused, else live, else queued, else stopped.
+/// Session shapes, each with its run control: paused, else live, else queued, else stopped.
 private enum Shapes {
   static let all: [(name: String, session: SessionSummary, run: SessionRunControl)] = {
     var pausedLive = liveWork()
@@ -105,8 +104,7 @@ private enum Shapes {
   }()
 }
 
-/// The header's one button that starts or stops claude, chosen in the order of the old header: paused, then live,
-/// then queued, then stopped.
+/// The one button that starts or stops claude. It checks paused, then live, then queued, then stopped.
 @Suite struct SessionActionsRunControl {
   @Test(arguments: Shapes.all.indices)
   func choosesTheSameRunControlAsTheOldHeader(_ i: Int) {
@@ -244,8 +242,7 @@ private enum Shapes {
   }
 }
 
-/// The header's trash showed for every session that a session view shows. Delete, Notes, and the side panel toggle
-/// stay unconditional, whatever the session's kind, state, or removal.
+/// Every session view offers Delete and the side panel toggle, whatever the session's kind, state, or removal.
 @Suite struct SessionActionsAlwaysOffered {
   @Test(arguments: Shapes.all.indices)
   func offersDeleteLastInEveryShape(_ i: Int) {
@@ -258,21 +255,14 @@ private enum Shapes {
   }
 
   @Test(arguments: Shapes.all.indices)
-  func offersNotesOnceInEveryShape(_ i: Int) {
-    let (name, s, _) = Shapes.all[i]
-
-    #expect(SessionActions.list(for: s).filter { $0 == .notes }.count == 1, "\(name)")
-  }
-
-  @Test(arguments: Shapes.all.indices)
   func offersTheSidePanelOnceInEveryShape(_ i: Int) {
     let (name, s, _) = Shapes.all[i]
 
     #expect(SessionActions.list(for: s).filter { $0 == .sidePanel }.count == 1, "\(name)")
   }
 
-  /// `SessionMenu` offers no Delete for a chat, the Operator, or a session with a removal. The header's trash does,
-  /// and this change keeps it that way.
+  /// `SessionMenu` offers no Delete for a chat, the Operator, or a session with a removal. The session view's
+  /// Delete does.
   @Test(
     arguments: [SessionKind.work, .manager, .chat, .operator],
     [Removal.State?.none, .queued, .running, .failed])
@@ -296,13 +286,13 @@ private enum Shapes {
   }
 }
 
-/// The whole list for the shapes that show each optional action, in the header's order: run, pause, done, notes,
+/// The whole list for the shapes that show each optional action, in the order the view shows them: run, pause, done,
 /// side panel, clean up, delete.
 @Suite struct SessionActionsOrder {
   @Test func listsEveryActionOfALiveSession() {
     #expect(
       SessionActions.list(for: liveWork()) == [
-        .run(.stop), .pause, .done(marked: false), .notes, .sidePanel, .delete,
+        .run(.stop), .pause, .done(marked: false), .sidePanel, .delete,
       ])
   }
 
@@ -311,7 +301,7 @@ private enum Shapes {
     s.pause = paused
 
     #expect(
-      SessionActions.list(for: s) == [.run(.resumePaused), .done(marked: false), .notes, .sidePanel, .delete])
+      SessionActions.list(for: s) == [.run(.resumePaused), .done(marked: false), .sidePanel, .delete])
   }
 
   @Test func listsEveryActionOfAQueuedSession() {
@@ -320,7 +310,7 @@ private enum Shapes {
 
     #expect(
       SessionActions.list(for: s) == [
-        .run(.startNow), .pause, .done(marked: false), .notes, .sidePanel, .delete,
+        .run(.startNow), .pause, .done(marked: false), .sidePanel, .delete,
       ])
   }
 
@@ -330,7 +320,7 @@ private enum Shapes {
 
     #expect(
       SessionActions.list(for: s) == [
-        .run(.restart), .pause, .done(marked: true), .notes, .sidePanel, .cleanUp, .delete,
+        .run(.restart), .pause, .done(marked: true), .sidePanel, .cleanUp, .delete,
       ])
   }
 
@@ -339,6 +329,6 @@ private enum Shapes {
     s.live = false
 
     #expect(
-      SessionActions.list(for: s) == [.run(.restart), .done(marked: false), .notes, .sidePanel, .delete])
+      SessionActions.list(for: s) == [.run(.restart), .done(marked: false), .sidePanel, .delete])
   }
 }

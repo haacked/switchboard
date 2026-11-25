@@ -28,7 +28,7 @@ struct SessionView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      SessionHeader(session: session, ui: ui, showsSidePanel: $showsSidePanel, requestRemoval: requestRemoval)
+      SessionHeader(session: session)
       if session.kind == .manager { ManagerStatusStrip(session: session) }
       if session.kind.isConversation { SchedulesStrip(session: session) }
       // The Inbox lists every proposal above the item that nests this view.
@@ -66,13 +66,22 @@ struct SessionView: View {
       SessionMessageField(session: session.id, draft: model.messageDraft(for: session))
     }
     // A request that no view took would otherwise take focus the next time this session shows.
+    // Every view that observes the model draws again on each assignment, even of the same value.
+    .onChange(of: session.id, initial: true) { if model.shownSession != session.id { model.shownSession = session.id } }
     .onDisappear { [model, id = session.id] in
       model.releaseTerminalFocus(id)
       model.forgetMessageField(id)
+      // The next session's view can appear before this one goes.
+      if model.shownSession == id { model.shownSession = nil }
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
       if session.hasTerminals { await connection.connect(session.id, live: session.live) }
+    }
+    .toolbar {
+      SessionToolbarItems(
+        model: model, session: session, sidePanelFits: ui.sidePanelFits, showsSidePanel: $showsSidePanel,
+        requestRemoval: requestRemoval)
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
     .referenceRepo(session)
