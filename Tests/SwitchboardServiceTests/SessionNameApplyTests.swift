@@ -20,6 +20,7 @@ private func withNamingService(config extra: [String: JSON] = [:], _ body: (Serv
 /// A quota that every account has spent.
 private struct NoBudget: QuotaBudget {
   func hasBudget(account: String) -> Bool { false }
+  func loginWorks(account: String, since: Int64) -> Bool { false }
 }
 
 private let namingReply = HeadlessReply(

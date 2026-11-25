@@ -73,6 +73,16 @@ public enum Account: Hashable, Sendable {
   /// The short name of a stored folder. It judges the folder by its name alone, because the app and `sb` have
   /// no config to read `codexHomes` from. It matches `name` for every listed account, because no list holds a
   /// `codexHomes` entry named like a Claude folder.
+  /// The account key of a session on `host`, which runs under that host's login. The key is no folder.
+  public static func key(ofHost host: String) -> String { "\(host)\(hostKeySuffix)" }
+
+  /// The host that a key from `key(ofHost:)` names, or nil for a folder.
+  public static func host(ofKey key: String) -> String? {
+    key.hasSuffix(hostKeySuffix) ? String(key.dropLast(hostKeySuffix.count)) : nil
+  }
+
+  private static let hostKeySuffix = ":~/.claude"
+
   public static func name(ofFolder folder: String) -> String {
     CodexAccount.isNamedLikeCodex(folder) ? CodexAccount(folder: folder).name : ClaudeAccount(folder: folder).name
   }

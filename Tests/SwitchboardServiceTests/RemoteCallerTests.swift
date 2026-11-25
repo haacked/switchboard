@@ -900,6 +900,7 @@ func withReadyService(
   private struct SpentFor: QuotaBudget {
     let account: String
     func hasBudget(account: String) -> Bool { account != self.account }
+    func loginWorks(account: String, since: Int64) -> Bool { false }
   }
 
   @Test(.timeLimit(.minutes(1)))

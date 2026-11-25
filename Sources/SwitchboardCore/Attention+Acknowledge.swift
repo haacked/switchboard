@@ -79,9 +79,11 @@ extension Attention {
   /// acknowledged moves to Waiting while its state, its reason, and the PR's
   /// head commit are the ones that the user saw, for `acknowledgedMs` after
   /// the acknowledgment. After that the verdict stays in the Inbox, and its
-  /// reason says when the user acknowledged it.
+  /// reason says when the user acknowledged it. A failed login's verdict
+  /// never moves, because the turn can't go on until the login works.
   static func acknowledged(_ verdict: Verdict, _ facts: SessionFacts, now: Int64, acknowledgedMs: Int64) -> Verdict {
-    guard AttentionState.inbox.contains(verdict.state), let ack = facts.acknowledgment, ack.covers(verdict, facts)
+    guard AttentionState.inbox.contains(verdict.state), !verdict.loginFailed, let ack = facts.acknowledgment,
+      ack.covers(verdict, facts)
     else { return verdict }
     var out = verdict
     let at = ack.at ?? now
