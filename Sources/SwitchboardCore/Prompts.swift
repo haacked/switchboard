@@ -27,7 +27,7 @@ public enum Prompt: String, CaseIterable, Sendable {
     case .managerGuide:
       return [
         "childQuestionsGuidance": ChildQuestions.guidance, "sessionLinkGuidance": SessionLink.guidance,
-        "managerOperatorName": Manager.operatorName,
+        "managerOperatorName": Manager.operatorName, "eventSubscriptionsGuidance": EventSubscriptions.guidance,
         "mcpToolServerDefaultEventLimit": String(MCPToolServer.defaultEventLimit),
       ]
     case .chatGuide:

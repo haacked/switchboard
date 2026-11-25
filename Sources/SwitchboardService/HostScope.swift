@@ -62,6 +62,8 @@ enum HostScope {
     "answer": Rule(
       keys: ["session", "card", "behavior", "autoMode", "always", "message", "answers"], refs: ["session"]),
     "summary-set": Rule(keys: ["session", "card"], refs: ["session"]),
+    // From a host, the op refuses every group but the one of the session that `session` names.
+    "group-show": Rule(keys: ["session", "group"], refs: ["session"]),
     // No `account` or `group`.
     "new": Rule(
       keys: [
