@@ -400,11 +400,12 @@ public enum SlackPoll {
     guard let user = answer["last_reply_user_id"]?.string, isUserId(user) else {
       throw ReadError("claude's last reply user is not a Slack user id")
     }
-    guard results.contains(where: { hasHeader($0, user: user, ts: ts) }) else {
+    let all = results.flatMap(headers(in:))
+    guard hasHeader(all, user: user, ts: ts) else {
       throw ReadError("no message in the thread's read is from claude's last reply user at its ts")
     }
-    let name = answer["last_reply_user_name"]?.string.map { oneLine($0, max: 80) }.flatMap { $0.isEmpty ? nil : $0 }
-    let others = results.flatMap(headers(in:)).compactMap { header -> (header: Header, ts: Int64)? in
+    let name = answer["last_reply_user_name"]?.string.flatMap(displayName)
+    let others = all.compactMap { header -> (header: Header, ts: Int64)? in
       guard header.user != you, let value = tsValue(header.ts), value > floor, value <= ceiling else { return nil }
       return (header, value)
     }
@@ -465,7 +466,7 @@ public enum SlackPoll {
   }
 
   /// One message header of a `slack_read_thread` result.
-  public struct Header: Equatable, Sendable {
+  public struct Header: Codable, Equatable, Sendable {
     public var user: String
     /// The text of the `From:` line before the id, without a trailing `<email>`, or nil when nothing is left.
     public var name: String?
@@ -497,14 +498,19 @@ public enum SlackPoll {
       if name.hasSuffix(">"), let email = name.lastIndex(of: "<") {
         name = String(name[..<email])
       }
-      let clipped = oneLine(name, max: 80)
-      out.append(Header(user: user, name: clipped.isEmpty ? nil : clipped, ts: ts))
+      out.append(Header(user: user, name: displayName(name), ts: ts))
     }
     return out
   }
 
-  /// Whether one message header in the text holds the user and the ts.
-  static func hasHeader(_ text: String, user: String, ts: String) -> Bool {
-    headers(in: text).contains { $0.user == user && $0.ts == ts }
+  /// Whether one of the message headers holds the user and the ts.
+  static func hasHeader(_ headers: [Header], user: String, ts: String) -> Bool {
+    headers.contains { $0.user == user && $0.ts == ts }
+  }
+
+  /// A user's name on one line and cut to 80 characters, or nil when nothing is left.
+  private static func displayName(_ text: String) -> String? {
+    let name = oneLine(text, max: 80)
+    return name.isEmpty ? nil : name
   }
 }

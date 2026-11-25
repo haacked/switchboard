@@ -9,16 +9,9 @@ import Testing
 /// the arguments of the runs, not on raw run counts. A link can land before sbd's first scan, so a poll may run before
 /// the first clock advance. Each test waits for a status that only a poll after the advance gives.
 @Suite(.blocking(timeLimit: .seconds(240))) struct SlackThreadPollTests {
-  static let config: [String: JSON] = ["slack": ["pollSeconds": 1200]]
-  /// D6: 3 days.
-  static let windowMs: Int64 = 3 * 24 * 60 * 60 * 1000
-  static let other = "U0OTHER"
   static let readTool = "mcp__claude_ai_Slack__slack_read_thread"
   static let profileTool = "mcp__claude_ai_Slack__slack_read_user_profile"
   static let sendTool = "mcp__claude_ai_Slack__slack_send_message"
-  static let secondChannel = "C0EXAMPLE02"
-  static let secondTs = "1794965100.000200"
-  static let secondThread = "https://example.slack.com/archives/C0EXAMPLE02/p1794965100000200"
 
   static func value(after flag: String, in run: [String]) -> String? {
     guard let i = run.firstIndex(of: flag), i + 1 < run.count else { return nil }
@@ -61,15 +54,15 @@ import Testing
 
   /// #503 requires this case.
   @Test func newReplyFromSomeoneElseShowsTheMark() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
 
     let status = try pollAndRead(sbd, s.id)
 
     #expect(status["replies"]?.int == 1)
-    #expect(status["lastReply"]?["user"]?.string == Self.other)
+    #expect(status["lastReply"]?["user"]?.string == SlackFixtures.other)
     #expect(status["lastReply"]?["name"]?.string == "Alice")
     #expect(status["lastReply"]?["t"]?.int.map(Int64.init) == t + 60_000)
     #expect(status["lastReply"]?["you"]?.bool == false)
@@ -83,7 +76,7 @@ import Testing
 
   /// #503 requires this case. The stub's profile answer gives the id in `slack-self-id`.
   @Test func replyYouWroteIsNotNew() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     try sbd.writeSlackSwitch("slack-self-id", "U0EXAMPLEME")
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
@@ -101,10 +94,10 @@ import Testing
 
   /// #503 requires this case.
   @Test func failedReadKeepsTheLastStatus() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     let good = try pollAndRead(sbd, s.id)
     #expect(good["replies"]?.int == 1)
 
@@ -127,14 +120,14 @@ import Testing
 
   /// #503 requires this case.
   @Test func threadStopsBeingWatchedAfterThreeDays() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     let good = try pollAndRead(sbd, s.id)
     let runs = sbd.slackRuns("slack-calls.log").count
 
-    try sbd.advanceClock(Self.windowMs)
+    try sbd.advanceClock(SlackWatch.windowMs)
     try waitForStatus(sbd, s.id, "the end of the watch") { $0["watched"]?.bool == false }
     try sbd.advanceClock(SlackFixtures.step)
 
@@ -146,7 +139,7 @@ import Testing
   }
 
   @Test func nothingWatchedMakesNoCall() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let linear = try sbd.addLink(s.id, "https://linear.app/example/issue/ENG-123")
 
@@ -162,7 +155,7 @@ import Testing
   // MARK: The call
 
   @Test func pollArgumentsFollowTheSpike() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     try pollAndRead(sbd, s.id)
@@ -192,7 +185,7 @@ import Testing
   /// D4: on a fresh sbd, claude lists every Slack tool, so sbd refuses the first attempt of each call at init and
   /// retries it with the learned deny list. A refused call stores a `headless_calls` row with its error.
   @Test func aFreshSbdRefusesEachCallOnceAndRetries() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     try pollAndRead(sbd, s.id)
@@ -213,10 +206,10 @@ import Testing
   }
 
   @Test func oldestAddsNewRepliesToTheCount() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    let first = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")
+    let first = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([first])
     let one = try pollAndRead(sbd, s.id)
     #expect(one["replies"]?.int == 1)
@@ -240,11 +233,11 @@ import Testing
 
   /// The profile call runs first, so it learns `mcp__other` before the poll's first attempt.
   @Test func extraToolIsDeniedAndRetried() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     try sbd.writeSlackSwitch("slack-extra-tools", "mcp__other__run\n")
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
 
     let status = try pollAndRead(sbd, s.id)
 
@@ -263,7 +256,7 @@ import Testing
 
   /// The profile id stays in memory, so only the poll meets the new server, and its log shows the refused attempt.
   @Test func addingAServerLaterIsDeniedAndRetried() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let first = try pollAndRead(sbd, s.id)
@@ -282,21 +275,21 @@ import Testing
   }
 
   @Test func skippedThreadIsAFailedRead() throws {
-    let sbd = try Instance(config: Self.config)
-    try sbd.writeSlackSwitch("slack-skip", "\(Self.secondChannel)/\(Self.secondTs)\n")
+    let sbd = try Instance(config: SlackFixtures.config)
+    try sbd.writeSlackSwitch("slack-skip", "\(SlackFixtures.secondChannel)/\(SlackFixtures.secondTs)\n")
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    _ = try sbd.addLink(s.id, Self.secondThread)
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    _ = try sbd.addLink(s.id, SlackFixtures.secondThread)
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     try sbd.writeSlackThread(
-      channel: Self.secondChannel, ts: Self.secondTs,
-      [SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+      channel: SlackFixtures.secondChannel, ts: SlackFixtures.secondTs,
+      [SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
 
     let read = try pollAndRead(sbd, s.id)
 
     #expect(read["replies"]?.int == 1)
     #expect(read["error"] == nil)
-    let skipped = try waitForStatus(sbd, s.id, url: Self.secondThread, "the skipped thread's error") {
+    let skipped = try waitForStatus(sbd, s.id, url: SlackFixtures.secondThread, "the skipped thread's error") {
       $0["error"]?.string != nil
     }
     #expect(skipped["replies"] == nil)
@@ -307,12 +300,12 @@ import Testing
   // MARK: Last looked
 
   @Test func openingTheLinkClearsTheMark() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let link = try sbd.addLink(s.id, SlackExample.root)
     let linkId = try #require(link["id"]?.string)
     let t = try time(link)
-    let first = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")
+    let first = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([first])
     let marked = try pollAndRead(sbd, s.id)
     #expect(marked["newReply"]?.bool == true)
@@ -323,7 +316,7 @@ import Testing
     #expect(opened["links"]?.array?.first?["status"]?["newReply"]?.bool == false, "\(opened)")
     #expect(try status(sbd, s.id)?["newReply"]?.bool == false)
 
-    let newer = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: Self.other, name: "Alice")
+    let newer = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([first, newer])
     let again = try pollAndRead(sbd, s.id)
     #expect(again["replies"]?.int == 2)
@@ -338,15 +331,15 @@ import Testing
   /// The app sends `link-open` through a queue with `at`, the time of the click. A reply posted between the click and
   /// the request still counts as new.
   @Test func anOpenCountsFromTheClick() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let link = try sbd.addLink(s.id, SlackExample.root)
     let linkId = try #require(link["id"]?.string)
-    let first = SlackReply(ts: SlackFixtures.ts(try time(link) + 60_000), user: Self.other, name: "Alice")
+    let first = SlackReply(ts: SlackFixtures.ts(try time(link) + 60_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([first])
     _ = try pollAndRead(sbd, s.id)
     let now = try sbd.now()
-    let between = SlackReply(ts: SlackFixtures.ts(now - 30_000), user: Self.other, name: "Alice")
+    let between = SlackReply(ts: SlackFixtures.ts(now - 30_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([first, between])
 
     _ = try sbd.client.call(
@@ -363,11 +356,11 @@ import Testing
 
   @Test func acknowledgingClearsTheMark() throws {
     // The idle stop stays past the clock moves, so the session keeps its Inbox item.
-    let sbd = try Instance(idleStopSeconds: 7200, config: Self.config)
+    let sbd = try Instance(idleStopSeconds: 7200, config: SlackFixtures.config)
     let s = try sbd.new(prompt: "hello", name: "flags-cache")
     try sbd.waitFor(s.id, "the summary of the first reply") { $0.state == .needsYou && $0.triage?.source == .summary }
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     let marked = try pollAndRead(sbd, s.id)
     #expect(marked["newReply"]?.bool == true)
 
@@ -385,10 +378,10 @@ import Testing
   /// A restart drops the clock offset and the profile id, so the first scan after it polls at once. The stub fails
   /// the profile call, so sbd makes no thread call (D3) and the status keeps the stored values.
   @Test func statusSurvivesARestart() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     let before = try pollAndRead(sbd, s.id)
     try sbd.writeSlackSwitch("slack-fail")
     let runs = sbd.slackRuns("slack-calls.log").count
@@ -405,10 +398,10 @@ import Testing
   }
 
   @Test func mcpGetSessionCarriesTheStatus() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
     try pollAndRead(sbd, s.id)
     let mcp = try MCPClient(sbd)
 
@@ -417,13 +410,10 @@ import Testing
     let status = try #require(got["links"]?.array?.first?["status"], "\(got)")
     #expect(status["replies"]?.int == 1)
     #expect(status["newReply"]?.bool == true)
-    #expect(status["lastReply"]?["user"]?.string == Self.other)
+    #expect(status["lastReply"]?["user"]?.string == SlackFixtures.other)
   }
 
-  // MARK: The newest reply that isn't yours (#504 Stage 2)
-
-  /// The stub's default profile id.
-  static let selfId = "U0EXAMPLESELF"
+  // MARK: The newest reply that isn't yours
 
   func storedRow(
     _ sbd: Instance, channel: String = SlackExample.channel, thread: String = SlackExample.rootTs
@@ -431,45 +421,45 @@ import Testing
     try sbd.slackThreadRow(channel: channel, thread: thread)
   }
 
-  /// Stage 2's stated case: Alice replies, then you reply before the poll. The row keeps your reply as the last one
-  /// and Alice's as the newest that isn't yours.
+  /// Alice replies, then you reply before the poll. The row keeps your reply as the last one and Alice's as the
+  /// newest that isn't yours.
   @Test func theNewestReplyThatIsNotYoursIsStored() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
     let alice = SlackFixtures.ts(t + 60_000)
     try sbd.writeSlackThread([
-      SlackReply(ts: alice, user: Self.other, name: "Alice"),
-      SlackReply(ts: SlackFixtures.ts(t + 120_000), user: Self.selfId, name: "Me"),
+      SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice"),
+      SlackReply(ts: SlackFixtures.ts(t + 120_000), user: SlackFixtures.selfId, name: "Me"),
     ])
 
     let status = try pollAndRead(sbd, s.id)
 
     #expect(status["lastReply"]?["you"]?.bool == true)
     let row = try #require(try storedRow(sbd))
-    #expect(row["lastReplyUser"]?.string == Self.selfId)
-    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
-    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
-    #expect(row["lastOtherReplyName"]?.string == "Alice", "\(row)")
+    #expect(row["lastReplyUser"]?.string == SlackFixtures.selfId)
+    #expect(row["lastOther"]?["ts"]?.string == alice, "\(row)")
+    #expect(row["lastOther"]?["user"]?.string == SlackFixtures.other, "\(row)")
+    #expect(row["lastOther"]?["name"]?.string == "Alice", "\(row)")
   }
 
   /// A later read that finds only your reply keeps Alice's. A later read that finds Carol's replaces it.
   @Test func theStoredOtherReplyChangesOnlyForANewerOne() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
-    let alice = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")
+    let alice = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")
     try sbd.writeSlackThread([alice])
     try pollAndRead(sbd, s.id)
-    let mine = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: Self.selfId, name: "Me")
+    let mine = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: SlackFixtures.selfId, name: "Me")
     try sbd.writeSlackThread([alice, mine])
 
     try pollAndRead(sbd, s.id)
 
     let kept = try #require(try storedRow(sbd))
     #expect(kept["lastReplyTs"]?.string == mine.ts, "\(kept)")
-    #expect(kept["lastOtherReplyTs"]?.string == alice.ts, "\(kept)")
-    #expect(kept["lastOtherReplyUser"]?.string == Self.other, "\(kept)")
+    #expect(kept["lastOther"]?["ts"]?.string == alice.ts, "\(kept)")
+    #expect(kept["lastOther"]?["user"]?.string == SlackFixtures.other, "\(kept)")
 
     let carol = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: "U0CAROL", name: "Carol")
     try sbd.writeSlackThread([alice, mine, carol])
@@ -477,17 +467,17 @@ import Testing
     try pollAndRead(sbd, s.id)
 
     let replaced = try #require(try storedRow(sbd))
-    #expect(replaced["lastOtherReplyTs"]?.string == carol.ts, "\(replaced)")
-    #expect(replaced["lastOtherReplyUser"]?.string == "U0CAROL", "\(replaced)")
-    #expect(replaced["lastOtherReplyName"]?.string == "Carol", "\(replaced)")
+    #expect(replaced["lastOther"]?["ts"]?.string == carol.ts, "\(replaced)")
+    #expect(replaced["lastOther"]?["user"]?.string == "U0CAROL", "\(replaced)")
+    #expect(replaced["lastOther"]?["name"]?.string == "Carol", "\(replaced)")
   }
 
   @Test func aFailedReadKeepsTheStoredOtherReply() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
     let alice = SlackFixtures.ts(t + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
     try pollAndRead(sbd, s.id)
     try sbd.writeSlackSwitch("slack-fail")
     _ = try sbd.advanceToPoll()
@@ -496,17 +486,17 @@ import Testing
 
     let row = try #require(try storedRow(sbd))
     #expect(row["error"]?.string != nil, "\(row)")
-    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
-    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
+    #expect(row["lastOther"]?["ts"]?.string == alice, "\(row)")
+    #expect(row["lastOther"]?["user"]?.string == SlackFixtures.other, "\(row)")
   }
 
   /// The call succeeds but skips the thread, so sbd refuses only that thread's read.
   @Test func aRefusedThreadReadKeepsTheStoredOtherReply() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let t = try time(try sbd.addLink(s.id, SlackExample.root))
     let alice = SlackFixtures.ts(t + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
     try pollAndRead(sbd, s.id)
     try sbd.writeSlackSwitch("slack-skip", "\(SlackExample.channel)/\(SlackExample.rootTs)\n")
     _ = try sbd.advanceToPoll()
@@ -514,17 +504,8 @@ import Testing
     try waitForStatus(sbd, s.id, "a refused read") { $0["error"]?.string != nil }
 
     let row = try #require(try storedRow(sbd))
-    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
-    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
-    #expect(row["lastOtherReplyName"]?.string == "Alice", "\(row)")
-  }
-
-  /// Checks the condition every 0.2 s for the seconds, and fails at the first check that is false.
-  func stays(_ what: String, for seconds: Double = 2, _ condition: () throws -> Bool) throws {
-    let deadline = Date().addingTimeInterval(seconds)
-    while Date() < deadline {
-      try #require(try condition(), "\(what)")
-      usleep(200_000)
-    }
+    #expect(row["lastOther"]?["ts"]?.string == alice, "\(row)")
+    #expect(row["lastOther"]?["user"]?.string == SlackFixtures.other, "\(row)")
+    #expect(row["lastOther"]?["name"]?.string == "Alice", "\(row)")
   }
 }

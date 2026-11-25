@@ -22,10 +22,9 @@ private enum WatchFx {
     SlackWatch.threads(links, now: now, replyWaits: replyWaits).map(\.key)
   }
 
-  /// The thread of an open reply wait on the URL's thread.
-  static func ref(_ url: String) -> SlackThreadRef {
-    let target = LinkTarget.parse(url)
-    return SlackThreadRef(key: target?.key ?? "", channel: target?.channel ?? "", thread: target?.thread ?? "")
+  /// The thread of an open reply wait on the URL's thread. It fails the test when the URL names no Slack thread.
+  static func ref(_ url: String) throws -> SlackThreadRef {
+    try #require(LinkTarget.parse(url).flatMap(SlackThreadRef.init(target:)), "\(url) names no Slack thread")
   }
 }
 
@@ -111,11 +110,11 @@ private enum WatchFx {
     #expect(WatchFx.keys(links, now: WatchFx.t) == [LinkFixtures.otherThreadKey])
   }
 
-  @Test func threadsKeepALinkPastItsWindowThatAReplyWaitNames() {
+  @Test func threadsKeepALinkPastItsWindowThatAReplyWaitNames() throws {
     let links = [WatchFx.link(t: WatchFx.t - WatchFx.windowMs)]
 
     #expect(
-      WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)]) == [
+      try WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)]) == [
         LinkFixtures.slackRootKey
       ])
   }
@@ -129,59 +128,59 @@ private enum WatchFx {
   // MARK: Reply waits' threads
 
   /// #504 D4: the poll reads a reply wait's thread even when no link lists it.
-  @Test func aReplyWaitsThreadThatNoLinkListsIsReturned() {
-    let refs = SlackWatch.threads([], now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.otherThread)])
+  @Test func aReplyWaitsThreadThatNoLinkListsIsReturned() throws {
+    let refs = try SlackWatch.threads([], now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.otherThread)])
 
-    #expect(refs == [WatchFx.ref(LinkFixtures.otherThread)])
+    #expect(try refs == [WatchFx.ref(LinkFixtures.otherThread)])
   }
 
-  @Test func aReplyWaitsThreadThatNoLinkListsComesAfterTheLinksThreads() {
+  @Test func aReplyWaitsThreadThatNoLinkListsComesAfterTheLinksThreads() throws {
     let links = [WatchFx.link()]
 
-    let keys = WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.otherThread)])
+    let keys = try WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.otherThread)])
 
     #expect(keys == [LinkFixtures.slackRootKey, LinkFixtures.otherThreadKey])
   }
 
-  @Test func aReplyWaitsThreadThatALinkListsIsReturnedOnce() {
+  @Test func aReplyWaitsThreadThatALinkListsIsReturnedOnce() throws {
     let links = [WatchFx.link(LinkFixtures.slackReply)]
 
-    let keys = WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
+    let keys = try WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
 
     #expect(keys == [LinkFixtures.slackRootKey])
   }
 
   /// A link past its window that a reply wait keeps watched keeps its place among the links' threads, ahead of a
   /// later link inside its window.
-  @Test func aLinkPastItsWindowThatAReplyWaitNamesKeepsItsPlaceAmongTheLinks() {
+  @Test func aLinkPastItsWindowThatAReplyWaitNamesKeepsItsPlaceAmongTheLinks() throws {
     let links = [
       WatchFx.link(LinkFixtures.slackRoot, t: WatchFx.t - WatchFx.windowMs, id: "l1"),
       WatchFx.link(LinkFixtures.otherThread, id: "l2"),
     ]
 
-    let keys = WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
+    let keys = try WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
 
     #expect(keys == [LinkFixtures.slackRootKey, LinkFixtures.otherThreadKey])
   }
 
-  @Test func aLinkPastItsWindowThatAReplyWaitNamesIsReturnedOnce() {
+  @Test func aLinkPastItsWindowThatAReplyWaitNamesIsReturnedOnce() throws {
     let links = [WatchFx.link(LinkFixtures.slackReply, t: WatchFx.t - WatchFx.windowMs)]
 
-    let keys = WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
+    let keys = try WatchFx.keys(links, now: WatchFx.t, replyWaits: [WatchFx.ref(LinkFixtures.slackRoot)])
 
     #expect(keys == [LinkFixtures.slackRootKey])
   }
 
-  @Test func replyWaitsThreadsThatNoLinkListsKeepTheirOrder() {
-    let waits: [SlackThreadRef] = [WatchFx.ref(LinkFixtures.otherThread), WatchFx.ref(LinkFixtures.slackRoot)]
+  @Test func replyWaitsThreadsThatNoLinkListsKeepTheirOrder() throws {
+    let waits: [SlackThreadRef] = try [WatchFx.ref(LinkFixtures.otherThread), WatchFx.ref(LinkFixtures.slackRoot)]
 
     #expect(
       WatchFx.keys([], now: WatchFx.t, replyWaits: waits) == [LinkFixtures.otherThreadKey, LinkFixtures.slackRootKey])
   }
 
   /// The threads are one per thread key, so two reply waits on one thread give one read.
-  @Test func twoReplyWaitsOnOneThreadGiveOneRef() {
-    let waits: [SlackThreadRef] = [WatchFx.ref(LinkFixtures.otherThread), WatchFx.ref(LinkFixtures.otherThread)]
+  @Test func twoReplyWaitsOnOneThreadGiveOneRef() throws {
+    let waits: [SlackThreadRef] = try [WatchFx.ref(LinkFixtures.otherThread), WatchFx.ref(LinkFixtures.otherThread)]
 
     #expect(WatchFx.keys([], now: WatchFx.t, replyWaits: waits) == [LinkFixtures.otherThreadKey])
   }

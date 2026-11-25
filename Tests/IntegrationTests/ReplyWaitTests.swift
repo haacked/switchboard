@@ -9,14 +9,6 @@ import Testing
 /// the events, and the summary, never on raw run counts. The tests read the reply wait as JSON. Each reply's ts comes
 /// from the wait's `created` on sbd's clock.
 @Suite(.blocking(timeLimit: .seconds(240))) struct ReplyWaitTests {
-  static let config: [String: JSON] = ["slack": ["pollSeconds": 1200]]
-  static let windowMs: Int64 = 3 * 24 * 60 * 60 * 1000
-  static let other = "U0OTHER"
-  /// The stub's default profile id.
-  static let selfId = "U0EXAMPLESELF"
-  static let secondChannel = "C0EXAMPLE02"
-  static let secondTs = "1794965100.000200"
-  static let secondThread = "https://example.slack.com/archives/C0EXAMPLE02/p1794965100000200"
   static let summaryOfRoot = "a reply in Slack thread in C0EXAMPLE01"
 
   /// The link of a reply as D1 builds it: `p` and the ts without its dot, then the root.
@@ -73,13 +65,10 @@ import Testing
       "the wait-resolved event", timeout: 30, fetch: { try resolvedEvents(sbd, session).last }, until: { _ in true })
   }
 
-  /// Checks the condition every 0.2 s for the seconds, and fails at the first check that is false.
-  func stays(_ what: String, for seconds: Double = 2, _ condition: () throws -> Bool) throws {
-    let deadline = Date().addingTimeInterval(seconds)
-    while Date() < deadline {
-      try #require(try condition(), "\(what)")
-      usleep(200_000)
-    }
+  /// Checks for 2 s that the session resolved no wait, then that `wait` is its one open wait.
+  func staysOpen(_ sbd: Instance, _ session: String, _ wait: JSON) throws {
+    try stays("the wait stays open") { try resolvedEvents(sbd, session).isEmpty }
+    #expect(try openWaits(sbd, session).map { $0["id"] } == [wait["id"]])
   }
 
   /// The session's row as sbd stored it, read with sqlite3 while sbd runs.
@@ -95,12 +84,12 @@ import Testing
   /// The issue's case: a reply from someone else after the wait resolves it, and the session resumes with the reply's
   /// name and link.
   @Test func replyFromSomeoneElseResolvesTheWait() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
 
@@ -116,12 +105,12 @@ import Testing
   }
 
   @Test func notifyMovesTheSessionToNeedsYou() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id, ["--then", "notify"])
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
 
@@ -134,12 +123,12 @@ import Testing
 
   /// The issue's case: your own reply leaves the wait open. The tests wait for the status, which shows the reply.
   @Test func yourOwnReplyDoesNotResolve() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     try sbd.writeSlackThread([
-      SlackReply(ts: SlackFixtures.ts(try created(wait) + 60_000), user: Self.selfId, name: "Me")
+      SlackReply(ts: SlackFixtures.ts(try created(wait) + 60_000), user: SlackFixtures.selfId, name: "Me")
     ])
 
     try pollThenTick(sbd)
@@ -149,61 +138,58 @@ import Testing
     try sbd.advanceClock(1000)
     try sbd.advanceClock(1000)
 
-    try stays("the wait stays open") { try resolvedEvents(sbd, s.id).isEmpty }
-    #expect(try openWaits(sbd, s.id).map { $0["id"] } == [wait["id"]])
+    try staysOpen(sbd, s.id, wait)
   }
 
   /// The issue's case: a reply that landed before the wait was set doesn't answer it.
   @Test func aReplyFromBeforeTheWaitDoesNotResolve() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     let alice = SlackFixtures.ts(try created(wait) - 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
     try sbd.advanceClock(1000)
 
     let row = try #require(try sbd.slackThreadRow())
-    try #require(row["lastOtherReplyTs"]?.string == alice, "the poll stored Alice's reply: \(row)")
-    try stays("the wait stays open") { try resolvedEvents(sbd, s.id).isEmpty }
-    #expect(try openWaits(sbd, s.id).map { $0["id"] } == [wait["id"]])
+    try #require(row["lastOther"]?["ts"]?.string == alice, "the poll stored Alice's reply: \(row)")
+    try staysOpen(sbd, s.id, wait)
   }
 
   /// Risk 1's sharpest input: your reply at the wait's exact ms and Alice's a ms before it.
   @Test func repliesAtAndJustBeforeTheWaitDoNotResolve() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     let t = try created(wait)
     try sbd.writeSlackThread([
-      SlackReply(ts: SlackFixtures.ts(t - 1), user: Self.other, name: "Alice"),
-      SlackReply(ts: SlackFixtures.ts(t), user: Self.selfId, name: "Me"),
+      SlackReply(ts: SlackFixtures.ts(t - 1), user: SlackFixtures.other, name: "Alice"),
+      SlackReply(ts: SlackFixtures.ts(t), user: SlackFixtures.selfId, name: "Me"),
     ])
 
     try pollThenTick(sbd)
     try sbd.advanceClock(1000)
 
     let row = try #require(try sbd.slackThreadRow())
-    try #require(row["lastOtherReplyTs"]?.string == SlackFixtures.ts(t - 1), "the poll stored Alice's reply: \(row)")
+    try #require(row["lastOther"]?["ts"]?.string == SlackFixtures.ts(t - 1), "the poll stored Alice's reply: \(row)")
     try #require(row["lastReplyTs"]?.string == SlackFixtures.ts(t), "the poll stored your reply: \(row)")
-    try #require(row["lastReplyUser"]?.string == Self.selfId, "\(row)")
-    try stays("the wait stays open") { try resolvedEvents(sbd, s.id).isEmpty }
-    #expect(try openWaits(sbd, s.id).map { $0["id"] } == [wait["id"]])
+    try #require(row["lastReplyUser"]?.string == SlackFixtures.selfId, "\(row)")
+    try staysOpen(sbd, s.id, wait)
   }
 
   /// D2: Alice replies after the wait, then you reply before the poll. The wait still resolves and names Alice.
   @Test func someoneElsesReplyThenYoursStillResolves() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
     try sbd.writeSlackThread([
-      SlackReply(ts: alice, user: Self.other, name: "Alice"),
-      SlackReply(ts: SlackFixtures.ts(try created(wait) + 120_000), user: Self.selfId, name: "Me"),
+      SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice"),
+      SlackReply(ts: SlackFixtures.ts(try created(wait) + 120_000), user: SlackFixtures.selfId, name: "Me"),
     ])
 
     try pollThenTick(sbd)
@@ -215,7 +201,7 @@ import Testing
 
   /// One row serves every session that links the thread, so one reply resolves a wait in each.
   @Test func twoSessionsWaitingOnOneThreadBothResolve() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let first = try sbd.idleSession(name: "flags-cache")
     let second = try sbd.idleSession(name: "flags-docs")
     _ = try sbd.addLink(first.id, SlackExample.root)
@@ -223,7 +209,7 @@ import Testing
     let firstWait = try setReplyWait(sbd, first.id)
     let secondWait = try setReplyWait(sbd, second.id)
     let alice = SlackFixtures.ts(max(try created(firstWait), try created(secondWait)) + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
 
@@ -234,28 +220,27 @@ import Testing
 
   /// D4: sbd resolves no wait of a Done session, as for every kind.
   @Test func aDoneSessionsReplyWaitDoesNotResolve() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     try sbd.sb("done", s.id)
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
     try sbd.advanceClock(1000)
 
     let row = try #require(try sbd.slackThreadRow())
-    try #require(row["lastOtherReplyTs"]?.string == alice, "the poll stored Alice's reply: \(row)")
-    try stays("the wait stays open") { try resolvedEvents(sbd, s.id).isEmpty }
-    #expect(try openWaits(sbd, s.id).map { $0["id"] } == [wait["id"]])
+    try #require(row["lastOther"]?["ts"]?.string == alice, "the poll stored Alice's reply: \(row)")
+    try staysOpen(sbd, s.id, wait)
   }
 
   // MARK: Recheck and the hand
 
   /// The issue's case: with no reply, the wait goes overdue at its recheck and stays open.
   @Test func recheckOverdueMovesTheSessionToNeedsYou() throws {
-    let sbd = try Instance(config: Self.config.merging(["recheckSeconds": ["reply": 600]]) { $1 })
+    let sbd = try Instance(config: SlackFixtures.config.merging(["recheckSeconds": ["reply": 600]]) { $1 })
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
@@ -273,7 +258,7 @@ import Testing
 
   /// D12: the default recheck is a day.
   @Test func aReplyWaitRechecksADayAfterItWasSet() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
 
@@ -286,7 +271,7 @@ import Testing
 
   /// The issue's case.
   @Test func resolveByHand() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     try setReplyWait(sbd, s.id)
@@ -303,7 +288,7 @@ import Testing
   /// D5: without --target, the wait takes the session's one Slack thread. A reply's link and its thread's link are
   /// one thread.
   @Test func aReplyLinkAndItsThreadsLinkAreOneDefaultTarget() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     // The list can fold the reply's link into its thread's entry, so the test doesn't require a second entry.
@@ -317,7 +302,7 @@ import Testing
   }
 
   @Test func noSlackThreadAmongTheLinksRefusesAWaitWithoutATarget() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, "https://linear.app/example/issue/ENG-123")
 
@@ -329,23 +314,23 @@ import Testing
   }
 
   @Test func twoSlackThreadsAmongTheLinksRefuseAWaitWithoutATargetAndListBoth() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
-    _ = try sbd.addLink(s.id, Self.secondThread)
+    _ = try sbd.addLink(s.id, SlackFixtures.secondThread)
 
     let text = try refusal(sbd, ["wait", s.id, "--kind", "reply"])
 
     #expect(text.contains("flags-cache has 2 Slack threads among its links, so give one as --target"), "\(text)")
     #expect(text.contains(SlackExample.root), "\(text)")
-    #expect(text.contains(Self.secondThread), "\(text)")
+    #expect(text.contains(SlackFixtures.secondThread), "\(text)")
   }
 
   @Test(arguments: [
     "https://github.com/PostHog/posthog/pull/1204", "https://example.slack.com/archives/C0EXAMPLE01",
   ])
   func targetMustBeASlackMessageLink(_ target: String) throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
 
     let text = try refusal(sbd, ["wait", s.id, "--kind", "reply", "--target", target])
@@ -368,31 +353,33 @@ import Testing
 
   /// The target is not among the session's links, and another thread is.
   @Test func anUnlistedTargetIsRead() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
-    let wait = try setReplyWait(sbd, s.id, ["--target", Self.secondThread])
+    let wait = try setReplyWait(sbd, s.id, ["--target", SlackFixtures.secondThread])
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
     try sbd.writeSlackThread(
-      channel: Self.secondChannel, ts: Self.secondTs, [SlackReply(ts: alice, user: Self.other, name: "Alice")])
+      channel: SlackFixtures.secondChannel, ts: SlackFixtures.secondTs,
+      [SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
-    try pollThenTick(sbd, channel: Self.secondChannel, thread: Self.secondTs)
+    try pollThenTick(sbd, channel: SlackFixtures.secondChannel, thread: SlackFixtures.secondTs)
 
-    #expect(sbd.slackAsks().last?.contains { $0["message_ts"]?.string == Self.secondTs } == true)
+    #expect(sbd.slackAsks().last?.contains { $0["message_ts"]?.string == SlackFixtures.secondTs } == true)
     let resolved = try waitForResolve(sbd, s.id)
-    let link = Self.replyLink(alice, channel: Self.secondChannel, root: Self.secondTs)
+    let link = Self.replyLink(alice, channel: SlackFixtures.secondChannel, root: SlackFixtures.secondTs)
     #expect(resolved.data["outcome"]?.string == "Alice replied: \(link)")
   }
 
-  /// A session with no links at all still has its wait's thread read. On a fresh sbd the first scan is due at once,
-  /// so it can start just after the wait is set and read the reply. The wait then resolves, and the next due scan drops the thread's row because no link or open wait
-  /// names the thread. So the test waits for the resolution, not for a stored read.
+  /// sbd reads the wait's thread even for a session with no links at all. On a fresh sbd the first scan is due at
+  /// once, so it can start just after the test sets the wait and read the reply. The wait then resolves. The next due
+  /// scan drops the thread's row, because no link or open wait names the thread. So the test waits for the
+  /// resolution, not for a stored read.
   @Test func aTargetOfASessionWithNoLinksIsRead() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     let wait = try setReplyWait(sbd, s.id, ["--target", SlackExample.reply])
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
-    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: SlackFixtures.other, name: "Alice")])
 
     _ = try sbd.advanceToPoll()
 
@@ -402,13 +389,13 @@ import Testing
   }
 
   @Test func theThreadStaysWatchedPastItsLinksWindowWhileTheWaitIsOpen() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     try setReplyWait(sbd, s.id)
     try pollThenTick(sbd)
 
-    try pollThenTick(sbd, by: Self.windowMs)
+    try pollThenTick(sbd, by: SlackWatch.windowMs)
 
     #expect(sbd.slackAsks().last?.contains { $0["message_ts"]?.string == SlackExample.rootTs } == true)
     let status = try sbd.sessionLinks(s.id)?.first { $0["url"]?.string == SlackExample.root }?["status"]
@@ -416,7 +403,7 @@ import Testing
   }
 
   @Test func theThreadStaysWatchedAfterItsLinkIsRemoved() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     let link = try sbd.addLink(s.id, SlackExample.root)
     try setReplyWait(sbd, s.id)
@@ -433,29 +420,29 @@ import Testing
 
   // MARK: Check now (D15)
 
-  /// After one scan asks for both threads, they were asked for at once, so the link's thread goes first until Check
-  /// now puts the wait's unlisted thread first.
+  /// One scan asks for both threads at once, so the link's thread goes first until Check now puts the wait's unlisted
+  /// thread first.
   @Test func checkNowPutsTheThreadFirstAtTheNextPoll() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
-    let wait = try setReplyWait(sbd, s.id, ["--target", Self.secondThread])
-    try pollThenTick(sbd, channel: Self.secondChannel, thread: Self.secondTs)
-    try pollThenTick(sbd, channel: Self.secondChannel, thread: Self.secondTs)
+    let wait = try setReplyWait(sbd, s.id, ["--target", SlackFixtures.secondThread])
+    try pollThenTick(sbd, channel: SlackFixtures.secondChannel, thread: SlackFixtures.secondTs)
+    try pollThenTick(sbd, channel: SlackFixtures.secondChannel, thread: SlackFixtures.secondTs)
     let before = try #require(sbd.slackAsks().last)
     try #require(before.first?["message_ts"]?.string == SlackExample.rootTs, "\(before)")
 
     _ = try sbd.client.call(
       "wait-check", ["session": .string(s.id), "wait": .string(try waitId(wait)), "by": "you"])
-    try pollThenTick(sbd, channel: Self.secondChannel, thread: Self.secondTs)
+    try pollThenTick(sbd, channel: SlackFixtures.secondChannel, thread: SlackFixtures.secondTs)
 
     let after = try #require(sbd.slackAsks().last)
-    #expect(after.first?["message_ts"]?.string == Self.secondTs, "\(after)")
+    #expect(after.first?["message_ts"]?.string == SlackFixtures.secondTs, "\(after)")
   }
 
-  /// Revised D15: Check now only orders the next scheduled scan.
+  /// D15: Check now only orders the next scheduled scan.
   @Test func checkNowStartsNoScan() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
@@ -470,7 +457,7 @@ import Testing
   }
 
   @Test func checkNowIsOnlyForYouAndOnlyForAReplyWait() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let reply = try setReplyWait(sbd, s.id)
@@ -491,7 +478,7 @@ import Testing
   }
 
   @Test func checkNowIsRefusedWhileThePollIsOff() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
@@ -507,12 +494,12 @@ import Testing
   // MARK: The status (D14, Risk 5)
 
   @Test func statusIsOnlyInTheSummary() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.idleSession(name: "flags-cache")
     _ = try sbd.addLink(s.id, SlackExample.root)
     let wait = try setReplyWait(sbd, s.id)
     try sbd.writeSlackThread([
-      SlackReply(ts: SlackFixtures.ts(try created(wait) + 60_000), user: Self.selfId, name: "Me")
+      SlackReply(ts: SlackFixtures.ts(try created(wait) + 60_000), user: SlackFixtures.selfId, name: "Me")
     ])
     try pollThenTick(sbd)
 
@@ -539,12 +526,12 @@ import Testing
 
   /// D17: a reply still only sets the mark.
   @Test func aReplyWithoutAWaitRaisesNoItem() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
     let s = try sbd.new(name: "flags-cache")
     let link = try sbd.addLink(s.id, SlackExample.root)
     let before = try sbd.summaryJSON(s.id)
     let t = Int64(try #require(link["t"]?.int))
-    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")])
+    try sbd.writeSlackThread([SlackReply(ts: SlackFixtures.ts(t + 60_000), user: SlackFixtures.other, name: "Alice")])
 
     try pollThenTick(sbd)
 
@@ -553,7 +540,8 @@ import Testing
       fetch: { try sbd.sessionLinks(s.id)?.first { $0["url"]?.string == SlackExample.root }?["status"] },
       until: { $0["newReply"]?.bool == true })
     #expect(status["replies"]?.int == 1)
-    // A session without a first prompt is already in Needs you, so the reply must leave its state and item as they were.
+    // A session without a first prompt is already in Needs you, so the reply must leave its state and item as they
+    // were.
     let after = try sbd.summaryJSON(s.id)
     #expect(after["state"] == before["state"], "\(after)")
     #expect(after["reason"] == before["reason"], "\(after)")
@@ -563,7 +551,7 @@ import Testing
   // MARK: Help
 
   @Test func theHelpAndTheMCPToolNameTheReplyKind() throws {
-    let sbd = try Instance(config: Self.config)
+    let sbd = try Instance(config: SlackFixtures.config)
 
     let help = try sbd.sb("help")
     let mcp = try MCPClient(sbd)

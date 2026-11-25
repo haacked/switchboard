@@ -17,9 +17,7 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// The newest reply whose user is not the user's own Slack id, as sbd parsed it from a read's message headers.
   /// sbd decides "not you" when it reads the reply, as for `lastReplyYou`. The last reply can be yours while this
   /// one is someone else's.
-  public var lastOtherReplyTs: String?
-  public var lastOtherReplyUser: String?
-  public var lastOtherReplyName: String?
+  public var lastOther: SlackPoll.Header?
   /// When the last successful read ended, in ms since the epoch.
   public var read: Int64?
   /// When sbd last asked for the thread, whether or not the read succeeded, in ms since the epoch.
@@ -40,10 +38,8 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// Stores the header as the newest reply that isn't yours, unless the stored one has the same ts or a later one.
   public mutating func record(other header: SlackPoll.Header) {
     guard let value = SlackPoll.tsValue(header.ts) else { return }
-    if let stored = lastOtherReplyTs.flatMap(SlackPoll.tsValue), stored >= value { return }
-    lastOtherReplyTs = header.ts
-    lastOtherReplyUser = header.user
-    lastOtherReplyName = header.name
+    if let stored = lastOther.flatMap({ SlackPoll.tsValue($0.ts) }), stored >= value { return }
+    lastOther = header
   }
 }
 
@@ -77,15 +73,23 @@ public enum SlackWatch {
   /// then the open reply waits' threads that no link gives, in the order of `replyWaits`.
   public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: [SlackThreadRef]) -> [SlackThreadRef] {
     let waitKeys = Set(replyWaits.map(\.key))
-    var seen = Set<String>()
-    var refs: [SlackThreadRef] = []
-    for link in links {
-      guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: waitKeys),
-        let ref = SlackThreadRef(target: target), seen.insert(ref.key).inserted
-      else { continue }
-      refs.append(ref)
+    let watched = links.filter { link in
+      link.linkTarget.map { isWatched(link, target: $0, now: now, replyWaits: waitKeys) } ?? false
     }
+    let refs = uniqueThreads(watched).map(\.ref)
+    var seen = Set(refs.map(\.key))
     return refs + replyWaits.filter { seen.insert($0.key).inserted }
+  }
+
+  /// The links that name a Slack thread, each with its thread, keeping only the first link of each thread key.
+  public static func uniqueThreads(_ links: [ExternalLink]) -> [(link: ExternalLink, ref: SlackThreadRef)] {
+    var seen = Set<String>()
+    return links.compactMap { link in
+      guard let ref = link.linkTarget.flatMap(SlackThreadRef.init(target:)), seen.insert(ref.key).inserted else {
+        return nil
+      }
+      return (link, ref)
+    }
   }
 }
 

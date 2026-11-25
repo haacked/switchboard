@@ -604,20 +604,22 @@ let usage = """
   on the session's own PR. session takes another session as --target and a
   --state (default done). date needs --until (2h, 2026-10-26, or
   2026-10-26T09:00). manual takes an optional --until that returns it to Needs
-  you, a day later without one. reply takes a Slack message link as --target,
-  or the session's one Slack thread, and resolves when someone other than you
-  replies in the thread after the wait was set. It needs slack.pollSeconds
-  above 0 in config.json. --then notify moves the session to Needs you
-  instead of resuming it. --then merge (a session wait for ready_to_merge),
-  rm-worktree (a session wait for done, or a merge wait on owner/name#N), rm
-  (a session wait for done), and report (any kind but manual, with --note, and
-  --needs-you for an Inbox item) arm an action that sbd runs when the wait is
-  met. Only a Manager conversation, the Operator, or you in a terminal can arm
-  one, and merge needs the PR's repository in operator.mergeRepos in
-  config.json. review, bot-review, and queue take --since WHEN, a past time
-  after which a review or a change in Trunk's queue counts, instead of the
-  time the wait was set. A wait still open past its recheck time
-  (recheckSeconds in config.json) moves the session to Needs you.
+  you, a day later without one. reply takes a Slack message link as --target.
+  Leave --target out only when the session has exactly one Slack thread among
+  its links, because sb wait fails when it has none or several. It resolves
+  when someone other than you replies in the thread after the wait was set, and
+  a bot's reply doesn't resolve it. It needs slack.pollSeconds above 0 in
+  config.json. --then notify moves the session to Needs you instead of resuming
+  it. --then merge (a session wait for ready_to_merge), rm-worktree (a session
+  wait for done, or a merge wait on owner/name#N), rm (a session wait for
+  done), and report (any kind but manual, with --note, and --needs-you for an
+  Inbox item) arm an action that sbd runs when the wait is met. Only a Manager
+  conversation, the Operator, or you in a terminal can arm one, and merge needs
+  the PR's repository in operator.mergeRepos in config.json. review,
+  bot-review, and queue take --since WHEN, a past time after which a review or
+  a change in Trunk's queue counts, instead of the time the wait was set. A
+  wait still open past its recheck time (recheckSeconds in config.json) moves
+  the session to Needs you.
   """
 
 struct Args {

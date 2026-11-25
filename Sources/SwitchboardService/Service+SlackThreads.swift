@@ -40,6 +40,9 @@ extension Service {
     }
   }
 
+  /// Whether sbd reads Slack threads: `slack.pollSeconds` is above 0.
+  var slackPollOn: Bool { config.slack.pollSeconds > 0 }
+
   /// The refusal of a reply wait or a Check now while the poll is off.
   var slackPollOff: APIError {
     APIError(
@@ -51,11 +54,7 @@ extension Service {
   /// reply's link and its thread's link name one thread. It refuses a session with no thread or with several.
   func replyTarget(of id: String) throws -> String {
     let e = entries[id]!
-    var seen = Set<String>()
-    let threads = e.session.links(found: e.facts.links).filter { link in
-      guard let ref = link.linkTarget.flatMap(SlackThreadRef.init(target:)) else { return false }
-      return seen.insert(ref.key).inserted
-    }
+    let threads = SlackWatch.uniqueThreads(e.session.links(found: e.facts.links)).map(\.link)
     let name = e.session.name
     guard threads.count == 1 else {
       throw APIError(
@@ -72,8 +71,7 @@ extension Service {
   func withThreadStatus(_ wait: Wait, watched: Set<String>) -> Wait {
     guard wait.kind == .reply, let target = wait.replyThread else { return wait }
     var out = wait
-    out.threadStatus = SlackThreadStatus(
-      target: target, row: slackThreads[target.key], watched: watched.contains(target.key), lookedAt: wait.created)
+    out.threadStatus = slackStatus(target, watched: watched, lookedAt: wait.created)
     return out
   }
 
@@ -82,7 +80,7 @@ extension Service {
   func waitCheckRequest(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
     try requireUser(args, "Only you can check a reply wait's thread now.")
-    guard config.slack.pollSeconds > 0 else { throw slackPollOff }
+    guard slackPollOn else { throw slackPollOff }
     let wait = try openWait(id, args["wait"]?.string).wait
     guard wait.kind == .reply, let target = wait.replyThread else {
       throw APIError("wait \(wait.id) isn't a reply wait on a Slack thread")
@@ -98,7 +96,7 @@ extension Service {
 
   /// The keys of the threads that sbd still reads for any session. None while the poll is off.
   func watchedSlackKeys(now: Int64) -> Set<String> {
-    guard config.slack.pollSeconds > 0 else { return [] }
+    guard slackPollOn else { return [] }
     return Set(SlackWatch.threads(listedLinks(), now: now, replyWaits: replyWaitThreads()).map(\.key))
   }
 
@@ -107,17 +105,21 @@ extension Service {
   func withSlackStatus(_ link: ExternalLink, facts: SessionFacts, watched: Set<String>) -> ExternalLink {
     guard let target = link.linkTarget, target.kind == .slack else { return link }
     var out = link
-    out.status = SlackThreadStatus(
-      target: target, row: slackThreads[target.key], watched: watched.contains(target.key),
-      lookedAt: SlackThreadStatus.lookedAt(link: link, facts: facts))
+    out.status = slackStatus(target, watched: watched, lookedAt: SlackThreadStatus.lookedAt(link: link, facts: facts))
     return out
+  }
+
+  /// The status of the Slack target from its thread's row. `watched` is the result of `watchedSlackKeys`.
+  private func slackStatus(_ target: LinkTarget, watched: Set<String>, lookedAt: Int64) -> SlackThreadStatus? {
+    SlackThreadStatus(
+      target: target, row: slackThreads[target.key], watched: watched.contains(target.key), lookedAt: lookedAt)
   }
 
   /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that neither a session's link nor an open
   /// reply wait names, and reads the watched threads that `SlackPoll.batch` picks, with the ones that Check now
   /// asked for first.
   func pollSlackThreadsIfDue(now: Int64) {
-    guard config.slack.pollSeconds > 0, !slackPoll.running,
+    guard slackPollOn, !slackPoll.running,
       now - slackPoll.last >= Int64(config.slack.pollSeconds * 1000)
     else { return }
     slackPoll.last = now

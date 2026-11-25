@@ -86,7 +86,7 @@ private let slackNow: Int64 = 1_794_968_600_000
 private func slackTs(_ ms: Int64) -> String { String(format: "%lld.%06lld", ms / 1000, (ms % 1000) * 1000) }
 
 /// The status of the `slackRoot` thread as a session summary gives it at `slackNow`. A read thread has `replies`
-/// replies, the last from Alice 2h ago, and was read 1h ago. The user last looked 3h ago, so Alice's reply is new.
+/// replies, the last from Alice 2h ago, and sbd read it 1h ago. The user last looked 3h ago, so Alice's reply is new.
 private func threadStatus(replies: Int? = 2, error: String? = nil) throws -> SlackThreadStatus {
   let target = try #require(LinkTarget.parse(slackRoot))
   var row = SlackThread(channel: slackChannel, thread: slackRootTs)

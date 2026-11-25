@@ -198,7 +198,8 @@ public struct Wait: Codable, Equatable, Sendable {
 
   /// The Slack thread that `url` names, or nil when the URL doesn't parse to a Slack thread.
   public var replyThread: LinkTarget? {
-    url.flatMap(LinkTarget.parse).flatMap { $0.kind == .slack && $0.channel != nil && $0.thread != nil ? $0 : nil }
+    guard let target = url.flatMap(LinkTarget.parse), SlackThreadRef(target: target) != nil else { return nil }
+    return target
   }
 
   /// The session that the action acts on: the subject, or else the session that the wait watches.
@@ -507,18 +508,17 @@ public struct Wait: Codable, Equatable, Sendable {
     }
   }
 
-  /// What happened, when this `reply` wait resolves from its thread's row, or nil while it stays open. It resolves
-  /// when the newest reply that isn't yours came after `countsAfter`, compared in whole ms. The outcome names the
-  /// reply's author on one line, escaped and cut to 80 characters, and links the reply with the wait URL's workspace
-  /// and the row's channel and ts values, which sbd checked when it parsed them.
-  public func settlement(of thread: SlackThread) -> Settlement? {
-    guard kind == .reply, let target = replyThread, let workspace = target.workspace,
-      target.channel == thread.channel, target.thread == thread.thread,
-      let ts = thread.lastOtherReplyTs, let user = thread.lastOtherReplyUser,
-      let at = SlackPoll.tsValue(ts).map({ $0 / 1000 }), at > countsAfter
+  /// What happened, when this `reply` wait resolves from its thread's row, or nil while it stays open. `thread`
+  /// gives the row of a thread key, or nil when sbd has none. It resolves when the newest reply that isn't yours came
+  /// after `countsAfter`, compared in whole ms. The outcome names the reply's author on one line, escaped and cut to
+  /// 80 characters, and links the reply with the wait URL's workspace and the row's channel, root, and reply ts,
+  /// which sbd checked when it parsed them.
+  public func settlement(thread: (String) -> SlackThread?) -> Settlement? {
+    guard kind == .reply, let target = replyThread, let workspace = target.workspace, let row = thread(target.key),
+      let other = row.lastOther, let at = SlackPoll.tsValue(other.ts).map({ $0 / 1000 }), at > countsAfter
     else { return nil }
-    let name = SlackThreadStatus.clipped(thread.lastOtherReplyName ?? user, max: 80)
-    let link = LinkTarget.slackReplyURL(workspace: workspace, channel: thread.channel, thread: thread.thread, ts: ts)
+    let name = SlackThreadStatus.clipped(other.name ?? other.user, max: 80)
+    let link = LinkTarget.slackReplyURL(workspace: workspace, channel: row.channel, thread: row.thread, ts: other.ts)
     return Settlement("\(name) replied: \(link)", changedAt: at, met: true)
   }
 

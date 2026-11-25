@@ -4,11 +4,28 @@ import Testing
 
 /// Values that the Slack thread poll suites share.
 enum SlackFixtures {
+  static let config: [String: JSON] = ["slack": ["pollSeconds": 1200]]
+  static let other = "U0OTHER"
+  /// The stub's default profile id.
+  static let selfId = "U0EXAMPLESELF"
+  static let secondChannel = "C0EXAMPLE02"
+  static let secondTs = "1794965100.000200"
+  static let secondThread = "https://example.slack.com/archives/C0EXAMPLE02/p1794965100000200"
+
   /// A little more than `slack.pollSeconds` of 1200, so a scan is due whether "due" means after or at.
   static let step: Int64 = 20 * 60_000 + 1000
 
   /// A Slack ts for a time in ms.
   static func ts(_ ms: Int64) -> String { String(format: "%lld.%06lld", ms / 1000, (ms % 1000) * 1000) }
+}
+
+/// Checks the condition every 0.2 s for the seconds, and fails at the first check that is false.
+func stays(_ what: String, for seconds: Double = 2, _ condition: () throws -> Bool) throws {
+  let deadline = Date().addingTimeInterval(seconds)
+  while Date() < deadline {
+    try #require(try condition(), "\(what)")
+    usleep(200_000)
+  }
 }
 
 /// A reply in a thread fixture of the stub's `<slack-threads>` branch.

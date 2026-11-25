@@ -43,7 +43,7 @@ extension Service {
   /// and returns the id of that session. The caller holds the state queue.
   /// A wait from a host must pass `requireGitHubWait`. A wait with an action must pass `armAction`. A merge wait must
   /// land on the operator, because only the operator approves a merge. A reply wait without a target takes the
-  /// session's one Slack thread, and a reply wait needs the Slack poll on.
+  /// session's one Slack thread. A reply wait needs the Slack poll on.
   func setWait(_ args: JSON, waiter named: String, from origin: RequestOrigin, caller: Caller) throws -> String {
     let session = entries[named]!.session
     try refuseNotStarted(session)
@@ -51,7 +51,7 @@ extension Service {
     if request.kind == Wait.Kind.reply.rawValue && request.target == nil { request.target = try replyTarget(of: named) }
     // The checks run against `named`, so a conversation still can't wait on itself.
     var wait = try request.makeWait(id: "", waiter: named, now: nowMs(), findSession: waitTarget)
-    if wait.kind == .reply && !(config.slack.pollSeconds > 0) { throw slackPollOff }
+    if wait.kind == .reply && !slackPollOn { throw slackPollOff }
     if case .remote(let host) = origin { try requireGitHubWait(wait, on: named, from: host) }
     if wait.action != nil { try armAction(&wait, args, origin: origin, caller: caller) }
     if wait.kind == .ci && wait.pr == nil {
@@ -261,7 +261,7 @@ extension Service {
     for (session, wait) in waitsToResolve() {
       guard
         let settlement = wait.settlement(now: now, stateOf: lastState)
-          ?? wait.replyThread.flatMap({ slackThreads[$0.key] }).flatMap({ wait.settlement(of: $0) })
+          ?? wait.settlement(thread: { slackThreads[$0] })
       else { continue }
       do {
         try resolve(

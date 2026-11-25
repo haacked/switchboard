@@ -528,7 +528,7 @@ extension SlackPollTests {
 
     // MARK: Check now (#504 D15)
 
-    /// Rows that every thread was asked for at the same time, so only `first` can change the order.
+    /// Rows in which the poll asked for every thread at the same time, so only `first` can change the order.
     static func askedAtOnce(_ refs: [SlackThreadRef]) -> [String: SlackThread] {
       Dictionary(uniqueKeysWithValues: refs.map { ($0.key, Self.row($0, read: Self.now, tried: Self.now)) })
     }
@@ -1759,20 +1759,7 @@ extension SlackPollTests {
   }
 }
 
-// MARK: - Message headers (#504 Stage 1)
-
-/// A header's fields, so the tests compare lists of headers without requiring `SlackPoll.Header` to be `Equatable`.
-private struct HeaderFields: Equatable, CustomStringConvertible {
-  var user: String
-  var name: String?
-  var ts: String
-
-  var description: String { "\(user) \(name.map { "\"\($0)\"" } ?? "nil") \(ts)" }
-}
-
-private func headerFields(_ text: String) -> [HeaderFields] {
-  SlackPoll.headers(in: text).map { HeaderFields(user: $0.user, name: $0.name, ts: $0.ts) }
-}
+// MARK: - Message headers
 
 /// The body of `SlackPoll.hasHeader` before #504 rewrote it on top of `headers(in:)`. The parity table runs every
 /// text through this copy and through the new form.
@@ -1802,13 +1789,13 @@ extension SlackPollTests {
     @Test func oneHeaderGivesItsUserNameAndTs() {
       let text = "From: Alice (U0OTHER)\nMessage TS: \(Self.reply1)\nLooks good to me.\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
     }
 
     @Test func aHeaderWithOneTimeLineIsListed() {
       let text = "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nMessage TS: \(Self.reply1)\nHi.\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
     }
 
     @Test func aHeaderWithTwoTimeLinesIsListed() {
@@ -1816,99 +1803,99 @@ extension SlackPollTests {
         "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nTime: 2026-11-20 10:57:42 UTC\n"
         + "Message TS: \(Self.reply1)\nHi.\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
     }
 
     @Test func theNameLeavesOutATrailingEmail() {
       let text = "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
     }
 
     @Test func theNameIsTrimmed() {
       let text = "From:    Alice    (U0OTHER)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text).map(\.name) == ["Alice"])
+      #expect(SlackPoll.headers(in: text).map(\.name) == ["Alice"])
     }
 
     @Test func aFromLineWithOnlyAnIdHasNoName() {
       let text = "From: (U0OTHER)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: nil, ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: nil, ts: Self.reply1)])
     }
 
     @Test func aFromLineWithOnlyAnEmailHasNoName() {
       let text = "From: <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: nil, ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: nil, ts: Self.reply1)])
     }
 
     @Test func aLongNameIsCutTo80Characters() {
       let text = "From: \(String(repeating: "a", count: 100)) (U0OTHER)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text).map(\.name) == [String(repeating: "a", count: 79) + "…"])
+      #expect(SlackPoll.headers(in: text).map(\.name) == [String(repeating: "a", count: 79) + "…"])
     }
 
     /// The display name holds `(U0OTHER)`, but the line's own id is U0EVE.
     @Test func onlyTheTrailingIdIsTheUser() {
       let text = "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0EVE", name: "Eve (U0OTHER)", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0EVE", name: "Eve (U0OTHER)", ts: Self.reply1)])
     }
 
     @Test func aFromLineWithoutATrailingIdIsNotAHeader() {
       let text = "From: Alice <alice@example.com>\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text).isEmpty)
+      #expect(SlackPoll.headers(in: text).isEmpty)
     }
 
     @Test func aLineOtherThanTimeBeforeTheMessageTsLineIsNotAHeader() {
       let text = "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text).isEmpty)
+      #expect(SlackPoll.headers(in: text).isEmpty)
     }
 
     @Test func aBlankLineBeforeTheMessageTsLineIsNotAHeader() {
       let text = "From: Alice (U0OTHER)\n\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text).isEmpty)
+      #expect(SlackPoll.headers(in: text).isEmpty)
     }
 
     @Test func aFromLineAtTheEndOfTheTextIsNotAHeader() {
-      #expect(headerFields("Please review.\nFrom: Alice (U0OTHER)").isEmpty)
+      #expect(SlackPoll.headers(in: "Please review.\nFrom: Alice (U0OTHER)").isEmpty)
     }
 
     @Test(arguments: ["12345", "1794965246.46", "1794965246", "soon", "", "\(PollFx.reply1) (edited)"])
     func aMalformedMessageTsIsNotAHeader(_ ts: String) {
-      #expect(headerFields("From: Alice (U0OTHER)\nMessage TS: \(ts)\n").isEmpty)
+      #expect(SlackPoll.headers(in: "From: Alice (U0OTHER)\nMessage TS: \(ts)\n").isEmpty)
     }
 
     /// A mention puts Alice's id in Carol's text. Only Carol's header is listed.
     @Test func aMentionOfAnIdInTheTextIsNotAHeader() {
       let text = "From: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n<@U0OTHER|alice> looks good.\n(U0OTHER)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
     }
 
     /// Of two From lines in a row, only the one that the Message TS line follows is a header.
     @Test func aFromLineFollowedByAnotherFromLineIsNotAHeader() {
       let text = "From: Alice (U0OTHER)\nFrom: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n"
 
-      #expect(headerFields(text) == [HeaderFields(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
     }
 
     /// The connector's layout, from the `twoReplies` fixture: the parent and two replies, in the text's order.
     @Test func theParentAndTwoRepliesAreListedInOrder() {
       #expect(
-        headerFields(ParseThreadsHeaderPair.twoReplies) == [
-          HeaderFields(user: "U0ROOT", name: "Bob", ts: PollFx.rootB),
-          HeaderFields(user: "U0OTHER", name: "Alice", ts: PollFx.reply1),
-          HeaderFields(user: "U0CAROL", name: "Carol", ts: PollFx.reply2),
+        SlackPoll.headers(in: ParseThreadsHeaderPair.twoReplies) == [
+          SlackPoll.Header(user: "U0ROOT", name: "Bob", ts: PollFx.rootB),
+          SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply1),
+          SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2),
         ])
     }
 
     @Test func anEmptyTextHasNoHeaders() {
-      #expect(headerFields("").isEmpty)
+      #expect(SlackPoll.headers(in: "").isEmpty)
     }
   }
 
@@ -2010,7 +1997,8 @@ extension SlackPollTests {
     func hasHeaderAgreesWithTheOldHasHeader(_ row: HeaderText) {
       for (user, ts) in Self.pairs(row.text) {
         #expect(
-          SlackPoll.hasHeader(row.text, user: user, ts: ts) == oldHasHeader(row.text, user: user, ts: ts),
+          SlackPoll.hasHeader(SlackPoll.headers(in: row.text), user: user, ts: ts)
+            == oldHasHeader(row.text, user: user, ts: ts),
           "\(user) at \(ts)")
       }
     }
@@ -2027,7 +2015,7 @@ extension SlackPollTests {
   }
 }
 
-// MARK: - The newest reply that isn't yours (#504 Stage 2)
+// MARK: - The newest reply that isn't yours
 
 /// A reply in a thread text that the `lastOther` tests build.
 struct LastOtherReply: Sendable {
@@ -2111,19 +2099,19 @@ extension SlackPollTests {
 
     fileprivate static func lastOther(
       _ parts: [PollFx.Part], ask: SlackPoll.Ask = PollFx.askB, you: String = PollFx.selfId
-    ) throws -> HeaderFields? {
-      try read(parts, ask: ask, you: you).lastOther.map { HeaderFields(user: $0.user, name: $0.name, ts: $0.ts) }
+    ) throws -> SlackPoll.Header? {
+      try read(parts, ask: ask, you: you).lastOther
     }
 
     /// The common case: replies in the connector's layout, with the answer naming the reply with the greatest ts.
     fileprivate static func lastOther(
       of replies: [LastOtherReply], ask: SlackPoll.Ask = PollFx.askB, you: String = PollFx.selfId
-    ) throws -> HeaderFields? {
+    ) throws -> SlackPoll.Header? {
       let last = try #require(replies.max { SlackPoll.tsValue($0.ts)! < SlackPoll.tsValue($1.ts)! })
       return try lastOther([part(replies, last: last, ask: ask)], ask: ask, you: you)
     }
 
-    fileprivate static let alice1 = HeaderFields(user: "U0OTHER", name: "Alice", ts: PollFx.reply1)
+    fileprivate static let alice1 = SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply1)
 
     // MARK: Which reply is taken
 
@@ -2145,7 +2133,7 @@ extension SlackPollTests {
     @Test func yourReplyThenAnOtherGivesTheOtherReply() throws {
       let got = try Self.lastOther(of: [.you(PollFx.reply1), .other(PollFx.reply2)])
 
-      #expect(got == HeaderFields(user: "U0OTHER", name: "Alice", ts: PollFx.reply2))
+      #expect(got == SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply2))
     }
 
     /// The parent is Bob's, a valid id that isn't yours, at the root's ts.
@@ -2156,14 +2144,14 @@ extension SlackPollTests {
     @Test func theNewerOfTwoOtherRepliesIsTaken() throws {
       let got = try Self.lastOther(of: [.other(PollFx.reply1), .carol(PollFx.reply2)])
 
-      #expect(got == HeaderFields(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
     }
 
     /// Carol's newer header comes before Alice's older one in the text.
     @Test func theGreatestTsIsTakenWhateverTheTextOrder() throws {
       let got = try Self.lastOther(of: [.carol(PollFx.reply2), .other(PollFx.reply1), .you(Self.reply3)])
 
-      #expect(got == HeaderFields(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
     }
 
     /// The model can name someone else for the reply. The name comes from the reply's own header.
@@ -2177,14 +2165,14 @@ extension SlackPollTests {
     @Test func aFromLineWithOnlyAnIdGivesNoName() throws {
       let got = try Self.lastOther(of: [LastOtherReply(user: "U0OTHER", name: nil, ts: PollFx.reply1)])
 
-      #expect(got == HeaderFields(user: "U0OTHER", name: nil, ts: PollFx.reply1))
+      #expect(got == SlackPoll.Header(user: "U0OTHER", name: nil, ts: PollFx.reply1))
     }
 
     /// The same text with Alice as you: the other reply is then the one from U0EXAMPLESELF.
     @Test func yourIdDecidesWhichRepliesAreYours() throws {
       let got = try Self.lastOther(of: [.other(PollFx.reply1), .you(PollFx.reply2)], you: "U0OTHER")
 
-      #expect(got == HeaderFields(user: "U0EXAMPLESELF", name: "Me", ts: PollFx.reply2))
+      #expect(got == SlackPoll.Header(user: "U0EXAMPLESELF", name: "Me", ts: PollFx.reply2))
     }
 
     // MARK: Users
@@ -2227,7 +2215,7 @@ extension SlackPollTests {
 
     // MARK: Times
 
-    /// The answer's own last reply stays within the hour, so #503 accepts the read.
+    /// The answer's own last reply stays within the hour, so `parseThreads` accepts the read.
     @Test func aReplyMoreThanAnHourAfterTheScanIsNotTaken() throws {
       let last = LastOtherReply.other(PollFx.reply1)
 
@@ -2241,7 +2229,7 @@ extension SlackPollTests {
 
       let got = try Self.lastOther([Self.part([last, .carol(Self.anHourAfterTheScan)], last: last)])
 
-      #expect(got == HeaderFields(user: "U0CAROL", name: "Carol", ts: Self.anHourAfterTheScan))
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.anHourAfterTheScan))
     }
 
     @Test(arguments: [PollFx.rootB, beforeRootB])
@@ -2272,7 +2260,7 @@ extension SlackPollTests {
 
     // MARK: Which reads count
 
-    /// The read shows no replies heading, so #503 accepts a count of 0. The header in it must still not count.
+    /// The read shows no replies heading, so `parseThreads` accepts a count of 0. The header in it must still not count.
     @Test func aCountOfZeroGivesNoLastOther() throws {
       var p = PollFx.Part(PollFx.askB, id: "toolu_B", count: 0)
       p.resultText = PollFx.connectorText(
@@ -2340,7 +2328,7 @@ extension SlackPollTests {
       #expect(try results[1].get().lastOther == nil)
     }
 
-    /// The answer names Carol, but the read holds only Alice's header, so #503 refuses it.
+    /// The answer names Carol, but the read holds only Alice's header, so `parseThreads` refuses it.
     @Test func aRefusedReadGivesNoRead() throws {
       var p = Self.part([.other(PollFx.reply1)], last: .other(PollFx.reply1))
       p.setAnswer("last_reply_user_id", "U0CAROL")
@@ -2416,8 +2404,8 @@ extension SlackPollTests {
       #expect(got?.ts == expected?.ts)
     }
 
-    /// Stage 2's stated case: with the stub's default self id, `[U0OTHER at t1, U0EXAMPLESELF at t2]` gives the
-    /// last reply as yours at t2 and the newest other reply as U0OTHER's at t1.
+    /// With the stub's default self id, `[U0OTHER at t1, U0EXAMPLESELF at t2]` gives the last reply as yours at t2
+    /// and the newest other reply as U0OTHER's at t1.
     @Test func theStubsOtherThenSelfThreadGivesBothReplies() throws {
       let (p, ask) = Self.stubPart(LastOtherShape(name: "", replies: [.other(Self.r1), .you(Self.r2)]))
 
