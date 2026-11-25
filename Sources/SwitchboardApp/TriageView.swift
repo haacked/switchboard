@@ -97,7 +97,7 @@ struct TriageDetail: View {
         } else if session.runsClaude {
           MessageField(
             session: session.id, draft: model.inboxDraft(for: session),
-            shortcut: KeyboardShortcut(.return, modifiers: [.command]), ref: session.triage?.ref
+            shortcut: .sendMessage, ref: session.triage?.ref
           )
           .padding(8)
         }

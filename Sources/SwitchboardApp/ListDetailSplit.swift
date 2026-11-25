@@ -152,11 +152,13 @@ extension View {
     _ list: ListFocus, _ focused: FocusState<Bool>.Binding, model: BoardModel,
     move: @escaping (_ step: Int, _ wrap: Bool) -> Void, open: @escaping () -> Void
   ) -> some View {
-    focusable()
+    let next = String(AppShortcut.listNext.keys[0].key.character)
+    let previous = String(AppShortcut.listPrevious.keys[0].key.character)
+    return focusable()
       .focused(focused)
       .focusEffectDisabled()
-      .onKeyPress(characters: CharacterSet(charactersIn: "jk"), phases: .down) { press in
-        move(press.characters == "j" ? 1 : -1, true)
+      .onKeyPress(characters: CharacterSet(charactersIn: next + previous), phases: .down) { press in
+        move(press.characters == next ? 1 : -1, true)
         return .handled
       }
       .onKeyPress(keys: [.upArrow, .downArrow, .return], phases: [.down, .repeat]) { press in

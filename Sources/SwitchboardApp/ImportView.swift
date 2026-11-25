@@ -37,7 +37,7 @@ struct ImportView: View {
         Button(action: reload) {
           Label("Reload", systemImage: "arrow.clockwise")
         }
-        .keyboardShortcut("r")
+        .shortcut(.reloadImport)
         .disabled(form.busy)
       }
       if let repos = form.list?.repos, !repos.isEmpty {

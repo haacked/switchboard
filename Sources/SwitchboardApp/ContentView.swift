@@ -174,6 +174,11 @@ struct ContentView: View {
         NotesSheet(id: id) { model.editingNotes = nil }.environmentObject(model)
       }
     }
+    .sheet(isPresented: model.isPresent(\.shortcutsOverlay)) {
+      if let request = model.shortcutsOverlay {
+        ShortcutsOverlay(request: request).environmentObject(model)
+      }
+    }
     .sheet(isPresented: model.isPresent(\.loopEditor)) {
       if let request = model.loopEditor {
         LoopEditor(
@@ -266,8 +271,8 @@ struct Sidebar: View {
       return .handled
     }
     .onKeyPress(keys: [.delete]) { press in
-      guard press.modifiers.intersection([.command, .option, .control, .shift]) == .command,
-        model.showsMultiSelection, removableSelection > 0, !model.showingDoneRemoval
+      guard SelectionKey.action(press.key, modifiers: press.modifiers) == .delete, model.showsMultiSelection,
+        removableSelection > 0, !model.showingDoneRemoval
       else { return .ignored }
       model.checkSelectionRemoval()
       return .handled
@@ -329,7 +334,7 @@ struct Sidebar: View {
         .buttonStyle(.borderless)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(8)
-        .help("Create an empty group on the Board (⇧⌘G)")
+        .help(AppShortcut.newGroup.help("Create an empty group on the Board"))
         .accessibilityIdentifier("sidebar-new-group")
         RemovalStatusView()
       }
@@ -401,13 +406,14 @@ struct ManagerButton: View {
     switch icon {
     case .needsMe:
       guard let waiting = model.waitingManager, let reason = ChatMark(waiting).needsMeReason else {
-        return "A Manager conversation needs you (⇧⌘M)"
+        return AppShortcut.openManager.help("A Manager conversation needs you")
       }
-      return "\(waiting.name) needs you: \(reason) (⇧⌘M)"
-    case .unread: return "A Manager conversation has unread replies (⇧⌘M)"
+      return AppShortcut.openManager.help("\(waiting.name) needs you: \(reason)")
+    case .unread: return AppShortcut.openManager.help("A Manager conversation has unread replies")
     case .outline:
       return managers.isEmpty
-        ? "Start a session that manages the others through sb (⇧⌘M)" : "Open the latest Manager conversation (⇧⌘M)"
+        ? AppShortcut.openManager.help("Start a session that manages the others through sb")
+        : AppShortcut.openManager.help("Open the latest Manager conversation")
     }
   }
 }

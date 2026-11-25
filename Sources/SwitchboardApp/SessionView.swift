@@ -94,7 +94,10 @@ struct SessionView: View {
             }
             // Open Shell comes first, so it keeps the place that `ShellSelfTest.labelPoint` clicks.
             Button("Message") { model.revealMessageField(session.id) }
-              .help("Show a field that sends Claude a message, with images dropped on it or pasted into it (⇧⌘E)")
+              .help(
+                AppShortcut.messageClaude.help(
+                  "Show a field that sends Claude a message, with images dropped on it or pasted into it")
+              )
           }
           TerminalPane(
             command: terminals.attachCommand(.claude), takesFocus: model.terminalFocus == session.id,
@@ -368,7 +371,7 @@ private struct SessionMessageField: View {
     if SessionView.showsMessageField(revealed: model.revealedMessageField == session, draft: draft) {
       Divider()
       MessageField(
-        session: session, draft: draft, shortcut: KeyboardShortcut(.return, modifiers: [.command]),
+        session: session, draft: draft, shortcut: .sendMessage,
         takesFocus: model.messageFieldFocus == session,
         onFocus: { [model, session] in model.releaseMessageFieldFocus(session) },
         onEmptyEscape: { [model, session] in model.hideMessageField(session) },

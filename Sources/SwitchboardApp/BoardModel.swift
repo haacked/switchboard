@@ -29,13 +29,13 @@ enum MainView: CaseIterable {
     }
   }
 
-  /// The key that, with ⌘, shows the view from the View menu.
-  var shortcutKey: Character {
+  /// The View menu's shortcut that shows the view.
+  var shortcut: AppShortcut {
     switch self {
-    case .inbox: "1"
-    case .board: "2"
-    case .issues: "3"
-    case .loops: "4"
+    case .inbox: .showInbox
+    case .board: .showBoard
+    case .issues: .showIssues
+    case .loops: .showLoops
     }
   }
 }
@@ -147,9 +147,12 @@ final class BoardModel: ObservableObject {
   private(set) var loopEditorOpening = 0
   /// A loop editor's save is on its way to sbd, so a second Save would add a second loop.
   @Published var savingLoop = false
+  /// The open shortcuts overlay.
+  @Published var shortcutsOverlay: ShortcutsOverlayRequest?
   var presentingSheet: Bool {
     newSession != nil || showingImport || showingSearch || showingDoneRemoval || quickAsk != nil
       || pickingSnoozeTime != nil || pickingPauseTime != nil || editingNotes != nil || loopEditor != nil
+      || shortcutsOverlay != nil
   }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)

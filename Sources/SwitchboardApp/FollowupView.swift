@@ -26,7 +26,7 @@ struct FollowupView: View {
         Spacer()
         StartButton(session: session)
           .buttonStyle(.borderedProminent)
-          .keyboardShortcut(.return, modifiers: [.command])
+          .shortcut(.startFollowup)
         if followup.repository != nil { StartButton(session: session, inFolder: true) }
         Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
         Button(role: .destructive) {

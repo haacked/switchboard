@@ -1,3 +1,4 @@
+import SwiftUI
 import SwitchboardCore
 import Testing
 
@@ -19,7 +20,7 @@ import Testing
 
   /// The View menu binds Show Inbox, Show Board, Show Issues, and Show Loops to ⌘1 to ⌘4.
   @Test func mainViewShortcutKeysAreOneToFour() {
-    #expect(MainView.allCases.map(\.shortcutKey) == ["1", "2", "3", "4"])
+    #expect(MainView.allCases.map { $0.shortcut.binding } == ["1", "2", "3", "4"].map { KeyboardShortcut($0) })
   }
 
   /// The navigation history menu shows these symbols next to each place.
