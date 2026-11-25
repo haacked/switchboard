@@ -153,10 +153,10 @@ extension GitHubPoller {
   private func readStateFile(_ service: String, now: Int64, stats: inout Stats) throws {
     let path = "repos/\(Wait.chartsRepository)/contents/state/\(service).yaml"
     let last = deploys.files[service]
-    var req = try apiRequest(path)
+    var req = try client.apiRequest(path)
     req.setValue("application/vnd.github.raw", forHTTPHeaderField: "Accept")
     if let etag = last?.etag { req.setValue(etag, forHTTPHeaderField: "If-None-Match") }
-    let (status, headers, body, _) = try send(req, stats: &stats)
+    let (status, headers, body, _) = try client.send(req, stats: &stats)
     switch status {
     case 304 where last != nil:
       deploys.files[service]?.checked = now

@@ -16,7 +16,7 @@ extension GitHubPoller {
     _ method: String, _ path: String, query: [String: String] = [:], etag: String? = nil, body: JSON? = nil,
     stats: inout Stats
   ) throws -> RESTReply {
-    var req = try apiRequest(path)
+    var req = try client.apiRequest(path)
     if !query.isEmpty, let url = req.url, var c = URLComponents(url: url, resolvingAgainstBaseURL: false) {
       c.queryItems = query.sorted { $0.key < $1.key }.map { URLQueryItem(name: $0.key, value: $0.value) }
       req.url = c.url
@@ -27,7 +27,7 @@ extension GitHubPoller {
       req.setValue("application/json", forHTTPHeaderField: "Content-Type")
       req.httpBody = Data(body.text.utf8)
     }
-    let (status, headers, _, json) = try send(req, stats: &stats)
+    let (status, headers, _, json) = try client.send(req, stats: &stats)
     return RESTReply(status: status, etag: headers["etag"], json: json)
   }
 

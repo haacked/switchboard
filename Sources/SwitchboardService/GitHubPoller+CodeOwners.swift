@@ -56,7 +56,7 @@ extension GitHubPoller {
     for key in open.map(configKey) where seen.insert(key).inserted {
       guard all || GitHub.elapsed(since: codeOwners.configs[key]?.read, settings.idleMs, now: now) else { continue }
       do {
-        let response = try request(GitHub.codeOwnersConfigQuery, configVariables(key), stats: &stats)
+        let response = try client.request(GitHub.codeOwnersConfigQuery, configVariables(key), stats: &stats)
         codeOwners.configs[key] = (try GitHub.parseCodeOwnersConfig(response), now)
       } catch {
         failure = failure ?? "code owners of \(key.repo) \(key.base): \(error)"
@@ -68,7 +68,7 @@ extension GitHubPoller {
     }
     for chunk in GitHub.chunks(unread.map(\.id)) {
       do {
-        let response = try request(GitHub.filesQuery, idsVariable(chunk), stats: &stats)
+        let response = try client.request(GitHub.filesQuery, idsVariable(chunk), stats: &stats)
         let nodes = response["data"]?["nodes"]?.array ?? []
         for (i, id) in chunk.enumerated() {
           do {
@@ -86,7 +86,7 @@ extension GitHubPoller {
     }
     for chunk in GitHub.chunks(approved.map(\.id)) {
       do {
-        let response = try request(GitHub.approvalTeamsQuery, idsVariable(chunk), stats: &stats)
+        let response = try client.request(GitHub.approvalTeamsQuery, idsVariable(chunk), stats: &stats)
         let nodes = response["data"]?["nodes"]?.array ?? []
         for (i, id) in chunk.enumerated() {
           guard i < nodes.count, nodes[i] != .null else {
@@ -117,7 +117,8 @@ extension GitHubPoller {
     // Each page holds up to 100 files. Ten pages reach `CodeOwners.maxFiles`.
     var pages = 1
     while let next = page.next, page.total <= CodeOwners.maxFiles, pages < CodeOwners.maxFiles / 100 {
-      let response = try request(GitHub.filesPageQuery, ["id": .string(id), "after": .string(next)], stats: &stats)
+      let response = try client.request(
+        GitHub.filesPageQuery, ["id": .string(id), "after": .string(next)], stats: &stats)
       guard let node = response["data"]?["node"], let read = GitHub.parseFiles(node) else {
         throw APIError("GitHub failed to read the changed files of \(id): \(GitHub.message(response))")
       }
