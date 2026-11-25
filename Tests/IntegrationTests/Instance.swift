@@ -134,6 +134,8 @@ final class Instance {
       "codexHomes": .array(codexFolders.map(JSON.string)), "codex": .string(Instance.codexStub),
       // No test reaches the real Depot API. DepotTests point sbd at a FakeDepot.
       "depot": ["enabled": false],
+      // No test polls Slack threads by accident. SlackThreadPollTests turn the poll on.
+      "slack": ["pollSeconds": 0],
       "usage": ["pollSeconds": 0, "keychain": false],
       // No test runs the real trunk. A test that needs one writes a fake here.
       "trunk": ["path": .string("\(path)/trunk")],

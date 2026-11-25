@@ -13,7 +13,7 @@ import SwiftUI
 /// toggle does. `select <session>` selects a session. `type <text>` types the text and
 /// Return into the shell pane. `ctrl-d` types Ctrl-D there. `panes` reports how many terminals the window
 /// shows. `cmd-w` sends ⌘W to the menu bar and reports the menu item that owns ⌘W. `nav-keys` sends each of
-/// `NavShortcuts` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
+/// `navKeys` to the menu bar as a US keyboard types it, and reports the title of the menu item that ran.
 /// `mouse <3|4>` posts a press of mouse button 4 or 5 (button numbers 3 and 4) over the window to the app's
 /// event queue, so it passes through the app's event monitors as a real press does. `where` reports the place
 /// that the window shows. `snapshot <path>` draws the window as SB_SNAPSHOT does. `click-row <session>` clicks the
@@ -41,9 +41,20 @@ import SwiftUI
 /// with that click anchor, as `click-delete-selected` does. It looks in the main window first, then in the app's other
 /// windows, such as a popover's. `fill <placeholder>|<text>` types the text into the field with that placeholder,
 /// in any of the app's windows. `submit <placeholder>|<text>` types the text the same way and then presses Return in
-/// the field.
+/// the field. `menu-shortcuts` checks every menu item that has a key against `AppShortcut` and reports `none`, or each
+/// mismatch joined by "; ": `unlisted <title> <keys>` for an item that no entry names, `wrong <title> <keys> want
+/// <keys>`, or `missing <entry>` for a menu entry that no item carries. `question [sheet]` posts a ? press to the main
+/// window, or to its sheet, through the app's event queue, so the press passes through the app's key monitors as a
+/// typed ? does. `overlay` reports `hidden`, or `shown` and the overlay's areas joined by commas.
 @MainActor
 enum ShellSelfTest {
+  /// The shortcuts that `nav-keys` sends, in order. Search Sessions is last, because it opens a sheet. New
+  /// Conversation, Message Claude, and Ask Switchboard stay out, because each one starts a conversation, moves
+  /// focus into a field, or opens a sheet that `bin/test-gui shell` does not expect.
+  nonisolated static let navKeys: [AppShortcut] = [
+    .nextSession, .previousSession, .focusList, .focusTerminal, .back, .forward, .showRecentPlaces, .searchSessions,
+  ]
+
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
   /// `board-drag` hides this view so that it can't take a card drag.
   private static var dragControl: NSView?
@@ -118,7 +129,19 @@ enum ShellSelfTest {
       return "handled \(handled) by \(owner?.title ?? "no item")"
     case "nav-keys":
       guard let window else { return "no window" }
-      return NavShortcuts.all.map { menuItem(running: $0, in: window) }.joined(separator: "; ")
+      return navKeys.map { menuItem(running: $0.binding, in: window) }.joined(separator: "; ")
+    case "menu-shortcuts":
+      let found = menuShortcutMismatches()
+      return found.isEmpty ? "none" : found.joined(separator: "; ")
+    case "question":
+      let target = rest == "sheet" ? window?.attachedSheet : window
+      guard let target else { return "no window" }
+      guard let event = keyDown("?", ignoringModifiers: "/", in: target) else { return "no event" }
+      NSApp.postEvent(event, atStart: false)
+      return "posted"
+    case "overlay":
+      guard let request = model.shortcutsOverlay else { return "hidden" }
+      return "shown " + request.areas.map { "\($0)" }.joined(separator: ",")
     case "settings-key":
       guard let window else { return "no window" }
       return menuItem(running: KeyboardShortcut(","), in: window)
@@ -205,6 +228,38 @@ enum ShellSelfTest {
     default:
       return "unknown command"
     }
+  }
+
+  /// The actions of the items that macOS adds to the Edit menu. Their keys use the Globe key, which a
+  /// `KeyboardShortcut` can't name.
+  private static let systemActions: Set<Selector> = [
+    Selector(("startDictation:")), #selector(NSApplication.orderFrontCharacterPalette(_:)),
+  ]
+
+  private static let modifierPairs: [(NSEvent.ModifierFlags, EventModifiers)] = [
+    (.command, .command), (.option, .option), (.shift, .shift), (.control, .control),
+  ]
+
+  private static func menuShortcutMismatches() -> [String] {
+    let entries = AppShortcut.available.filter { $0.kind == .menu || $0.kind == .menuAlternate }
+    var found: [String] = []
+    var carried: Set<AppShortcut> = []
+    let menus = (NSApp.mainMenu?.items ?? []).compactMap { $0.submenu.map { refreshedMenu($0.title) ?? $0 } }
+    for item in menus.flatMap(\.items) {
+      guard let key = item.keyEquivalent.first, !(item.action.map(systemActions.contains) ?? false) else { continue }
+      let mask = item.keyEquivalentModifierMask
+      let press = AppShortcut.Press(key, EventModifiers(Self.modifierPairs.filter { mask.contains($0.0) }.map(\.1)))
+      let keys = AppShortcut.glyphs(KeyboardShortcut(KeyEquivalent(press.key), modifiers: press.modifiers))
+      guard let entry = AppShortcut.entry(menuTitle: item.title) else {
+        if !AppShortcut.systemPresses.contains(press) { found.append("unlisted \(item.title) \(keys)") }
+        continue
+      }
+      carried.insert(entry)
+      if press != AppShortcut.Press(entry.keys[0]) {
+        found.append("wrong \(item.title) \(keys) want \(AppShortcut.glyphs(entry.keys[0]))")
+      }
+    }
+    return found + entries.filter { !carried.contains($0) }.map { "missing \($0)" }
   }
 
   /// The menu bar's menu with `title`. SwiftUI sets the items' titles when the menu opens. This function asks for
@@ -426,19 +481,23 @@ enum ShellSelfTest {
     (view as? NSTableView).map { [$0] } ?? view.subviews.flatMap(tables)
   }
 
+  /// A key press of `char` in `window`, with ⇧ added when a US keyboard types `char` with ⇧.
+  private static func keyDown(
+    _ char: String, ignoringModifiers: String? = nil, flags: NSEvent.ModifierFlags = [], in window: NSWindow
+  ) -> NSEvent? {
+    let (code, shift) = TerminalSelfTest.keystroke(for: char)
+    return NSEvent.keyEvent(
+      with: .keyDown, location: .zero, modifierFlags: shift ? flags.union(.shift) : flags,
+      timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil,
+      characters: char, charactersIgnoringModifiers: ignoringModifiers ?? char, isARepeat: false, keyCode: code)
+  }
+
   /// Reports the menu item that `shortcut` runs. When none runs, it reports the item that owns the key and
   /// whether that item is enabled. The event has ⇧ when the character is a shifted one, such as "}", because
   /// a keyboard sends ⇧⌘] that way.
   private static func menuItem(running shortcut: KeyboardShortcut, in window: NSWindow) -> String {
     let char = String(shortcut.key.character)
-    let (code, shift) = TerminalSelfTest.keystroke(for: char)
-    let flags: NSEvent.ModifierFlags = shift ? [.command, .shift] : .command
-    guard
-      let event = NSEvent.keyEvent(
-        with: .keyDown, location: .zero, modifierFlags: flags, timestamp: ProcessInfo.processInfo.systemUptime,
-        windowNumber: window.windowNumber, context: nil, characters: char, charactersIgnoringModifiers: char,
-        isARepeat: false, keyCode: code)
-    else { return "\(char) no event" }
+    guard let event = keyDown(char, flags: .command, in: window) else { return "\(char) no event" }
     var ran: String?
     let observer = NotificationCenter.default.addObserver(
       forName: NSMenu.didSendActionNotification, object: nil, queue: nil

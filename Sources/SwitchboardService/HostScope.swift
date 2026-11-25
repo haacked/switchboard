@@ -108,7 +108,8 @@ enum HostScope {
       "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "rm-plan", "rm-queue",
       "rm-cancel", "rm-keep", "rm-retry",
       "removal-notices", "removal-notice-dismiss",
-      "host-disconnect", "live", "live-next", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+      "host-disconnect", "live", "live-next", "auto-mode", "open-shell", "autocontinue", "snapshots", "poll", "repos",
+      "repo-add",
       "clock",
       "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
       "decision-ask",
@@ -119,7 +120,7 @@ enum HostScope {
       "dependency-resolved", "activity", "activity-report", "activity-clear", "headless-usage", "draft-post",
       "draft-check", "issues",
       "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm", "issues-settings",
-      "issues-dismiss",
+      "issues-dismiss", "link-open",
     ] {
       refused[op] = actsHere
     }

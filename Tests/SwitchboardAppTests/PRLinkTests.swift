@@ -25,6 +25,11 @@ struct HostedElement {
     (object as AnyObject).accessibilityPerformPress?() ?? false
   }
 
+  /// VoiceOver's increment action on an adjustable element.
+  @discardableResult func increment() -> Bool {
+    (object as AnyObject).accessibilityPerformIncrement?() ?? false
+  }
+
   var frame: CGRect? { (object.value(forKey: "accessibilityFrame") as? NSValue)?.rectValue }
 }
 

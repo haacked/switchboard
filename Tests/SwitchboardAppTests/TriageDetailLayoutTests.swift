@@ -5,7 +5,7 @@ import Testing
 
 @testable import SwitchboardApp
 
-/// The Inbox detail's header at the width the detail has in a 1024 pt window.
+/// The Inbox detail's header at the detail's minimum width, and at the width it has in a 1024 pt window.
 @MainActor
 @Suite struct TriageDetailHeaderLayout {
   static let longName = "Typo-tolerant search with fuzzy matching across every field"
@@ -27,11 +27,26 @@ import Testing
     return s
   }
 
-  func host(_ session: SessionSummary) -> HostedView {
+  /// The detail's width in a 1024 pt window, where the sidebar hides and the list has its ideal width.
+  static let narrowWindowWidth: CGFloat = {
+    typealias Split = ListDetailSplit<EmptyView, EmptyView>
+    return 1024 - Split.listIdealWidth - Split.dividerWidth
+  }()
+
+  func host(_ session: SessionSummary, width: CGFloat? = nil) -> HostedView {
     HostedView(
       TriageDetail(session: session)
         .environmentObject(offlineModel())
-        .frame(width: ListDetailSplit<EmptyView, EmptyView>.detailMinWidth))
+        .frame(width: width ?? ListDetailSplit<EmptyView, EmptyView>.detailMinWidth))
+  }
+
+  @Test func aLongNameShowsInFullWithTheRepoAndPRInA1024PointWindow() throws {
+    let hosted = host(session(name: Self.longName), width: Self.narrowWindowWidth)
+
+    let name = try #require(hosted.staticTexts(Self.longName).first?.frame?.width)
+    #expect(name >= idealWidth(Text(verbatim: Self.longName).fontWeight(.medium)) - 1)
+    #expect(hosted.staticTexts(Self.repoName).count == 1)
+    #expect(hosted.prLinks.map(\.label) == [PRLink.accessibilityLabel("#4812")])
   }
 
   @Test func aLongNameLeavesThePRNumberReadableInFull() throws {

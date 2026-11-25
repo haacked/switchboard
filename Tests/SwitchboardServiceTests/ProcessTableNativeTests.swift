@@ -289,6 +289,33 @@ import Testing
     ] as [(String, [UInt8])])
   func argvOfABufferWithNoArgumentsIsEmpty(_ what: String, buffer: [UInt8]) {
     #expect(ProcessTable.argv(fromProcArgs: buffer) == [], "\(what)")
+    #expect(ProcessTable.environment(fromProcArgs: buffer) == [], "\(what)")
+  }
+
+  /// The kernel ends the environment with an empty string and pads the rest of the buffer with NULs, which can
+  /// hold stale strings.
+  @Test func environmentHoldsTheStringsAfterArgvUpToAnEmptyOne() {
+    let buffer = procArgs(
+      argc: 2, path: "/bin/sleep", padding: 5, ["sleep", "30", "PATH=/bin", "SB_SESSION_ID=swb_a", "", "STALE=1"])
+
+    #expect(ProcessTable.environment(fromProcArgs: buffer) == ["PATH=/bin", "SB_SESSION_ID=swb_a"])
+  }
+
+  @Test func environmentIsEmptyWhenTheBufferEndsInsideArgv() {
+    let buffer = procArgs(argc: 3, path: "/bin/sleep", padding: 2, ["sleep", "30"])
+
+    #expect(ProcessTable.environment(fromProcArgs: buffer) == [])
+  }
+
+  /// macOS can hide the environment of /bin/sleep, so the process runs a copy with an ad hoc signature.
+  @Test func environmentOfALiveProcessHoldsWhatItStartedWith() throws {
+    let folder = try makeShortTempFolder()
+    defer { try? FileManager.default.removeItem(atPath: folder) }
+    try copySleep(to: "\(folder)/sleep")
+    let sleep = try Child("\(folder)/sleep", ["120"], environment: ["SB_SESSION_ID": "swb_live"])
+    defer { sleep.stop() }
+
+    #expect(ProcessTable.environment(of: sleep.process.processIdentifier) == ["SB_SESSION_ID=swb_live"])
   }
 }
 

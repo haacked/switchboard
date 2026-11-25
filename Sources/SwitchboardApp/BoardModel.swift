@@ -29,13 +29,13 @@ enum MainView: CaseIterable {
     }
   }
 
-  /// The key that, with ⌘, shows the view from the View menu.
-  var shortcutKey: Character {
+  /// The View menu's shortcut that shows the view.
+  var shortcut: AppShortcut {
     switch self {
-    case .inbox: "1"
-    case .board: "2"
-    case .issues: "3"
-    case .loops: "4"
+    case .inbox: .showInbox
+    case .board: .showBoard
+    case .issues: .showIssues
+    case .loops: .showLoops
     }
   }
 }
@@ -147,9 +147,12 @@ final class BoardModel: ObservableObject {
   private(set) var loopEditorOpening = 0
   /// A loop editor's save is on its way to sbd, so a second Save would add a second loop.
   @Published var savingLoop = false
+  /// The open shortcuts overlay.
+  @Published var shortcutsOverlay: ShortcutsOverlayRequest?
   var presentingSheet: Bool {
     newSession != nil || showingImport || showingSearch || showingDoneRemoval || quickAsk != nil
       || pickingSnoozeTime != nil || pickingPauseTime != nil || editingNotes != nil || loopEditor != nil
+      || shortcutsOverlay != nil
   }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
@@ -341,6 +344,8 @@ final class BoardModel: ObservableObject {
   @Published var liveCap: Int?
   /// Whether new sessions start in auto mode, as sbd last answered it, or nil before the Settings window reads it.
   @Published var defaultAutoMode: Bool?
+  /// Whether new sessions open a shell, as sbd last answered it, or nil before the Settings window reads it.
+  @Published var openShellByDefault: Bool?
   /// sbd's refusal of the last change in Settings ▸ General. The tab shows it instead of the main window's banner.
   @Published var settingsError: String?
   /// The Settings ▸ General writes that sbd hasn't answered yet, by op. A reply applies only when no newer write of
@@ -1876,6 +1881,19 @@ final class BoardModel: ObservableObject {
     case .session(let id): perform("link-rm", ["session": .string(id), "link": .string(link), "by": by])
     case .group(let id): perform("group-link-rm", ["group": .string(id), "link": .string(link), "by": by])
     }
+  }
+
+  /// Records an Open of a session's link, which clears a Slack link's new-reply mark. The Open button opens the URL
+  /// itself. sbd keeps no Open time for a group's own link, so that Open sends nothing. `at` is the time of the click,
+  /// because the request waits on the model's queue and a reply can arrive before sbd records it.
+  func openLink(_ row: LinkRows.Row) {
+    guard case .session(let id) = row.owner else { return }
+    perform(
+      "link-open",
+      [
+        "session": .string(id), "link": .string(row.link.id), "by": .string(Author.you.rawValue),
+        "at": .number(Double(nowMs())),
+      ])
   }
 
   /// Every listed session by id, whatever the sidebar's filters hide.

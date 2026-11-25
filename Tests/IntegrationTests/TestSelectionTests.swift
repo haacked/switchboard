@@ -162,16 +162,21 @@ private struct SelectionRun {
     zip([""] + args, args).contains { prev, arg in arg == "list" && prev != "--filter" && prev != "--skip" }
   }
 
-  static func filters(_ args: [String]) -> [String] {
+  static func filters(_ args: [String]) -> [String] { values("--filter", args) }
+
+  static func skips(_ args: [String]) -> [String] { values("--skip", args) }
+
+  /// The values of `option` in `args`, given as `option value` or `option=value`.
+  static func values(_ option: String, _ args: [String]) -> [String] {
     var found: [String] = []
     var i = 0
     while i < args.count {
-      if args[i] == "--filter", i + 1 < args.count {
+      if args[i] == option, i + 1 < args.count {
         found.append(args[i + 1])
         i += 2
         continue
       }
-      if args[i].hasPrefix("--filter=") { found.append(String(args[i].dropFirst("--filter=".count))) }
+      if args[i].hasPrefix("\(option)=") { found.append(String(args[i].dropFirst(option.count + 1))) }
       i += 1
     }
     return found
@@ -430,6 +435,18 @@ private func expectTargeted(
   _ run: SelectionRun, _ filters: Set<String>, sourceLocation: SourceLocation = #_sourceLocation
 ) {
   guard let runIndex = expectFilteredRun(run, filters, sourceLocation: sourceLocation) else { return }
+  expectProductBuildsBefore(run, runIndex, sourceLocation: sourceLocation)
+  // A bundle that a filter names must be a bundle that this run built, because a bundle
+  // that it did not build can hold tests from before the change.
+  let filterTargets = Set(filters.compactMap { parseFilter($0)?.target })
+  #expect(Set(run.builtProducts) == filterTargets, "\(run.invocations)", sourceLocation: sourceLocation)
+}
+
+/// Checks that bin/test built at least one bundle, and that each build came before the
+/// run and named one product.
+private func expectProductBuildsBefore(
+  _ run: SelectionRun, _ runIndex: Int, sourceLocation: SourceLocation = #_sourceLocation
+) {
   #expect(!run.builds.isEmpty, "\(run.invocations)", sourceLocation: sourceLocation)
   for build in run.builds {
     #expect(build.index < runIndex, "\(run.invocations)", sourceLocation: sourceLocation)
@@ -437,10 +454,6 @@ private func expectTargeted(
     // swift build honors only the last --product it is given, so a second one would leave a bundle stale.
     #expect(build.args.filter { $0 == "--product" }.count == 1, "\(build.args)", sourceLocation: sourceLocation)
   }
-  // A bundle that a filter names must be a bundle that this run built, because a bundle
-  // that it did not build can hold tests from before the change.
-  let filterTargets = Set(filters.compactMap { parseFilter($0)?.target })
-  #expect(Set(run.builtProducts) == filterTargets, "\(run.invocations)", sourceLocation: sourceLocation)
 }
 
 /// Checks that bin/test built every test bundle in one `--build-tests` build
@@ -945,6 +958,77 @@ private struct PassthroughCase: Sendable, CustomTestStringConvertible {
   var testDescription: String { args.joined(separator: " ") }
 }
 
+private let testTargets = Set(unitTargetNames + ["IntegrationTests"])
+
+/// A bin/test run with --filter arguments and the test bundles it should build.
+private struct FilterCase: Sendable, CustomTestStringConvertible {
+  var name: String
+  var files: [String: String] = [:]
+  var args: [String]
+  var bundles: Set<String>
+
+  var testDescription: String { name }
+}
+
+private let filterCases: [FilterCase] = [
+  FilterCase(
+    name: "a Core suite with its target prefix", args: ["--filter", "^SwitchboardCoreTests\\.FxCoreTests/"],
+    bundles: ["SwitchboardCoreTests"]),
+  FilterCase(
+    name: "a whole target, as bin/test prints it", args: ["--filter", "^SwitchboardCoreTests\\."],
+    bundles: ["SwitchboardCoreTests"]),
+  FilterCase(
+    name: "suites in parentheses, as bin/test prints them",
+    args: ["--filter", "^SwitchboardCoreTests\\.(FxCoreTests|FxOtherTests)/"], bundles: ["SwitchboardCoreTests"]),
+  FilterCase(name: "a Core suite name", args: ["--filter", "FxCoreTests"], bundles: ["SwitchboardCoreTests"]),
+  FilterCase(name: "--filter=", args: ["--filter=FxAppTests"], bundles: ["SwitchboardAppTests"]),
+  FilterCase(name: "an IntegrationTests suite", args: ["--filter", "FxCLITests"], bundles: ["IntegrationTests"]),
+  FilterCase(
+    name: "suites in two bundles", args: ["--filter", "FxCoreTests", "--filter", "FxServiceTests"],
+    bundles: ["SwitchboardCoreTests", "SwitchboardServiceTests"]),
+  FilterCase(
+    name: "a name that two bundles' sources declare outside their file names",
+    files: ["Tests/SwitchboardServiceTests/AdapterTests.swift": suiteFile("FxCoreAdapterTests", "adapts")],
+    args: ["--filter", "FxCore"], bundles: ["SwitchboardCoreTests", "SwitchboardServiceTests"]),
+  FilterCase(name: "part of a target's name", args: ["--filter", "Integration"], bundles: ["IntegrationTests"]),
+  FilterCase(
+    name: "a file name that no source names",
+    files: ["Tests/SwitchboardAppTests/FxPlacement.swift": suiteFile("FxAppMoreTests", "places")],
+    args: ["--filter", "FxPlacement"], bundles: ["SwitchboardAppTests"]),
+  FilterCase(name: "--claude", args: ["--claude", "--filter", "FxCoreTests"], bundles: ["SwitchboardCoreTests"]),
+]
+
+/// Filters whose matches bin/test cannot place in known bundles, or whose matches
+/// every bundle can hold.
+private let everyBundleFilterArgs: [[String]] = [
+  ["--filter", "Fx.*Tests"],
+  ["--filter", "^SwitchboardCoreTests\\.FxCoreTests|FxServiceTests"],
+  ["--filter", "^SwitchboardCoreTests\\.(FxCoreTests)|FxServiceTests"],
+  ["--filter", "^SwitchboardCoreTests\\.FxCoreTests\\|FxServiceTests"],
+  ["--filter", "Fx"],
+  ["--filter", "^NoSuchTests\\.FxCoreTests"],
+  ["--filter", "FxNoSuchSuite"],
+  ["--filter", "FxCoreTests", "--filter", "Fx.*"],
+]
+
+/// Checks that bin/test built each of `bundles` in its own `--product` build, then ran
+/// swift test once with `--skip-build`, the filters in `args`, and a `--skip` for each
+/// other test target, whose bundle can predate the change.
+private func expectFilteredBundles(
+  _ run: SelectionRun, args: [String], bundles: Set<String>, sourceLocation: SourceLocation = #_sourceLocation
+) {
+  #expect(run.result.status == 0, "\(run.result.stderr)", sourceLocation: sourceLocation)
+  #expect(run.builtProducts.sorted() == bundles.sorted(), "\(run.invocations)", sourceLocation: sourceLocation)
+  #expect(run.testRuns.count == 1, "\(run.invocations)", sourceLocation: sourceLocation)
+  guard let test = run.testRuns.first, let runIndex = run.invocations.firstIndex(of: test) else { return }
+  expectProductBuildsBefore(run, runIndex, sourceLocation: sourceLocation)
+  #expect(test.contains("--skip-build"), "\(test)", sourceLocation: sourceLocation)
+  #expect(SelectionRun.filters(test) == SelectionRun.filters(args), "\(test)", sourceLocation: sourceLocation)
+  #expect(
+    Set(SelectionRun.skips(test)) == Set(testTargets.subtracting(bundles).map(wholeTarget)), "\(test)",
+    sourceLocation: sourceLocation)
+}
+
 private struct SelectCase: Sendable, CustomTestStringConvertible {
   var name: String
   var files: [String: String] = [:]
@@ -1136,9 +1220,17 @@ private func selectionLines(_ output: String) -> Set<String> {
   }
 
   @Test(arguments: [
-    PassthroughCase(args: ["--filter", "Foo"], invocations: [["test", "--filter", "Foo"]]),
+    PassthroughCase(
+      args: ["--filter", "FxCoreTests", "--parallel"], invocations: [["test", "--filter", "FxCoreTests", "--parallel"]]),
+    PassthroughCase(
+      args: ["--filter", "FxCoreTests", "--skip-build"],
+      invocations: [["test", "--filter", "FxCoreTests", "--skip-build"]]),
+    PassthroughCase(
+      args: ["--filter", "FxCoreTests", "--skip", "Bar"],
+      invocations: [["test", "--filter", "FxCoreTests", "--skip", "Bar"]]),
+    PassthroughCase(args: ["--filter"], invocations: [["test", "--filter"]]),
     PassthroughCase(args: ["--skip", "Bar"], invocations: [["test", "--skip", "Bar"]]),
-    PassthroughCase(args: ["--claude", "--filter", "Foo"], invocations: [["test", "--filter", "Foo"]]),
+    PassthroughCase(args: ["--claude", "--filter", "Foo", "-v"], invocations: [["test", "--filter", "Foo", "-v"]]),
     PassthroughCase(
       args: ["--claude"], invocations: [["test", "--filter", "ClaudeTests"], ["test", "--skip", "ClaudeTests"]]),
   ])
@@ -1276,6 +1368,89 @@ private func selectionLines(_ output: String) -> Set<String> {
     let run = try repo.run()
 
     #expect(run.result.status != 0)
+    #expect(run.testRuns.isEmpty, "\(run.invocations)")
+  }
+
+  @Test(arguments: filterCases)
+  fileprivate func filtersBuildOnlyTheBundlesThatCanHoldTheirTests(_ c: FilterCase) throws {
+    let repo = try SelectionRepo(files: c.files)
+
+    let run = try repo.run(c.args)
+
+    expectFilteredBundles(run, args: c.args, bundles: c.bundles)
+  }
+
+  /// The listing comes from the last build, which predates the new suite. Only the
+  /// sources show that the filter also matches a suite in another bundle.
+  @Test func aFilterMatchingASuiteNewSinceTheLastBuildBuildsItsBundle() throws {
+    let repo = try SelectionRepo()
+    try repo.write("Tests/SwitchboardAppTests/ViewTests.swift", suiteFile("FxCoreViewTests", "draws"))
+
+    let run = try repo.run("--filter", "FxCore")
+
+    expectFilteredBundles(run, args: ["--filter", "FxCore"], bundles: ["SwitchboardCoreTests", "SwitchboardAppTests"])
+  }
+
+  @Test(arguments: everyBundleFilterArgs)
+  func filtersThatNeedEveryBundleRunPlainSwiftTest(_ args: [String]) throws {
+    let repo = try SelectionRepo()
+
+    let run = try repo.run(args)
+
+    #expect(run.result.status == 0, "\(run.result.stderr)")
+    #expect(run.builds.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns == [["test"] + args], "\(run.invocations)")
+    #expect(run.result.stderr.contains("so every test bundle builds"), "\(run.result.stderr)")
+  }
+
+  @Test func anUnreadableSourceFileRunsPlainSwiftTest() throws {
+    let repo = try SelectionRepo()
+    let path = "\(repo.dir)/Tests/SwitchboardAppTests/FxAppTests.swift"
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path) }
+
+    let run = try repo.run("--filter", "FxCoreTests")
+
+    #expect(run.builds.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns == [["test", "--filter", "FxCoreTests"]], "\(run.invocations)")
+  }
+
+  /// A test's name carries its source line and column. The digit appears in the App
+  /// sources, but a line number of any bundle can match it too.
+  @Test func anAllDigitFilterRunsPlainSwiftTest() throws {
+    let repo = try SelectionRepo(files: [
+      "Tests/SwitchboardAppTests/FxRetryTests.swift":
+        "import Testing\n\nstruct FxRetryTests {\n  @Test func retries() { #expect(3 > 0) }\n}\n"
+    ])
+
+    let run = try repo.run("--filter", "3")
+
+    #expect(run.builds.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns == [["test", "--filter", "3"]], "\(run.invocations)")
+  }
+
+  @Test func aFilterWithAMissingBundleBuildsEveryBundleAndSkipsNone() throws {
+    let repo = try SelectionRepo()
+    repo.bundles.removeAll { $0 == "IntegrationTests" }
+
+    let run = try repo.run("--filter", "FxCoreTests")
+
+    #expect(run.result.status == 0, "\(run.result.stderr)")
+    #expect(run.builds.map(\.args).filter { $0.contains("--build-tests") }.count == 1, "\(run.invocations)")
+    #expect(run.builtProducts.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns.count == 1, "\(run.invocations)")
+    let test = run.testRuns.first ?? []
+    #expect(test.contains("--skip-build") && SelectionRun.skips(test).isEmpty, "\(test)")
+  }
+
+  @Test func aFailingFilteredBuildRunsNoTest() throws {
+    let repo = try SelectionRepo()
+    repo.buildStatus = 1
+
+    let run = try repo.run("--filter", "FxCoreTests")
+
+    #expect(run.result.status != 0)
+    #expect(!run.builds.isEmpty, "\(run.invocations)")
     #expect(run.testRuns.isEmpty, "\(run.invocations)")
   }
 

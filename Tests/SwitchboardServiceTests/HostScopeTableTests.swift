@@ -90,7 +90,8 @@ enum PlannedScope {
     "account-add",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "host-connect", "host-disconnect", "live", "auto-mode", "open-shell", "autocontinue", "snapshots", "poll", "repos",
+    "repo-add",
     "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
     "decision-ask",
@@ -100,7 +101,7 @@ enum PlannedScope {
     "followup-rm", "followup-import", "docket-start", "merge", "review", "ack", "resolved-todos",
     "dependency-resolved", "activity", "activity-report", "activity-clear", "live-next", "draft-post", "draft-check",
     "issues", "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm",
-    "issues-settings", "issues-dismiss",
+    "issues-settings", "issues-dismiss", "link-open",
   ]
 
   /// The ops that `handleHostRequest` sends on their own path before the table: `hook` to `handleHostHook`, and

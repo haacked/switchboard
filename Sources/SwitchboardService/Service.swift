@@ -338,6 +338,8 @@ public final class Service {
   var liveCap: Int
   /// Whether new sessions start in auto mode. `sb auto-mode` changes it.
   var defaultAutoMode: Bool
+  /// Whether new work sessions open their shell pane. `sb open-shell` changes it.
+  var openShellByDefault: Bool
   /// The `operator` settings that the tick last read, with config.json's modification time then.
   var cachedOperatorSettings: (modified: Date?, settings: OperatorSettings)?
   /// The model of a Manager conversation or a group chat without its own. `sb manager model` changes it.
@@ -360,6 +362,11 @@ public final class Service {
     return jobs
   }()
   var docketPoll = DocketPoll()
+  /// The stored Slack threads by `LinkTarget.key`.
+  var slackThreads: [String: SlackThread] = [:]
+  var slackPoll = SlackPollState()
+  /// Only `Service.slackQueue` touches it.
+  var slackAccounts: [String: SlackAccountState] = [:]
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -396,6 +403,7 @@ public final class Service {
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.defaultAutoMode = config.autoMode
+    self.openShellByDefault = config.openShell
     self.managerModel = config.manager.model
     self.issueSettings = config.issues
     let links = Service.makeHostLinks(config: config, home: home)
@@ -437,6 +445,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
+    slackThreads = try store.slackThreads()
     pruneDeclinedSuggestions()
     mac.snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain {
@@ -848,6 +857,8 @@ public final class Service {
       return try noteRequest(op, args, origin: origin)
     case "link-add", "link-rm":
       return try sessionLinkRequest(op, args, origin: origin)
+    case "link-open":
+      return try linkOpenRequest(args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "rm-retry", "rm-keep", "rm-cancel", "removal-notices", "removal-notice-dismiss":
@@ -872,6 +883,8 @@ public final class Service {
       return try operatorModelRequest(args)
     case "auto-mode":
       return try autoModeRequest(args)
+    case "open-shell":
+      return try openShellRequest(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -993,10 +1006,15 @@ public final class Service {
   /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
   /// records nothing, when the store can't keep the event.
   func hook(_ args: JSON, stamp: HostEventStamp? = nil) throws -> (event: Event, answer: JSON)? {
-    guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
+    guard let id = args["session"]?.string, let session = entries[id]?.session, var payload = args["payload"] else {
       return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
+    // The facts replay from the log, so the event itself names the account whose login may have failed.
+    if kind == "StopFailure", case .object(var fields) = payload {
+      fields["account"] = .string(claudeAccount(of: id).key)
+      payload = .object(fields)
+    }
     if let stamp, try store.hasHostEvent(stamp.id) { return nil }
     let before = entries[id]!.facts
     // A job starts inside a turn, and the tick skips a running turn. The count
@@ -1459,6 +1477,7 @@ public final class Service {
     configure(&session)
     // A conversation shows Claude's terminal alone. The user opens its shell on demand.
     if session.kind.isConversation { session.shellClosed = true }
+    applyOpenShellSetting(to: &session)
     session.model = SessionModel.stored(kind: session.kind, requested: session.model, workModel: config.model)
     if session.kind != .operator { try refuseOperatorName(session.name) }
     if let host = session.host {
@@ -2909,8 +2928,10 @@ public final class Service {
       expireGroupMessages(now: now)
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
+      pollSlackThreadsIfDue(now: now)
       applyMCPChanges(now: now)
       autoContinueSessions(now: now)
+      resumeFailedLogins(now: now)
       pruneActivityIfDue(now: now)
       compactSnapshots()
       pruneHostEvents(now: now)
@@ -2938,16 +2959,20 @@ public final class Service {
 
   func summaries(for origin: RequestOrigin = .mac) -> [SessionSummary] {
     let rowFollowups = planRowFollowups()
-    return entries.keys.map { summary($0, rowFollowups: rowFollowups, for: origin) }.sorted {
+    let watched = watchedSlackKeys(now: nowMs())
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups, watchedSlack: watched, for: origin) }.sorted {
       $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
     }
   }
 
   /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
-  /// data only where `showsGitHub` allows it.
-  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil, for origin: RequestOrigin = .mac)
-    -> SessionSummary
-  {
+  /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil
+  /// and the session lists a Slack link. A caller that builds many summaries computes the set once and passes it to
+  /// each call.
+  func summary(
+    _ id: String, rowFollowups: PlanRowFollowups? = nil, watchedSlack: Set<String>? = nil,
+    for origin: RequestOrigin = .mac
+  ) -> SessionSummary {
     let e = entries[id]!
     let now = nowMs()
     let facts = shownFacts(id, for: origin)
@@ -2958,7 +2983,7 @@ public final class Service {
       claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: facts.stateSince,
       lastActivity: facts.lastActivity,
       live: facts.live, claudePid: claudePid(id),
-      attached: attached(id), lastReply: facts.lastReply,
+      attached: attached(id), lastReply: facts.shownReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: facts.cards,
       openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)
@@ -3004,7 +3029,9 @@ public final class Service {
     if !facts.dependencies.isEmpty { out.dependencies = facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     if !facts.artifacts.isEmpty { out.artifacts = facts.artifacts }
-    let links = s.links(found: facts.links)
+    let listed = s.links(found: facts.links)
+    let watched = watchedSlack ?? (listed.contains { $0.kind == .slack } ? watchedSlackKeys(now: now) : [])
+    let links = listed.map { withSlackStatus($0, facts: facts, watched: watched) }
     if !links.isEmpty { out.links = links }
     out.conversationStarted = facts.conversationStarted
     out.docket = s.docket.map { DocketSummary($0, facts.docket) }

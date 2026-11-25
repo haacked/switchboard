@@ -205,28 +205,45 @@ struct CardDrag: ViewModifier {
   }
 }
 
+enum SelectionKeyAction: Equatable {
+  case clear, toggle, delete
+  case extend(BoardDirection)
+}
+
+enum SelectionKey {
+  /// The selection change that a key asks for: Escape clears, Space toggles, ⌘⌫ deletes, and a ⇧-arrow extends.
+  /// Any other key gives nil.
+  static func action(_ key: KeyEquivalent, modifiers: EventModifiers) -> SelectionKeyAction? {
+    let modifiers = NavKey.modifiers(modifiers)
+    switch key {
+    case .escape where modifiers.isEmpty: return .clear
+    case .space where modifiers.isEmpty: return .toggle
+    case .delete where modifiers == .command: return .delete
+    default:
+      guard modifiers == .shift, case .move(let direction) = NavKey.action(key, modifiers: []) else { return nil }
+      return .extend(direction)
+    }
+  }
+}
+
 extension BoardView {
-  /// Handles Escape, Space, ⌘⌫, and ⇧-arrows, which change the Board selection. It returns nil for the keys
-  /// that move the focus ring or open a card.
+  /// Handles the keys that change the Board selection. It returns nil for the keys that move the focus ring or
+  /// open a card.
   func selectionKey(_ press: KeyPress, removable: Int) -> KeyPress.Result? {
-    let modifiers = NavKey.modifiers(press.modifiers)
-    switch press.key {
-    case .escape where modifiers.isEmpty:
+    switch SelectionKey.action(press.key, modifiers: press.modifiers) {
+    case .clear:
       guard !model.multiSelection.isEmpty else { return .ignored }
       model.clearBoardSelection()
-    case .space where modifiers.isEmpty:
+    case .toggle:
       model.toggleFocusedBoardCard()
     case .delete:
       // `removable` is 0 unless two or more sessions are selected.
-      guard modifiers == .command, removable > 0, !model.showingDoneRemoval else {
-        return .ignored
-      }
+      guard removable > 0, !model.showingDoneRemoval else { return .ignored }
       model.checkSelectionRemoval()
-    default:
-      guard modifiers == .shift, case .move(let direction) = NavKey.action(press.key, modifiers: []) else {
-        return nil
-      }
+    case .extend(let direction):
       model.extendBoardSelection(direction)
+    case nil:
+      return nil
     }
     return .handled
   }

@@ -39,6 +39,10 @@ import Testing
     #expect(Manager.guide == Prompts.text(.managerGuide))
     #expect(Manager.guide.contains("sb schedule \(Manager.operatorName) --every 30m"))
     #expect(TriageSummarizer.system.contains("under \(Triage.titleLength) characters"))
+    #expect(SlackPoll.threadsSystem == Prompts.text(.slackThreads))
+    #expect(SlackPoll.threadsSystem.contains("call \(SlackPoll.readTool) once"))
+    #expect(SlackPoll.selfSystem == Prompts.text(.slackSelf))
+    #expect(SlackPoll.selfSystem.contains("Call \(SlackPoll.profileTool) once"))
   }
 
   @Test func aMissingFileIsAnErrorThatNamesIt() throws {

@@ -52,6 +52,11 @@ extension Service {
   func acknowledge(_ id: String, _ verdict: Verdict) throws {
     let e = entries[id]!
     guard !shown(id, verdict, now: nowMs()).acknowledged else { return }
+    if verdict.loginFailed {
+      throw APIError(
+        "\(e.session.name) stays in Needs you until its Claude login works again. Run /login in it, send it a message, or mark it done"
+      )
+    }
     guard AttentionState.inbox.contains(verdict.state) else {
       throw APIError("\(e.session.name) isn't in the Inbox: \(verdict.reason)")
     }

@@ -50,7 +50,7 @@ See [Waits, pauses, schedules, and notes](docs/waits-and-notes.md).
 
 ### Live cap and fast switching
 
-`sbd` runs at most 10 `claude` processes at once by default. It stops idle sessions, queues new starts, and resumes a stopped session when you open it, click its terminal, or send it a message. A stopped session costs a few MB instead of 300 to 500. ⌘K searches every session by name, repo, branch, PR, issue, or notes, and ⌘[ and ⌘] go back and forward through the places you went.
+`sbd` runs at most 10 `claude` processes at once by default. It stops idle sessions, queues new starts, and resumes a stopped session when you open it, click its terminal, or send it a message. A stopped session costs a few MB instead of 300 to 500. ⌘K searches every session by name, repo, branch, PR, issue, or notes, and ⌘[ and ⌘] go back and forward through the places you went. Press ? when no text field has focus, or choose Help > Keyboard Shortcuts (⌘/), to see the shortcuts for the view you are in.
 
 ![The session search panel, matching "search" against session names, repos, and PR titles](docs/images/search.png)
 

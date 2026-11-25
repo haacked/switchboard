@@ -32,7 +32,8 @@ extension Service {
 
   /// Runs `claude` with the arguments and the input on stdin, in the folder,
   /// ends it after `timeout` seconds or once `cancelled` returns true, and
-  /// parses what it printed. Every one-shot call that sbd makes runs through
+  /// parses what it printed. `onLine` can refuse a line of stdout, as
+  /// `Headless.run` describes. Every one-shot call that sbd makes runs through
   /// it, and it stores one `headless_calls` row for each call that started
   /// claude: the model and the tokens that claude's envelope reports, and
   /// the error when the call gave no answer that `parse` accepts. Runs off
@@ -40,7 +41,7 @@ extension Service {
   func headlessCall<T>(
     _ kind: HeadlessKind, session: String?, arguments: [String], input: String, env: [String: String],
     folder: String, timeout: Double, cancelled: @escaping @Sendable () -> Bool = { false },
-    parse: (String) throws -> T
+    onLine: ((String) -> String?)? = nil, parse: (String) throws -> T
   ) -> HeadlessOutcome<T> {
     let outcome: HeadlessOutcome<T>
     do {
@@ -50,10 +51,12 @@ extension Service {
       let reply = Headless.reply(
         try Headless.run(
           claude: claude, arguments: arguments, input: input, env: env, folder: folder, timeout: timeout,
-          cancelled: cancelled))
+          cancelled: cancelled, onLine: onLine))
       outcome = HeadlessOutcome(reply: reply, result: Result { try parse(reply.output) })
     } catch let exit as Headless.ExitError {
       outcome = HeadlessOutcome(reply: Headless.reply(exit.output), result: .failure(exit))
+    } catch let refused as Headless.Refused {
+      outcome = HeadlessOutcome(reply: Headless.reply(refused.output), result: .failure(refused))
     } catch let notStarted as Headless.NotStarted {
       return HeadlessOutcome(reply: nil, result: .failure(notStarted))
     } catch {
@@ -78,7 +81,8 @@ extension Service {
 }
 
 /// What `headlessCall` returns: what claude printed, which is nil when claude
-/// did not run or did not exit by itself, and what `parse` made of it.
+/// did not run or when a timeout or a cancel ended it, and what `parse` made
+/// of it.
 struct HeadlessOutcome<T> {
   var reply: HeadlessReply?
   var result: Result<T, Error>
