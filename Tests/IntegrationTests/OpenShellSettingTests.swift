@@ -83,7 +83,8 @@ import Testing
     sbd.stopSbd()
     try sbd.startSbd()
     #expect(try shown(sbd) == ["openShell": false])
-    #expect(try JSON.parse(try sbd.sb("open-shell", "on", "--json")) == ["openShell": true])
+    let on = try #require(JSON.parse(try sbd.sb("open-shell", "on", "--json")))
+    #expect(on == ["openShell": true])
     #expect(try sbd.config()["openShell"] == true)
   }
 
