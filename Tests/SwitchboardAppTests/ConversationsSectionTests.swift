@@ -46,7 +46,7 @@ import Testing
     #expect(list.numberOfRows == 1)
   }
 
-  @Test func withConversationsTheHeaderShowsAboveThem() throws {
+  @Test func withConversationsTheHeaderShowsOnceWithTheirRows() throws {
     let (model, _) = recordingModel([needsItem("m", manager: true, state: .working)])
     let hosted = host(model)
 
