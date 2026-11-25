@@ -23,11 +23,11 @@ public enum Prompt: String, CaseIterable, Sendable {
   var values: [String: String] {
     switch self {
     case .operatorRole:
-      return ["managerOperatorName": Manager.operatorName]
+      return ["managerOperatorName": Manager.operatorName, "eventSubscriptionsGuidance": EventSubscriptions.guidance]
     case .managerGuide:
       return [
         "childQuestionsGuidance": ChildQuestions.guidance, "sessionLinkGuidance": SessionLink.guidance,
-        "managerOperatorName": Manager.operatorName,
+        "managerOperatorName": Manager.operatorName, "eventSubscriptionsGuidance": EventSubscriptions.guidance,
         "mcpToolServerDefaultEventLimit": String(MCPToolServer.defaultEventLimit),
       ]
     case .chatGuide:
