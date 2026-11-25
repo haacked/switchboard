@@ -7,8 +7,8 @@ import os
 
 /// A harness whose session names a settled PR, which the poller read a second ago. The timer is off, which makes the
 /// pending interval 0, but a settled PR polls at the idle interval, so no poll finds it due. GitHub answers
-/// every request with a 502, and `requests` counts the status reads. Each poll that reads the PR sends one.
-/// `otherRequests` counts the other GraphQL requests, such as lookups.
+/// every request with a 502, apart from a status read when `status` is set, and `requests` counts the status reads.
+/// Each poll that reads the PR sends one. `otherRequests` counts the other GraphQL requests, such as lookups.
 private final class RequestedReads {
   let h: PollerHarness
   let requests = OSAllocatedUnfairLock(initialState: 0)
@@ -16,7 +16,7 @@ private final class RequestedReads {
   /// The times at which the poller scheduled a wake, in order.
   let wakes = OSAllocatedUnfairLock(initialState: [Int64]())
 
-  init(fakeWakes: Bool = true, waits: [Wait] = []) throws {
+  init(fakeWakes: Bool = true, waits: [Wait] = [], status: JSON? = nil) throws {
     h = try PollerHarness()
     var pr = cachePR()
     pr.reviewDecision = .approved
@@ -35,6 +35,7 @@ private final class RequestedReads {
     h.poller.client.transport = { [requests, otherRequests] req in
       if JSON.parse(String(decoding: req.httpBody ?? Data(), as: UTF8.self))?["query"]?.string == GitHub.statusQuery {
         requests.withLock { $0 += 1 }
+        if let status { return (200, [:], Data(status.text.utf8)) }
       } else {
         otherRequests.withLock { $0 += 1 }
       }
@@ -148,8 +149,7 @@ private final class RequestedReads {
     let wakes = r.scheduled
     try #require(wakes.count == 1)
     #expect(wakes[0] >= before + 10_000)
-    #expect(r.poller.queue.sync { r.poller.readRequests.timed.keys.sorted() } == ["PR_7"])
-    #expect(r.poller.queue.sync { r.poller.readRequests.timedReads["PR_7"]?.trigger } == .confirm)
+    #expect(r.readRequests.timedReads.mapValues(\.trigger) == ["PR_7": .confirm])
   }
 }
 
@@ -206,18 +206,13 @@ private final class RequestedReads {
 
   /// A poll that reads a requested PR and then fails on a later query doesn't put that read back.
   @Test func aFailureAfterTheStatusReadDoesNotPutTheReadBack() throws {
-    let r = try RequestedReads()
     // The PR's base isn't its repo's default branch, so the poll reads the merged base after the status, and that
     // read fails.
     let node: JSON = [
       "id": "PR_7", "number": 7, "state": "OPEN", "headRefName": "feature", "baseRefName": "stack-1", "body": "",
       "mergeCommit": .null, "repository": ["nameWithOwner": "acme/widgets", "defaultBranchRef": ["name": "main"]],
     ]
-    let status = Data(JSON.object(["data": ["rateLimit": ["cost": 1], "nodes": [node]]]).text.utf8)
-    r.poller.client.transport = { req in
-      let query = JSON.parse(String(decoding: req.httpBody ?? Data(), as: UTF8.self))?["query"]?.string
-      return query == GitHub.statusQuery ? (200, [:], status) : (502, [:], Data(#"{"message":"bad gateway"}"#.utf8))
-    }
+    let r = try RequestedReads(status: ["data": ["rateLimit": ["cost": 1], "nodes": [node]]])
     r.request(["PR_7"], after: 0, trigger: .event)
 
     let result = r.poller.poll(all: false)
