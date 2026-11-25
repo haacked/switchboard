@@ -155,8 +155,8 @@ fi
 
 # Builds the bundles of the tests it selects and sets `run` to the swift test
 # arguments that filter them to the selection. It never selects all of a
-# ci-only target (bin/lib/test-selection.sh), which CI runs on every push. Exits
-# when no test can read a changed file.
+# ci-only target (bin/lib/test-selection.sh), which CI runs once the PR is
+# ready. Exits when no test can read a changed file.
 # A bundle that it does not build keeps its last build, which can predate the
 # change, so every --filter must name a target whose bundle it built. The
 # selection names every test target that depends on a changed target.
@@ -168,7 +168,7 @@ targeted() {
   local base changed json selection filters filter target built missing
   if ! json=$(swift package dump-package) || ! jq -e .targets <<<"$json" >/dev/null 2>&1; then
     for target in $ci_only_targets; do
-      echo "bin/test: could not read the package's targets, so every test outside $target runs. CI runs $target on every push." >&2
+      echo "bin/test: could not read the package's targets, so every test outside $target runs. CI runs $target once the PR is ready for review." >&2
       run+=(--skip "^$target\\.")
     done
     return
@@ -200,7 +200,7 @@ targeted() {
     echo "bin/test: runs the tests that match $filter" >&2
     run+=(--filter "$filter")
   done <<<"$filters"
-  echo "bin/test: CI runs every other test on every push, so a local run does not need them" >&2
+  echo "bin/test: CI runs every other test that the change can affect once the PR is ready for review, so a local run does not need them" >&2
 }
 
 run=()

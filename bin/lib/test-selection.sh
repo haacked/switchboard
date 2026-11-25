@@ -10,11 +10,12 @@
 # reaches, they select whole test targets outside ci_only_targets and the smoke
 # suites, never nothing. They never select a whole ci_only_targets target.
 
-# CI runs every test on each push. Locally these targets run only a changed
-# file's own suites, the suites of the test files that use its names or quote
-# its path, and the smoke suites. The search does not follow the files that use
-# those test files. The tests of these targets start sbd and tmux, so they take
-# most of the suite's run time.
+# CI runs every test that a change can affect once its PR is ready for
+# review. Locally these targets run only a changed file's own suites, the
+# suites of the test files that use its names or quote its path, and the smoke
+# suites. The search does not follow the files that use those test files. The
+# tests of these targets start sbd and tmux, so they take most of the suite's
+# run time.
 ci_only_targets=" IntegrationTests "
 
 # A changed file that more test files of a ci-only target use than this runs
@@ -29,6 +30,9 @@ is_ci_only() {
   case $ci_only_targets in *" $1 "*) return 0 ;; esac
   return 1
 }
+
+# Matches a Markdown file at the repository root, which no build or test reads.
+root_markdown='^[^/]+\.md$'
 
 # Prints the paths on stdin, one per line, of the files whose text matches the
 # grep arguments.
@@ -235,7 +239,7 @@ select_tests() {
 
   while IFS= read -r changed; do
     [ -n "$changed" ] || continue
-    if [[ $changed =~ ^[^/]+\.md$ ]]; then
+    if [[ $changed =~ $root_markdown ]]; then
       echo "bin/test: $changed: no test reads it" >&2
       continue
     fi
