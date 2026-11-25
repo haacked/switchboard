@@ -278,6 +278,24 @@ struct Sidebar: View {
     } message: { move in
       Text(move.message)
     }
+    // The overlay comes before the bottom safe area inset, so the empty state fills only the space above it and
+    // never covers New Group.
+    .overlay {
+      if model.sidebarIsEmpty {
+        ContentUnavailableView {
+          Label("No sessions", systemImage: "rectangle.stack")
+        } description: {
+          Text("Start a session, or import ones that are already running.")
+        } actions: {
+          // Side by side, the two buttons overflow the sidebar at its minimum width.
+          VStack {
+            Button("Start a Session…") { model.openNewSession() }
+            Button("Import Sessions…") { model.showingImport = true }
+          }
+        }
+        .padding(.horizontal)
+      }
+    }
     // A toolbar search field would push New Session into the overflow menu at the minimum window width.
     .searchable(text: $model.sidebarQuery, placement: .sidebar, prompt: "Search Sessions")
     .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -294,15 +312,6 @@ struct Sidebar: View {
         .help("Create an empty group on the Board (⇧⌘G)")
         .accessibilityIdentifier("sidebar-new-group")
         RemovalStatusView()
-      }
-    }
-    .overlay {
-      if model.sidebarIsEmpty {
-        VStack(spacing: 8) {
-          Text("No sessions").font(.headline)
-          Button("Start a Session…") { model.openNewSession() }
-          Button("Import Sessions…") { model.showingImport = true }
-        }
       }
     }
   }
@@ -598,13 +607,14 @@ struct BoardView: View {
     if empty && model.filterHidesAllWork {
       FilterHidesAll().frame(maxWidth: .infinity, maxHeight: .infinity)
     } else if empty {
-      VStack(spacing: 12) {
-        Image(systemName: "square.grid.3x3").font(.system(size: 40)).foregroundStyle(.secondary)
-        Text("Start a session to see it here").foregroundStyle(.secondary)
+      ContentUnavailableView {
+        Label("No sessions", systemImage: MainView.board.symbol)
+      } description: {
+        Text("Start a session to see it here.")
+      } actions: {
         Button("New Session…") { model.openNewSession() }
         Button("New Group") { model.startNewGroup() }
       }
-      .frame(maxWidth: .infinity, maxHeight: .infinity)
     } else {
       GeometryReader { geometry in
         let fittedWidth = Self.fittedColumnWidth(available: geometry.size.width, columns: layout.columns.count)
