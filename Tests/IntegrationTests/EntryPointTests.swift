@@ -48,6 +48,7 @@ import Testing
     let agents = "\(fakeHome)/Library/LaunchAgents"
     let r = try sbd.run(["service", "install"], env: ["SB_LAUNCH_AGENTS": agents, "SB_LAUNCHCTL": launchctl])
     #expect(r.status == 0, "\(r.stderr)")
+    #expect(!r.stdout.contains("waiting for sbd"), "\(r.stdout)")
     let plist = "\(agents)/com.haacked.switchboard.sbd.plist"
     #expect(FileManager.default.fileExists(atPath: plist))
     let log = try String(contentsOfFile: "\(fakeHome)/launchctl.log", encoding: .utf8)

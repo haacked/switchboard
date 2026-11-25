@@ -977,7 +977,7 @@ func service(_ a: Args) {
     // sbd opens its socket only after it loads every session. A rebuild makes every snapshot unusable, so the
     // first start after an update replays every event. That took about 10 s for 57,000 events.
     // SB_SERVICE_WAIT lets a test shorten the wait.
-    let wait = Double(ProcessInfo.processInfo.environment["SB_SERVICE_WAIT"] ?? "") ?? 60
+    let wait = ProcessInfo.processInfo.environment["SB_SERVICE_WAIT"].flatMap(TimeInterval.init) ?? 60
     let start = Date()
     var told = false
     while case let elapsed = Date().timeIntervalSince(start), elapsed < wait {
