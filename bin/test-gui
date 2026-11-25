@@ -62,7 +62,7 @@
 # The group check shows the Board in group lanes in a window 1024 pt wide and drives a group's lane header through
 # the app's ShellSelfTest commands. It clicks Accept on a description that Claude wrote and checks through sb that
 # the description is the user's. It opens the Links popover, removes the seeded link, adds a link through the
-# popover's fields, and checks both through sb. It adds a claude.ai artifact link through the same fields and
+# popover's fields and Return, and checks both through sb. It adds a claude.ai artifact link through the same fields and
 # removes it from the Artifacts popover. It opens the Notes link and checks that the popover shows each note.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
 # settings, boardselect, boarddrag, wake, links, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
@@ -1140,13 +1140,14 @@ check_group() {
   wait_for 5 clicked "group-link-$group-$rfc-remove" || fail "the links popover did not show the RFC link: $result"
   wait_for 10 links_are '[]' || fail "Remove did not remove the link: $(group_json .links)"
   [ "$(app fill 'Link URL|https://example.com/design')" = filled ] || fail "the app could not fill the URL field"
-  [ "$(app fill 'Link title (optional)|Design doc')" = filled ] || fail "the app could not fill the title field"
-  clicked "add-group-link-$group" || fail "the app could not click Add: $result"
+  # On macOS 26 the Add button is not an AppKit button, so a click posted to its view does nothing. Return in the
+  # title field runs the same add as the button.
+  [ "$(app submit 'Link title (optional)|Design doc')" = submitted ] || fail "the app could not submit the title field"
   wait_for 10 links_are '["Design doc"]' || fail "Add did not add the link: $(group_json .links)"
   app snapshot "$shots/links.png" >/dev/null
   # A link to a claude.ai artifact lists under Artifacts, not Links, so Artifacts has to remove it.
-  [ "$(app fill 'Link URL|https://claude.ai/artifact/GroupGui1')" = filled ] || fail "the app could not fill the URL field"
-  clicked "add-group-link-$group" || fail "the app could not click Add for the artifact link: $result"
+  [ "$(app submit 'Link URL|https://claude.ai/artifact/GroupGui1')" = submitted ] ||
+    fail "the app could not submit the URL field"
   wait_for 10 links_are '["Design doc","https://claude.ai/artifact/GroupGui1"]' ||
     fail "Add did not add the artifact link: $(group_json .links)"
   artifact=$(group_json '.links[] | select(.url == "https://claude.ai/artifact/GroupGui1") | .id')

@@ -65,9 +65,7 @@ struct GroupLinkForm: View {
     TextField("Link URL", text: $url).onSubmit(add)
     HStack(spacing: 8) {
       TextField("Link title (optional)", text: $title).onSubmit(add)
-      Button("Add", action: add)
-        .disabled(!hasURL)
-        .clickAnchor("add-group-link-\(group)")
+      Button("Add", action: add).disabled(!hasURL)
     }
   }
 

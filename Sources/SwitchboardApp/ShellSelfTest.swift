@@ -40,7 +40,8 @@ import SwiftUI
 /// window's content and inside the container anchor's frame, else `:out`. `click-anchor <name>` clicks the view
 /// with that click anchor, as `click-delete-selected` does. It looks in the main window first, then in the app's other
 /// windows, such as a popover's. `fill <placeholder>|<text>` types the text into the field with that placeholder,
-/// in any of the app's windows.
+/// in any of the app's windows. `submit <placeholder>|<text>` types the text the same way and then presses Return in
+/// the field.
 @MainActor
 enum ShellSelfTest {
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
@@ -194,10 +195,10 @@ enum ShellSelfTest {
       return anchors(prefix: prefix, container: args.count > 1 ? args[1] : nil)
     case "click-anchor":
       return click(anchor: rest, throughWindow: false)
-    case "fill":
+    case "fill", "submit":
       let parts = rest.split(separator: "|", maxSplits: 1).map(String.init)
-      guard parts.count == 2 else { return "fill needs <placeholder>|<text>" }
-      return fill(placeholder: parts[0], with: parts[1])
+      guard parts.count == 2 else { return "\(words[0]) needs <placeholder>|<text>" }
+      return fill(placeholder: parts[0], with: parts[1], submit: words[0] == "submit")
     case "board-selection":
       let ids = model.multiSelection.sorted()
       return ids.isEmpty ? "none" : ids.joined(separator: ",")
@@ -316,15 +317,18 @@ enum ShellSelfTest {
   }
 
   /// Types `text` into the text field whose placeholder is `placeholder`, in any of the app's windows, as an input
-  /// method inserts it.
-  private static func fill(placeholder: String, with text: String) -> String {
+  /// method inserts it. With `submit`, it then presses Return in the field.
+  private static func fill(placeholder: String, with text: String, submit: Bool) -> String {
     guard let field = roots.lazy.compactMap({ TerminalSelfTest.textField(placeholder: placeholder, in: $0) }).first
     else { return "no field \(placeholder)" }
     guard field.window?.makeFirstResponder(field) == true, let editor = field.currentEditor() as? NSTextView else {
       return "no focus"
     }
     editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
-    return "filled"
+    guard submit else { return "filled" }
+    // The field editor ends editing on a new line, and the field then runs its SwiftUI onSubmit.
+    editor.insertNewline(nil)
+    return "submitted"
   }
 
   private static func setWidth(_ arg: String) -> String {
