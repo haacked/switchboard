@@ -25,7 +25,8 @@ final class PRChangeHub {
   /// GitHub can lose events in a short window after a subscription is created. A PR's catch-up read comes this long
   /// after its provider's `since`.
   static let catchUpMs: Int64 = 5_000
-  /// How long a provider stays live for a PR before polling leaves the PR to it.
+  /// How long a provider stays live for a PR before the PR counts as covered, so its poll rates read the provider's
+  /// signals.
   static let liveMs: Int64 = 60_000
 
   /// A PR that the poller read and that a session, wait, or merge trigger names.
@@ -43,6 +44,8 @@ final class PRChangeHub {
   private var seen: [String: Int64] = [:]
   /// The time of each PR's last signal-caused read, by node id. A time after now is a read that hasn't run.
   private var signalReads: [String: Int64] = [:]
+  /// When the newest signal joined each PR's pending signal-caused read, by node id.
+  private var joinedAt: [String: Int64] = [:]
   /// The time of a read that a `head` signal needs after the PR's pending signal-caused read, by node id.
   /// `ReadRequests` keeps one time for each PR, so the hub asks for it at the end of the poll that ran the pending
   /// read.
@@ -117,6 +120,14 @@ final class PRChangeHub {
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
+    // `ReadRequests` keeps the earlier of two times for a PR, so another trigger's read can run in place of the hub's.
+    // That read serves every signal that arrived before it.
+    for (id, signalled) in joinedAt {
+      guard let polled = known[id]?.polled, polled >= signalled else { continue }
+      joinedAt[id] = nil
+      if let last = signalReads[id], last > polled { signalReads[id] = polled }
+    }
+    joinedAt = joinedAt.filter { known[$0.key] != nil }
     signalReads = signalReads.filter { known[$0.key] != nil }
     owedReads = owedReads.filter { known[$0.key] != nil }
     requestOwedReads()
@@ -189,6 +200,7 @@ final class PRChangeHub {
   /// moves a read later.
   private func requestSignalRead(_ id: String, _ s: PRSignal, provider: String, now: Int64) {
     var at = now + (s.kind == .head ? Self.headDelayMs : Self.delayMs)
+    joinedAt[id] = now
     if let last = signalReads[id], last > now {
       if s.kind == .head && at > last {
         owedReads[id] = max(owedReads[id] ?? 0, s.failed ? at : max(at, last + Self.spacingMs))

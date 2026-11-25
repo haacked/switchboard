@@ -134,7 +134,7 @@ public struct PRSources: Codable, Equatable, Sendable {
     public var changedAt: Int64?
     /// The PRs that sbd asked the source to report.
     public var wanted: Int
-    /// The PRs that polling leaves to the source.
+    /// The PRs that the source covers, whose poll rates read the source's signals.
     public var covered: Int
     /// The signals that the source sent.
     public var signals: Int

@@ -264,7 +264,7 @@ final class GitHubPoller {
   }
 
   /// The PRs that a session, a wait, or a merge trigger names. A poll reads only these.
-  var namedPRIds: Set<String> {
+  private var namedPRIds: Set<String> {
     Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
   }
 

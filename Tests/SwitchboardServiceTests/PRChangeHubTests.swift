@@ -171,8 +171,8 @@ private let t0 = HubHarness.t0
     #expect(h.reads == [.init(id: "PR_7", at: t0 + 5_000, trigger: .event)])
   }
 
-  /// A `head` signal that comes while an earlier signal's read is pending still gets a read 5 s after it.
-  @Test func aHeadSignalDuringAPendingReadStillGetsAReadFiveSecondsAfterIt() {
+  /// A `head` signal that comes while an earlier signal's read is pending gets a spaced read of its own.
+  @Test func aHeadSignalDuringAPendingReadGetsASpacedReadOfItsOwn() {
     let h = HubHarness()
     h.signal(kind: .checks)
     h.setNow(t0 + 1_000)
@@ -180,7 +180,7 @@ private let t0 = HubHarness.t0
     h.signal(kind: .head)
     h.advance(by: 60_000)
 
-    #expect(h.reads.contains { $0.id == "PR_7" && $0.at >= t0 + 6_000 }, "\(h.reads)")
+    #expect(h.reads.map(\.at) == [t0 + 2_000, t0 + 17_000], "\(h.reads)")
   }
 
   /// A signal after a signal-caused read waits until 15 s after that read.
@@ -768,6 +768,24 @@ private final class HubPoller {
 
     #expect(h.reader.requests.nextPoll == ["PR_7": .catchup])
     #expect(h.reader.requests.timed.isEmpty)
+  }
+
+  /// A catch-up read that `ReadRequests` runs in place of the hub's spaced read serves the signals before it, and a
+  /// signal after it gets a read of its own.
+  @Test func aSignalAfterAnEarlierReadReplacedTheSpacedReadGetsARead() throws {
+    let h = HubHarness()
+    h.signal()
+    h.advance(to: t0 + 3_000)
+    h.signal()
+    try #require(h.reader.requests.timed["PR_7"] == t0 + 17_000)
+    h.coverage(.live(.pr(prRef(7)), since: t0 + 3_000, gap: true))
+    h.advance(to: t0 + 9_000)
+    try #require(h.reads.map(\.at) == [t0 + 2_000, t0 + 8_000])
+
+    h.signal()
+    h.advance(by: 60_000)
+
+    #expect(h.reads.contains { $0.at >= t0 + 9_000 }, "\(h.reads)")
   }
 
   /// Of two live providers that report as many kinds of change, the one registered first keeps the PR.
