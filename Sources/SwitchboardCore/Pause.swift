@@ -134,12 +134,12 @@ extension Session {
   }
 
   /// The items that ending the session as a Manager conversation drops.
-  public var ownItems: [OwnItem] { OwnItem.list(waits: waits ?? [], pause: pause, schedules: schedules ?? []) }
+  public var ownItems: [OwnItem] { OwnItem.list(waits: waits ?? [], pause: pause, schedules: allSchedules) }
 }
 
 extension SessionSummary {
   /// The items that ending the conversation drops.
-  public var ownItems: [OwnItem] { OwnItem.list(waits: waits, pause: pause, schedules: schedules ?? []) }
+  public var ownItems: [OwnItem] { OwnItem.list(waits: waits, pause: pause, schedules: allSchedules) }
 }
 
 /// One of a Manager conversation's own waits, its pause condition, or one of its schedules. Ending the

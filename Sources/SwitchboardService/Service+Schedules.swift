@@ -34,7 +34,7 @@ extension Service {
     try requireInScope(id, args: args)
     let session = entries[id]!.session
     try refuseNotStarted(session)
-    let open = session.schedules ?? []
+    let open = session.allSchedules
     guard open.count < Schedule.maxPerSession else {
       throw APIError(
         "\(id) has \(Schedule.maxPerSession) schedules, the most a session can have. Remove one with: sb schedule rm <id>"
@@ -42,10 +42,10 @@ extension Service {
     }
     let request = try JSONCoding.convert(args, to: ScheduleRequest.self)
     let group = try request.gate.flatMap { try topupGroup($0, args, origin: origin, caller: caller) }
-    let taken = entries.values.flatMap { $0.session.schedules ?? [] }.map(\.id)
+    let taken = entries.values.flatMap(\.session.allSchedules).map(\.id)
     let schedule = try request.makeSchedule(id: shortId("r", taken: taken), now: nowMs(), group: group)
     if let duplicate = Schedule.duplicate(of: schedule, in: open) { throw APIError(duplicate) }
-    try update(id) { $0.schedules = open + [schedule] }
+    try update(id) { $0.addSchedule(schedule) }
     record(id, "schedule", ["schedule": try JSON(encoding: schedule)])
     return try JSON(encoding: scheduleRow(id, schedule))
   }
@@ -76,7 +76,7 @@ extension Service {
     let sessions = try entries.values.map(\.session)
       .filter { s in only == nil || only == s.id }
       .filter { try inScope($0.id, args: args) }
-    let rows: [ScheduleRow] = sessions.flatMap { s in (s.schedules ?? []).map { scheduleRow(s.id, $0) } }
+    let rows: [ScheduleRow] = sessions.flatMap { s in s.allSchedules.map { scheduleRow(s.id, $0) } }
     func order(_ r: ScheduleRow) -> (Int, Int64, String) {
       (r.schedule.paused == true ? 1 : 0, r.schedule.next, r.schedule.id)
     }
@@ -85,10 +85,7 @@ extension Service {
 
   private func removeSchedule(_ args: JSON) throws -> JSON {
     let (id, schedule) = try ownedSchedule(args)
-    try update(id) { s in
-      let rest = (s.schedules ?? []).filter { $0.id != schedule.id }
-      s.schedules = rest.isEmpty ? nil : rest
-    }
+    try update(id) { $0.removeSchedule(schedule.id) }
     record(id, "schedule-removed", ["schedule": try JSON(encoding: schedule)])
     return try JSON(encoding: scheduleRow(id, schedule))
   }
@@ -165,41 +162,47 @@ extension Service {
   /// top-up is running stays due and runs no check.
   func fireDueSchedules(now: Int64) {
     let ids = entries.compactMap { id, e in
-      e.session.scheduleHold == nil && e.session.schedules?.contains { $0.isDue(now: now) } == true ? id : nil
+      e.session.scheduleHold == nil && e.session.allSchedules.contains { $0.isDue(now: now) } ? id : nil
     }
     // A pass arms and clears no action wait, so it reads the action waits once, at the first gate.
     var subjects: ActionSubjects?
     for id in ids.sorted() {
       guard let session = entries[id]?.session else { continue }
-      let due = (session.schedules ?? []).filter { $0.isDue(now: now) }
+      let due = session.allSchedules.filter { $0.isDue(now: now) }
         .sorted { ($0.next, $0.id) < ($1.next, $1.id) }
       for schedule in due where !topupsInFlight.contains(schedule.id) {
-        var opened: (gate: Schedule.Gate, status: QueueStatus)?
-        if let gate = schedule.gate {
-          let found = subjects ?? actionSubjects()
-          subjects = found
-          let status = QueueStatus.compute(queueRows(subjects: found, gate: gate), gate: gate)
-          switch status.decision {
-          case .gated:
-            recordGated(id, schedule, status: status, now: now)
-            continue
-          case .topup(let k):
-            dispatchTopup(id, schedule, status: status, k: k, now: now)
-            continue
-          case .open:
-            opened = (gate, status)
-          }
-        }
-        // A run makes the session busy, so the guard runs again before each schedule.
-        guard let e = entries[id],
-          Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
-            == nil
-        else { continue }
-        let text = opened.map { $0.gate.fallbackMessage(status: $0.status, prompt: schedule.prompt) } ?? schedule.prompt
-        let check = opened.map { Schedule.Gate.Check(.prompted, status: $0.status, now: now) }
-        fire(id, schedule, text: text, check: check, now: now)
+        fireDue(id, schedule, subjects: &subjects, now: now)
       }
     }
+  }
+
+  /// Checks a due schedule's gate, then sends its prompt when the gate is open and the session is free. `subjects`
+  /// holds the action waits that the pass read at its first gate.
+  private func fireDue(_ id: String, _ schedule: Schedule, subjects: inout ActionSubjects?, now: Int64) {
+    var opened: (gate: Schedule.Gate, status: QueueStatus)?
+    if let gate = schedule.gate {
+      let found = subjects ?? actionSubjects()
+      subjects = found
+      let status = QueueStatus.compute(queueRows(subjects: found, gate: gate), gate: gate)
+      switch status.decision {
+      case .gated:
+        recordGated(id, schedule, status: status, now: now)
+        return
+      case .topup(let k):
+        dispatchTopup(id, schedule, status: status, k: k, now: now)
+        return
+      case .open:
+        opened = (gate, status)
+      }
+    }
+    // A run makes the session busy, so the guard runs again before each schedule.
+    guard let e = entries[id],
+      Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
+        == nil
+    else { return }
+    let text = opened.map { $0.gate.fallbackMessage(status: $0.status, prompt: schedule.prompt) } ?? schedule.prompt
+    let check = opened.map { Schedule.Gate.Check(.prompted, status: $0.status, now: now) }
+    fire(id, schedule, text: text, check: check, now: now)
   }
 
   /// Saves the next run before the send and the result after it, so a crash
@@ -307,12 +310,10 @@ extension Service {
     return skipped
   }
 
-  /// Sends `text` to the session, then saves the run on `schedule` and records a `schedule-ran` event. A gated
-  /// schedule's `check` is saved as the gate's last check in the same save, as failed when the send fails.
+  /// Sends `text` to the session, then records the run through `recordRun`.
   func sendAndRecord(
     _ id: String, _ schedule: Schedule, text: String, skipped: Int, check: Schedule.Gate.Check? = nil, now: Int64
   ) {
-    var ran = schedule
     let run: Schedule.Run
     do {
       let delivered = try deliver(id, text, by: .sbd, trigger: .schedule)
@@ -321,6 +322,13 @@ extension Service {
       logLine("can't run schedule \(schedule.id) of \(id): \(error)")
       run = Schedule.Run(t: now, outcome: .failed, skipped: skipped, error: "\(error)")
     }
+    recordRun(id, schedule, run: run, check: check)
+  }
+
+  /// Saves `run` on `schedule` and records a `schedule-ran` event. A gated schedule's `check` is saved as the gate's
+  /// last check in the same save, as failed when the run failed.
+  func recordRun(_ id: String, _ schedule: Schedule, run: Schedule.Run, check: Schedule.Gate.Check?) {
+    var ran = schedule
     var check = check
     if run.outcome == .failed {
       check?.result = .failed
@@ -336,7 +344,7 @@ extension Service {
     } catch {
       logLine("can't save the run of schedule \(schedule.id) of \(id): \(error)")
     }
-    var data: [String: JSON] = ["outcome": .string(run.outcome.rawValue), "skipped": .number(Double(skipped))]
+    var data: [String: JSON] = ["outcome": .string(run.outcome.rawValue), "skipped": .number(Double(run.skipped))]
     data["schedule"] = try? JSON(encoding: ran)
     if let error = run.error { data["error"] = .string(error) }
     record(id, "schedule-ran", .object(data))
@@ -351,13 +359,7 @@ extension Service {
 
   /// Changes one schedule of the session and saves the session's row.
   func changeSchedule(_ id: String, _ scheduleId: String, _ change: (inout Schedule) -> Void) throws {
-    try update(id) { s in
-      s.schedules = s.schedules?.map { schedule in
-        var schedule = schedule
-        if schedule.id == scheduleId { change(&schedule) }
-        return schedule
-      }
-    }
+    try update(id) { $0.changeSchedule(scheduleId, change) }
   }
 
   private func scheduleRow(_ id: String, _ schedule: Schedule) -> ScheduleRow {
@@ -374,7 +376,7 @@ extension Service {
     guard let ref = args["schedule"]?.string, !ref.isEmpty else { throw APIError("name a schedule") }
     let named = try args["session"].map { _ in try lookup(args) }
     let owner = entries.values.lazy.map(\.session).compactMap { s in
-      s.schedules?.first { $0.id == ref }.map { (session: s.id, schedule: $0) }
+      s.schedule(ref).map { (session: s.id, schedule: $0) }
     }.first
     guard let owner, named == nil || named == owner.session else {
       throw APIError(named.map { "\($0) has no schedule \(ref)" } ?? "no schedule \(ref)")

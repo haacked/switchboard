@@ -49,7 +49,7 @@ struct ScheduleList: View {
     TimelineView(.everyMinute) { _ in
       let now = nowMs()
       VStack(alignment: .leading, spacing: 10) {
-        ForEach(session.schedules ?? [], id: \.id) {
+        ForEach(session.allSchedules, id: \.id) {
           ScheduleItem(schedule: $0, caption: ScheduleCaption($0, session: session, now: now))
         }
       }
@@ -140,7 +140,7 @@ struct SchedulesStrip: View {
 
   var body: some View {
     TimelineView(.everyMinute) { _ in
-      if let text = Self.text(session.schedules, now: nowMs()) {
+      if let text = Self.text(session.allSchedules, now: nowMs()) {
         HStack {
           Button {
             showing = true

@@ -2989,7 +2989,8 @@ public final class Service {
       let earlier = facts.earlierPRNumbers
       if !earlier.isEmpty { out.earlierPRs = earlier }
     }
-    if s.schedules?.isEmpty == false { out.schedules = s.schedules }
+    let schedules = s.allSchedules
+    if !schedules.isEmpty { out.schedules = schedules }
     if s.kind == .work {
       out.checkout = checkout(s)
       out.repository = out.checkout.flatMap { repository($0, of: s) }

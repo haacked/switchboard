@@ -47,7 +47,7 @@ struct SidePanel {
   let links: [LinkRows.Row]
 
   init(_ s: SessionSummary, now: Int64 = nowMs()) {
-    let schedules = s.schedules ?? []
+    let schedules = s.allSchedules
     waitsCount = s.waits.count
     showsSchedules = !schedules.isEmpty
     schedulesCount = schedules.count

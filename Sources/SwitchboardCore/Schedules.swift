@@ -290,6 +290,33 @@ extension Session {
   public var scheduleHold: String? {
     Schedule.hold(done: done, paused: Pause.blocker(self) != nil, removing: removal?.holdsSession == true)
   }
+
+  /// Every schedule of the session, in the order it stores them. Code reads and changes the session's schedules
+  /// only through these accessors.
+  public var allSchedules: [Schedule] { schedules ?? [] }
+
+  public func schedule(_ id: String) -> Schedule? {
+    allSchedules.first { $0.id == id }
+  }
+
+  public mutating func addSchedule(_ schedule: Schedule) {
+    schedules = allSchedules + [schedule]
+  }
+
+  /// It changes nothing when the session has no schedule with the id.
+  public mutating func changeSchedule(_ id: String, _ change: (inout Schedule) -> Void) {
+    schedules = schedules?.map { schedule in
+      var schedule = schedule
+      if schedule.id == id { change(&schedule) }
+      return schedule
+    }
+  }
+
+  /// A session with no schedule left stores nil, so its row matches one that never had a schedule.
+  public mutating func removeSchedule(_ id: String) {
+    let rest = allSchedules.filter { $0.id != id }
+    schedules = rest.isEmpty ? nil : rest
+  }
 }
 
 extension SessionSummary {
@@ -297,6 +324,8 @@ extension SessionSummary {
   public var scheduleHold: String? {
     Schedule.hold(done: markedDone, paused: pause != nil, removing: isBeingRemoved)
   }
+
+  public var allSchedules: [Schedule] { schedules ?? [] }
 }
 
 /// The arguments of the `schedule` request, as sb sends them.

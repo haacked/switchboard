@@ -115,7 +115,7 @@ func scheduleText(_ s: Schedule, status: String, groupNames: [String: String]) -
 
 /// The summary carries the facts that sbd's tick reads, so the status matches the one that sbd computes.
 func printSchedules(_ s: SessionSummary) {
-  let schedules = s.schedules ?? []
+  let schedules = s.allSchedules
   let names = gateGroupNames(schedules)
   for schedule in schedules {
     let status = ScheduleStatus(schedule, hold: s.scheduleHold, now: nowMs())
