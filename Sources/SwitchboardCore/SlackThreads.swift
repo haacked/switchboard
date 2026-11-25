@@ -14,6 +14,12 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// Whether the last reply's user is the user's own Slack id. sbd decides it when it reads the reply, so the mark
   /// never needs the id later.
   public var lastReplyYou: Bool
+  /// The newest reply whose user is not the user's own Slack id, as sbd parsed it from a read's message headers.
+  /// sbd decides "not you" when it reads the reply, as for `lastReplyYou`. The last reply can be yours while this
+  /// one is someone else's.
+  public var lastOtherReplyTs: String?
+  public var lastOtherReplyUser: String?
+  public var lastOtherReplyName: String?
   /// When the last successful read ended, in ms since the epoch.
   public var read: Int64?
   /// When sbd last asked for the thread, whether or not the read succeeded, in ms since the epoch.
@@ -30,6 +36,15 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// The `oldest` of the next read: none before the first successful read, then the last reply's ts, or the root's
   /// when the thread had no replies. `slack_read_thread` returns only the messages after it.
   public var oldest: String? { replies == nil ? nil : lastReplyTs ?? thread }
+
+  /// Stores the header as the newest reply that isn't yours, unless the stored one has the same ts or a later one.
+  public mutating func record(other header: SlackPoll.Header) {
+    guard let value = SlackPoll.tsValue(header.ts) else { return }
+    if let stored = lastOtherReplyTs.flatMap(SlackPoll.tsValue), stored >= value { return }
+    lastOtherReplyTs = header.ts
+    lastOtherReplyUser = header.user
+    lastOtherReplyName = header.name
+  }
 }
 
 /// A Slack thread that sbd reads: one that a session's links watch, or one that an open `reply` wait names.

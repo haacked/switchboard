@@ -420,6 +420,111 @@ import Testing
     #expect(status["lastReply"]?["user"]?.string == Self.other)
   }
 
+  // MARK: The newest reply that isn't yours (#504 Stage 2)
+
+  /// The stub's default profile id.
+  static let selfId = "U0EXAMPLESELF"
+
+  /// The thread's `slack_threads` row as sbd stored it, read with sqlite3 while sbd runs.
+  func storedRow(
+    _ sbd: Instance, channel: String = SlackExample.channel, thread: String = SlackExample.rootTs
+  ) throws -> JSON? {
+    let r = try runCommand(
+      "/usr/bin/sqlite3", ["-cmd", ".timeout 5000", sbd.home.database, "SELECT json FROM slack_threads"])
+    try #require(r.status == 0, "\(r.stderr)")
+    return r.stdout.split(separator: "\n").compactMap { JSON.parse(String($0)) }.first {
+      $0["channel"]?.string == channel && $0["thread"]?.string == thread
+    }
+  }
+
+  /// Stage 2's stated case: Alice replies, then you reply before the poll. The row keeps your reply as the last one
+  /// and Alice's as the newest that isn't yours.
+  @Test func theNewestReplyThatIsNotYoursIsStored() throws {
+    let sbd = try Instance(config: Self.config)
+    let s = try sbd.new(name: "flags-cache")
+    let t = try time(try sbd.addLink(s.id, SlackExample.root))
+    let alice = SlackFixtures.ts(t + 60_000)
+    try sbd.writeSlackThread([
+      SlackReply(ts: alice, user: Self.other, name: "Alice"),
+      SlackReply(ts: SlackFixtures.ts(t + 120_000), user: Self.selfId, name: "Me"),
+    ])
+
+    let status = try pollAndRead(sbd, s.id)
+
+    #expect(status["lastReply"]?["you"]?.bool == true)
+    let row = try #require(try storedRow(sbd))
+    #expect(row["lastReplyUser"]?.string == Self.selfId)
+    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
+    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
+    #expect(row["lastOtherReplyName"]?.string == "Alice", "\(row)")
+  }
+
+  /// A later read that finds only your reply keeps Alice's. A later read that finds Carol's replaces it.
+  @Test func theStoredOtherReplyChangesOnlyForANewerOne() throws {
+    let sbd = try Instance(config: Self.config)
+    let s = try sbd.new(name: "flags-cache")
+    let t = try time(try sbd.addLink(s.id, SlackExample.root))
+    let alice = SlackReply(ts: SlackFixtures.ts(t + 60_000), user: Self.other, name: "Alice")
+    try sbd.writeSlackThread([alice])
+    try pollAndRead(sbd, s.id)
+    let mine = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: Self.selfId, name: "Me")
+    try sbd.writeSlackThread([alice, mine])
+
+    try pollAndRead(sbd, s.id)
+
+    let kept = try #require(try storedRow(sbd))
+    #expect(kept["lastReplyTs"]?.string == mine.ts, "\(kept)")
+    #expect(kept["lastOtherReplyTs"]?.string == alice.ts, "\(kept)")
+    #expect(kept["lastOtherReplyUser"]?.string == Self.other, "\(kept)")
+
+    let carol = SlackReply(ts: SlackFixtures.ts(try sbd.now() + 60_000), user: "U0CAROL", name: "Carol")
+    try sbd.writeSlackThread([alice, mine, carol])
+
+    try pollAndRead(sbd, s.id)
+
+    let replaced = try #require(try storedRow(sbd))
+    #expect(replaced["lastOtherReplyTs"]?.string == carol.ts, "\(replaced)")
+    #expect(replaced["lastOtherReplyUser"]?.string == "U0CAROL", "\(replaced)")
+    #expect(replaced["lastOtherReplyName"]?.string == "Carol", "\(replaced)")
+  }
+
+  @Test func aFailedReadKeepsTheStoredOtherReply() throws {
+    let sbd = try Instance(config: Self.config)
+    let s = try sbd.new(name: "flags-cache")
+    let t = try time(try sbd.addLink(s.id, SlackExample.root))
+    let alice = SlackFixtures.ts(t + 60_000)
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try pollAndRead(sbd, s.id)
+    try sbd.writeSlackSwitch("slack-fail")
+    _ = try sbd.advanceToPoll()
+
+    try waitForStatus(sbd, s.id, "a failed read") { $0["error"]?.string != nil }
+
+    let row = try #require(try storedRow(sbd))
+    #expect(row["error"]?.string != nil, "\(row)")
+    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
+    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
+  }
+
+  /// The call succeeds but skips the thread, so sbd refuses only that thread's read.
+  @Test func aRefusedThreadReadKeepsTheStoredOtherReply() throws {
+    let sbd = try Instance(config: Self.config)
+    let s = try sbd.new(name: "flags-cache")
+    let t = try time(try sbd.addLink(s.id, SlackExample.root))
+    let alice = SlackFixtures.ts(t + 60_000)
+    try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
+    try pollAndRead(sbd, s.id)
+    try sbd.writeSlackSwitch("slack-skip", "\(SlackExample.channel)/\(SlackExample.rootTs)\n")
+    _ = try sbd.advanceToPoll()
+
+    try waitForStatus(sbd, s.id, "a refused read") { $0["error"]?.string != nil }
+
+    let row = try #require(try storedRow(sbd))
+    #expect(row["lastOtherReplyTs"]?.string == alice, "\(row)")
+    #expect(row["lastOtherReplyUser"]?.string == Self.other, "\(row)")
+    #expect(row["lastOtherReplyName"]?.string == "Alice", "\(row)")
+  }
+
   /// Checks the condition every 0.2 s for the seconds, and fails at the first check that is false.
   func stays(_ what: String, for seconds: Double = 2, _ condition: () throws -> Bool) throws {
     let deadline = Date().addingTimeInterval(seconds)

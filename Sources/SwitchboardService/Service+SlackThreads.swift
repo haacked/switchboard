@@ -123,7 +123,7 @@ extension Service {
     let poll = slackCall(
       .slackThreads, allowed: SlackPoll.readTool, schema: SlackPoll.threadsSchema, system: SlackPoll.threadsSystem,
       input: SlackPoll.threadsInput(asks), timeout: 60 + 20 * Double(asks.count), env: env, account: label,
-      model: model, deny: &state.deny, parse: { try SlackPoll.parseThreads($0, asked: asks, now: now) })
+      model: model, deny: &state.deny, parse: { try SlackPoll.parseThreads($0, asked: asks, you: selfId, now: now) })
     return poll.map { (selfId: selfId, reads: $0) }.mapError { SlackPoll.ReadError(oneLine("\($0)", max: 300)) }
   }
 
@@ -174,6 +174,7 @@ extension Service {
             row.lastReplyName = read.lastReplyName
             row.lastReplyYou = user == poll.selfId
           }
+          if let other = read.lastOther { row.record(other: other) }
           row.read = now
           row.error = nil
         case .failure(let error):
