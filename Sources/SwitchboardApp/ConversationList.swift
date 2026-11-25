@@ -2,7 +2,8 @@ import SwiftUI
 import SwitchboardCore
 
 /// The sidebar's Manager conversations: pinned first, then the others newest
-/// activity first, then a closed Archive group.
+/// activity first, then a closed Archive group. The header shows with no
+/// conversations, because its button is the sidebar's way to start one.
 struct ConversationsSection: View {
   @EnvironmentObject var model: BoardModel
   let activeAccount: String
@@ -10,31 +11,29 @@ struct ConversationsSection: View {
   let removableSelection: Int
 
   var body: some View {
-    if !model.managers.isEmpty {
-      let c = model.conversations
-      Section {
-        ForEach(c.pinned + c.active) { row($0) }
-        if !c.archived.isEmpty {
-          DisclosureGroup(isExpanded: $model.showingArchive) {
-            ForEach(c.archived) { row($0) }
-          } label: {
-            CountedTitle(title: "Archive", count: c.archived.count).foregroundStyle(.secondary)
-          }
-          .help("Conversations idle for \(Conversations.archiveAfterMs / 86_400_000) days that need nothing")
+    let c = model.conversations
+    Section {
+      ForEach(c.pinned + c.active) { row($0) }
+      if !c.archived.isEmpty {
+        DisclosureGroup(isExpanded: $model.showingArchive) {
+          ForEach(c.archived) { row($0) }
+        } label: {
+          CountedTitle(title: "Archive", count: c.archived.count).foregroundStyle(.secondary)
         }
-      } header: {
-        HStack {
-          Text("Conversations")
-          Spacer()
-          Button {
-            model.openManager(new: true)
-          } label: {
-            Image(systemName: "plus")
-          }
-          .buttonStyle(.borderless)
-          .help("Start a Manager conversation (⌥⌘N)")
-          .accessibilityLabel("New Manager conversation")
+        .help("Conversations idle for \(Conversations.archiveAfterMs / 86_400_000) days that need nothing")
+      }
+    } header: {
+      HStack {
+        Text("Conversations")
+        Spacer()
+        Button {
+          model.openManager(new: true)
+        } label: {
+          Image(systemName: "plus")
         }
+        .buttonStyle(.borderless)
+        .help("Start a Manager conversation (⌥⌘N)")
+        .accessibilityLabel("New Manager conversation")
       }
     }
   }
