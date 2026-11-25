@@ -31,6 +31,9 @@ jobs:
   # skipped job counts as passed, so a PR whose files no job reads still gets
   # passing checks.
   changes:
+    # The draft name keeps a later draft run from hiding a failed changes check
+    # of the ready run on the same commit.
+    name: ${{ github.event.pull_request.draft && 'changes (draft)' || 'changes' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
