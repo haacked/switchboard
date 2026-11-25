@@ -16,6 +16,10 @@ public struct TurnFailure: Codable, Equatable, Sendable {
   /// Whether claude's login failed, so the turn can go on only once the login works.
   public var isLogin: Bool { error == Self.authenticationFailed }
 
+  /// Whether sbd can tell when the failed login works again. A host's login is not one of this Mac's accounts, and
+  /// an event that an older sbd recorded names no account.
+  public var resumable: Bool { account.map { Account.host(ofKey: $0) == nil } ?? false }
+
   /// The account's short name. A host's key names the host.
   public static func accountName(_ key: String) -> String {
     Account.host(ofKey: key) ?? Account.name(ofFolder: key)
@@ -65,10 +69,8 @@ extension Attention {
     let login = failure.account.map { "its Claude login for \(TurnFailure.accountName($0))" } ?? "its Claude login"
     var verdict = Verdict(state: .needsYou, reason: "\(login) expired; run /login")
     let said = failure.message.map { "Claude stopped the turn with \u{201C}\($0)\u{201D}. " } ?? ""
-    // A host's login and a failure with no account give sbd no sign that the login works again.
-    let resumes = failure.account.map { Account.host(ofKey: $0) == nil } ?? false
     let next =
-      resumes
+      failure.resumable
       ? "Run /login in the session. Switchboard continues the turn once the login works again."
       : "Run /login in the session, then send it a message to continue the turn."
     verdict.summary = "\(said)\(next)"
@@ -113,8 +115,7 @@ public enum LoginResume {
   public static func blocker(_ input: LoginResumeInput) -> String? {
     let f = input.facts
     guard let failure = f.turnFailure, failure.isLogin else { return "no failed login" }
-    // An event that an older sbd recorded names no account, so nothing shows when the login works again.
-    guard let failed = failure.account else { return "the failure names no account" }
+    guard failure.resumable, let failed = failure.account else { return "sbd can't tell when this login works again" }
     // A send that failed leaves the failure open for the next tick, within the hourly cap below.
     if let sent = f.loginResumeSent, sent >= failure.at { return "already continued" }
     if input.session.done { return "marked done" }

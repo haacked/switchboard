@@ -28,7 +28,6 @@ extension Service {
     input.live = e.session.host.map { liveCount(onHost: $0) } ?? live
     input.liveCap = liveCap(onHost: e.session.host)
     input.account = account
-    // A host's login is not one of this Mac's accounts, so no usage read shows that it works again.
     if let failure = e.facts.turnFailure, let failed = failure.account {
       input.loginWorks = quota.loginWorks(account: failed, since: failure.at)
     }

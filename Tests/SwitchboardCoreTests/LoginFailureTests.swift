@@ -356,6 +356,12 @@ extension LoginFailureTests {
       #expect(LoginResume.blocker(input(f, loginWorks: true)) != nil)
     }
 
+    @Test func aHostSessionsFailureIsHeldBack() {
+      let f = facts(failedTurn(stopFailure(4, account: Account.key(ofHost: "mini"))))
+
+      #expect(LoginResume.blocker(input(f, loginWorks: true)) != nil)
+    }
+
     @Test func aFailureThatAPromptClearedIsHeldBack() {
       let f = facts(failedTurn(stopFailure(4)) + [event("UserPromptSubmit", 5, ["prompt": "go on"])])
 
