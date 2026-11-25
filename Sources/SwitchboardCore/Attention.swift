@@ -179,8 +179,11 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The main session's last turn, when it ended in a StopFailure and no prompt or Stop came after it. The box
   /// keeps `SessionFacts` small enough for the server threads' stacks.
   public var turnFailure: Box<TurnFailure>?
-  /// When sbd continued a turn that stopped on a failed login, within the last hour.
+  /// When sbd tried to continue a turn that stopped on a failed login, within the last hour. A send that failed
+  /// counts too.
   public var loginResumes: [Int64] = []
+  /// When sbd last delivered the message that continues a turn that stopped on a failed login.
+  public var loginResumeSent: Int64?
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
   /// What a docket row's `docket` events say.

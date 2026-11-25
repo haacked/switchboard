@@ -366,15 +366,27 @@ extension LoginFailureTests {
     /// continue.
     @Test func aFailureThatSbdAlreadyContinuedIsHeldBack() {
       let f = facts(
-        failedTurn(stopFailure(4)) + [event(LoginResume.eventKind, 10, ["text": .string(LoginResume.message)])])
+        failedTurn(stopFailure(4)) + [
+          event(LoginResume.eventKind, 10, ["text": .string(LoginResume.message), "delivery": "pasted"])
+        ])
 
       #expect(LoginResume.blocker(input(f, loginWorks: true)) != nil)
+    }
+
+    /// A send that threw delivered nothing, so the next tick tries again.
+    @Test func aContinueWhoseSendFailedIsTriedAgain() {
+      let f = facts(
+        failedTurn(stopFailure(4)) + [
+          event(LoginResume.eventKind, 10, ["text": .string(LoginResume.message), "error": "claude is gone"])
+        ])
+
+      #expect(LoginResume.blocker(input(f, loginWorks: true)) == nil)
     }
 
     @Test func aNewFailureAfterAContinueIsContinuedAgain() {
       let f = facts(
         failedTurn(stopFailure(4)) + [
-          event(LoginResume.eventKind, 10, ["text": .string(LoginResume.message)]),
+          event(LoginResume.eventKind, 10, ["text": .string(LoginResume.message), "delivery": "pasted"]),
           event("UserPromptSubmit", 11, ["prompt": .string(LoginResume.message)]),
           stopFailure(12, account: otherFolder),
         ])
@@ -411,7 +423,7 @@ extension LoginFailureTests {
       for n in 0..<Int64(LoginResume.perHour) {
         let t = 10 + n * 3
         events += [
-          event(LoginResume.eventKind, t, ["text": .string(LoginResume.message)]),
+          event(LoginResume.eventKind, t, ["text": .string(LoginResume.message), "delivery": "pasted"]),
           event("UserPromptSubmit", t + 1, ["prompt": .string(LoginResume.message)]),
           stopFailure(t + 2, account: failedFolder),
         ]
