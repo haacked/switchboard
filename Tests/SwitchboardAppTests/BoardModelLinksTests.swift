@@ -55,4 +55,12 @@ private func session(_ id: String, links: [ExternalLink]) -> SessionSummary {
     #expect(sent.op == "link-rm")
     #expect(sent.args == ["session": "s1", "link": "fabc12", "by": "you"])
   }
+
+  /// The Artifacts popover removes a group link to a claude.ai artifact by the link's id, because Links leaves it out.
+  @Test func removeByIdOnAGroupSendsGroupLinkRm() async {
+    let sent = await firstRequest { $0.removeLink("l9", of: .group("g1")) }
+
+    #expect(sent.op == "group-link-rm")
+    #expect(sent.args == ["group": "g1", "link": "l9", "by": "you"])
+  }
 }

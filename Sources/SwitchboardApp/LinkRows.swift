@@ -88,8 +88,8 @@ struct LinkRows {
     rows = Self.sorted(own + members)
   }
 
-  /// The lane link's title, such as `Links 2`, or nil when there are no rows.
-  var linkTitle: String? { rows.isEmpty ? nil : "Links \(rows.count)" }
+  /// The lane link's title, such as `Links 2`, or `Add a link` when there are no rows.
+  var linkTitle: String { rows.isEmpty ? "Add a link" : "Links \(rows.count)" }
 
   /// The link's title, or a short form when sbd filled the title in from the URL: the title that the link's kind
   /// gives, else the URL's host and path.

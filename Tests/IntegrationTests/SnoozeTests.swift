@@ -659,7 +659,9 @@ extension Instance {
   /// A session whose `slow held` turn runs, snoozed with `flags` during that turn.
   func snoozedWorkingSession(_ sbd: Instance, _ flags: String...) throws -> SessionSummary {
     let s = try sbd.new(prompt: "slow held", name: "busy")
-    try sbd.waitFor(s.id, "the held tool call") { $0.state == .working }
+    // The session reads Working before its turn starts. A clock jump between SessionStart and UserPromptSubmit
+    // would let the idle stop end claude.
+    try ScheduleFireTests().waitForPrompt(sbd, s.id, "slow held")
     try sbd.sb(["snooze", s.id] + flags)
     return s
   }

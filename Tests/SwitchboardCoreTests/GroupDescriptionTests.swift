@@ -94,6 +94,7 @@ import Testing
     let merged = group("g1", "mcp-tools").absorbing(group("g2", "flag-evals"), now: 30)
 
     #expect(merged.description == "Merged from mcp-tools and flag-evals")
+    #expect(merged.descriptionBy == .claude)
   }
 
   // MARK: Absorbing
