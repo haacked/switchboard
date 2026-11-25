@@ -29,6 +29,9 @@ extension BoardModel {
   /// The Help menu's Keyboard Shortcuts item opens the overlay, or closes it while it shows, as `?` does.
   func toggleShortcuts() { if shortcutsOverlay == nil { openShortcuts() } else { closeShortcuts() } }
 
+  /// The Help item can open the overlay when no other sheet shows, and can always close it.
+  var canToggleShortcuts: Bool { !presentingSheet || shortcutsOverlay != nil }
+
   func showAllShortcuts() { shortcutsOverlay = ShortcutsOverlayRequest(areas: ShortcutArea.allCases) }
 }
 
@@ -80,7 +83,7 @@ enum ShortcutsKey {
   /// so the responder comes from the event's own window.
   private static func handle(_ event: NSEvent, _ model: BoardModel) -> Bool {
     // Most keys are not ?, so the cheap check runs before the window and model lookups.
-    guard event.characters == "?" else { return false }
+    guard event.characters == "?", !event.isARepeat else { return false }
     let main = NSApp.switchboardWindow
     let window = event.window
     let place = Place(

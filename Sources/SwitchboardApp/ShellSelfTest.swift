@@ -244,7 +244,7 @@ enum ShellSelfTest {
       let mask = item.keyEquivalentModifierMask
       let press = AppShortcut.Press(key, EventModifiers(Self.modifierPairs.filter { mask.contains($0.0) }.map(\.1)))
       let keys = AppShortcut.glyphs(KeyboardShortcut(KeyEquivalent(press.key), modifiers: press.modifiers))
-      guard let entry = entry(titled: item.title, in: entries) else {
+      guard let entry = AppShortcut.entry(menuTitle: item.title) else {
         if !AppShortcut.systemPresses.contains(press) { found.append("unlisted \(item.title) \(keys)") }
         continue
       }
@@ -254,15 +254,6 @@ enum ShellSelfTest {
       }
     }
     return found + entries.filter { !carried.contains($0) }.map { "missing \($0)" }
-  }
-
-  /// The entry that names `title`: an exact title first, then the longest title that ends in "…" and starts the
-  /// item's title, so "New Session in Work…" finds the group item and "New Session…" finds New Session.
-  private static func entry(titled title: String, in entries: [AppShortcut]) -> AppShortcut? {
-    if let exact = entries.first(where: { $0.menuTitles.contains(title) }) { return exact }
-    return entries.flatMap { entry in entry.menuTitles.map { (entry, $0) } }
-      .filter { $0.1.hasSuffix("…") && title.hasPrefix(String($0.1.dropLast())) }
-      .max { $0.1.count < $1.1.count }?.0
   }
 
   /// The menu bar's menu with `title`. SwiftUI sets the items' titles when the menu opens. This function asks for

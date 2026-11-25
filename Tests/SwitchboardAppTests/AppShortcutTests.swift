@@ -43,24 +43,10 @@ private let nonMenuEntries = AppShortcut.allCases.filter { !menuKinds.contains($
 
 private let labeledEntries = AppShortcut.allCases.filter { $0.label != nil }
 
-/// The entries whose `menuTitles` name a menu item titled `title`. An exact title wins. Otherwise an entry title
-/// names every item title that starts with it, after any trailing "…" is dropped, and the longest such title wins.
-/// That is how "New Session in Flags…" reaches the group item and not New Session….
-private func entries(forMenuTitle title: String) -> [AppShortcut] {
-  let exact = AppShortcut.allCases.filter { $0.menuTitles.contains(title) }
-  if !exact.isEmpty { return exact }
-  let stems = AppShortcut.allCases.flatMap { entry in
-    entry.menuTitles.map { (entry, $0.hasSuffix("…") ? String($0.dropLast()) : $0) }
-  }
-  let matching = stems.filter { title.hasPrefix($0.1) }
-  guard let longest = matching.map({ $0.1.count }).max() else { return [] }
-  return matching.filter { $0.1.count == longest }.map(\.0)
-}
-
-// MARK: - Pinning against the menu literals at 0db20f94
+// MARK: - The menu keys that the docs name
 
 @Suite struct AppShortcutPinning {
-  /// A menu item's title and the key that `App.swift` bound to it at 0db20f94.
+  /// A menu item's title and the key it binds.
   struct Literal: Sendable, CustomTestStringConvertible {
     var title: String
     var key: Character
@@ -74,9 +60,8 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
     }
   }
 
-  /// Copied from `App.swift` and `KeyboardNavigation.swift` (`NavShortcuts`) at 0db20f94, character for character.
-  /// `KeyboardShortcut("n")` and `KeyEquivalent(view.shortcutKey)` default to ⌘. Next and Previous Session store
-  /// "}" and "{", because a US keyboard sends ⇧⌘] as "}" with ⌘ and ⇧.
+  /// The keys that README.md and docs/sessions.md name, as each menu item stores them. Next and Previous Session
+  /// store "}" and "{", because a US keyboard sends ⇧⌘] as "}" with ⌘ and ⇧.
   static let literals: [Literal] = [
     Literal("New Session…", "n"),
     Literal("New Session in Group…", "n", [.command, .shift]),
@@ -111,13 +96,13 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
 
   @Test(arguments: literals)
   func eachMenuTitleNamesExactlyOneEntry(_ literal: Literal) {
-    #expect(entries(forMenuTitle: literal.title).count == 1, "\(entries(forMenuTitle: literal.title))")
+    #expect(AppShortcut.entry(menuTitle: literal.title) != nil)
   }
 
   /// The stored character, not the key press, so a "}" that became "]" with ⇧ fails here.
   @Test(arguments: literals)
   func menuBindingsMatchThePreRefactorLiterals(_ literal: Literal) throws {
-    let entry = try #require(entries(forMenuTitle: literal.title).first)
+    let entry = try #require(AppShortcut.entry(menuTitle: literal.title))
     let binding = try #require(entry.keys.first)
 
     #expect(binding.key.character == literal.key, "\(entry) stores \(binding.key.character)")
@@ -127,7 +112,7 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
   /// Open Operator Transcript is the ⌥ alternate of Open Manager. It inherits ⇧⌘M and adds ⌥, so App.swift has no
   /// literal for it.
   @Test func theOperatorTranscriptAlternateIsOptionShiftCommandM() throws {
-    let entry = try #require(entries(forMenuTitle: "Open Operator Transcript").first)
+    let entry = try #require(AppShortcut.entry(menuTitle: "Open Operator Transcript"))
 
     #expect(entry.kind == .menuAlternate)
     #expect(Exact(entry.keys[0]) == Exact("m", [.command, .shift, .option]))
@@ -135,7 +120,7 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
 
   @Test(arguments: ["New Loop…", "Open Shell", "Close Shell"])
   func aMenuItemWithNoShortcutHasNoEntry(_ title: String) {
-    #expect(entries(forMenuTitle: title).isEmpty)
+    #expect(AppShortcut.entry(menuTitle: title) == nil)
   }
 
   /// The View menu's ForEach binds each MainView through `MainView.shortcut`, under the title "Show <title>".
@@ -280,7 +265,6 @@ private func entries(forMenuTitle title: String) -> [AppShortcut] {
     Expected(entry: .markDone, glyphs: "⇧⌘D"),
     Expected(entry: .stopClaude, glyphs: "⌘."),
     Expected(entry: .sendMessage, glyphs: "⌘↩ or ↩"),
-    // IssuesView's help said "(⌘Return)" before the list. It now shows the glyph.
     Expected(entry: .startIssueSession, glyphs: "⌘↩"),
     Expected(entry: .primaryAction, glyphs: "⇧⌘↩"),
     Expected(entry: .searchClose, glyphs: "⎋"),

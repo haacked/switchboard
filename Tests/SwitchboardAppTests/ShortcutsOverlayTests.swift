@@ -406,6 +406,19 @@ private final class TypingView: NSView, NSTextInputClient {
     #expect(model.presentingSheet)
   }
 
+  /// The Help item opens the overlay only when no other sheet shows, and closes it while it shows.
+  @Test func theHelpItemTogglesOnlyWhenNoOtherSheetShows() {
+    let model = offlineModel()
+    #expect(model.canToggleShortcuts)
+
+    model.showingImport = true
+    #expect(!model.canToggleShortcuts)
+
+    model.showingImport = false
+    model.openShortcuts()
+    #expect(model.canToggleShortcuts)
+  }
+
   @Test func closingClearsTheRequest() {
     let model = offlineModel()
     model.openShortcuts()

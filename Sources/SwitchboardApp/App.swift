@@ -107,7 +107,7 @@ struct SwitchboardApp: App {
       CommandGroup(replacing: .help) {
         Button("Keyboard Shortcuts", action: model.toggleShortcuts)
           .shortcut(.keyboardShortcuts)
-          .disabled(model.presentingSheet && model.shortcutsOverlay == nil)
+          .disabled(!model.canToggleShortcuts)
       }
       CommandMenu("Session") {
         let acknowledgeTarget = model.acknowledgeTarget

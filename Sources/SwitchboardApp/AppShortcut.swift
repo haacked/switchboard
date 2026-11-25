@@ -324,6 +324,15 @@ enum AppShortcut: CaseIterable, Identifiable {
     Press("/", [.command, .shift]),
   ]
 
+  /// The entry that names a menu item titled `title`: an exact title first, then the longest title that ends in "…"
+  /// and starts the item's title, so "New Session in Work…" finds the group item and "New Session…" finds New Session.
+  static func entry(menuTitle title: String) -> AppShortcut? {
+    if let exact = allCases.first(where: { $0.menuTitles.contains(title) }) { return exact }
+    return allCases.flatMap { entry in entry.menuTitles.map { (entry, $0) } }
+      .filter { $0.1.hasSuffix("…") && title.hasPrefix(String($0.1.dropLast())) }
+      .max { $0.1.count < $1.1.count }?.0
+  }
+
   static func glyphs(_ shortcut: KeyboardShortcut) -> String {
     let press = Press(shortcut)
     let order: [(EventModifiers, String)] = [(.control, "⌃"), (.option, "⌥"), (.shift, "⇧"), (.command, "⌘")]
