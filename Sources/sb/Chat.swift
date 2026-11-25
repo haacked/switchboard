@@ -13,7 +13,7 @@ func chat(_ a: Args) {
     return a.json ? printJSON(result) : printConversations(result)
   }
   if let ref = a.values["--end"] {
-    return endConversation(a, ref, scope: ["group": .string(group)], command: "sb chat --end")
+    return endConversation(a, ref, scope: ["group": .string(group)], command: "sb chat \(group) --end")
   }
   var args: [String: JSON] = ["group": .string(group)]
   if a.switches.contains("--new") {

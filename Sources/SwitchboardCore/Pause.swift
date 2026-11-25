@@ -9,8 +9,7 @@ public struct Pause: Codable, Equatable, Sendable {
     /// The session's name. For a group chat, it is the group's name.
     public var name: String
     public var kind: SessionKind
-    /// A group chat's own name, as `Chat.ownName` gives it. It is nil for a chat with its group's default name and
-    /// for every other kind.
+    /// A group chat's own name. It is nil for a chat with its group's default name and for every other kind.
     public var conversation: String?
 
     public init(id: String, name: String, kind: SessionKind, conversation: String? = nil) {
@@ -54,7 +53,7 @@ public struct Pause: Codable, Equatable, Sendable {
     switch from.kind {
     case .manager: return "Manager"
     case .operator: return Manager.operatorName
-    case .chat: return "the \(Chat.title(group: from.name, ownName: from.conversation))"
+    case .chat: return "the \(Chat.title(group: from.name, name: from.conversation))"
     case .work: return from.name
     }
   }

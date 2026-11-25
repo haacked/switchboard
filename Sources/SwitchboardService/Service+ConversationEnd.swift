@@ -130,12 +130,7 @@ extension Service {
         "\(name) can't end a conversation. Only the user ends one, from a terminal outside every session.")
     }
     let ref = args["session"]?.string ?? ""
-    // Only the refusals' wording reads this lookup, so a ref that names nothing falls to the throwing lookup below.
-    let command =
-      ref.isEmpty
-      ? Self.endCommand
-      : queue.sync { (try? endTarget(ref, args)).flatMap { entries[$0].map { endCommand(of: $0.session) } } }
-        ?? Self.endCommand
+    let command = args["group"]?.string.map { "sb chat \($0) --end" } ?? Self.endCommand
     let ancestry = try caller.ancestry(command: command)
     guard !ref.isEmpty else { throw APIError("name a Manager conversation") }
     let drops = Set(args["drop"]?.array?.compactMap(\.string) ?? [])
@@ -217,26 +212,20 @@ extension Service {
   private func startInPlace(of ended: Session, name: String?) throws -> SessionSummary {
     let name = name.flatMap { $0.isEmpty ? nil : $0 }
     if let group = ended.chat {
-      try queue.sync {
+      let description = try queue.sync { () throws -> String? in
         guard let found = groups[group] else { throw APIError("the group \(group) was removed") }
-        try ensureChatFolder(group, description: found.description)
+        return found.description
       }
+      try ensureChatFolder(group, description: description)
     } else {
       try ensureManagerFolder()
     }
     awaitMCPServers()
     return try queue.sync {
-      let id: String
-      if let group = ended.chat {
-        guard groups[group] != nil else { throw APIError("the group \(group) was removed") }
-        id = try createChat(group, name: name ?? Manager.untitled, prompt: nil) {
-          $0.claudeConfigDir = ended.claudeConfigDir
-          $0.mcp = ended.mcp
-          $0.mcpScoped = ended.mcpScoped
-        }.id
-      } else {
-        id = try createManager(name: name, prompt: nil, account: ended.claudeConfigDir, mcp: ended.mcp).id
-      }
+      if let group = ended.chat, groups[group] == nil { throw APIError("the group \(group) was removed") }
+      let id = try createConversation(
+        chat: ended.chat, name: name, prompt: nil, account: ended.claudeConfigDir, mcp: ended.mcp
+      ).id
       if ended.pinned == true {
         try update(id) { $0.pinned = true }
         record(id, "pinned")

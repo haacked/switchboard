@@ -33,7 +33,7 @@ extension Service {
         if !isNew, let id = mostRecentChat(of: group) { return (id, nil, false) }
         guard let groupName = groups[group]?.name else { throw APIError("group \(group) was removed") }
         let name = isNew ? args["name"]?.string.flatMap { $0.isEmpty ? nil : $0 } : Chat.name(group: groupName)
-        let chat = try createChat(group, name: name, prompt: text)
+        let chat = try createConversation(chat: group, name: name, prompt: text, mcp: nil)
         return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
       guard let created else { return try openOrSend(id, text) }
@@ -140,17 +140,19 @@ extension Service {
     return id
   }
 
-  /// The ids of the group's chats, newest activity first, with the done ones last and ties broken by id. It orders by
-  /// the fields that `Manager.newestFirst` compares, read from the entries without building summaries.
+  /// The ids of the group's chats in `Chat.Order`, read from the entries without building summaries.
   func chats(of group: String) -> [String] {
-    entries.values.filter { $0.session.chat == group }.sorted {
-      ($0.session.done ? 1 : 0, $1.facts.lastActivity, $1.session.created, $0.session.id)
-        < ($1.session.done ? 1 : 0, $0.facts.lastActivity, $0.session.created, $1.session.id)
-    }.map(\.session.id)
+    entries.values.filter { $0.session.chat == group }.sorted { chatOrder($0) < chatOrder($1) }.map(\.session.id)
   }
 
   /// The group's newest chat that is not done, or its newest done chat when every chat is done.
-  func mostRecentChat(of group: String) -> String? { chats(of: group).first }
+  func mostRecentChat(of group: String) -> String? {
+    entries.values.lazy.filter { $0.session.chat == group }.min { chatOrder($0) < chatOrder($1) }?.session.id
+  }
+
+  private func chatOrder(_ e: Entry) -> Chat.Order {
+    Chat.Order(done: e.session.done, lastActivity: e.facts.lastActivity, created: e.session.created, id: e.session.id)
+  }
 
   /// The `chat-ls` request: the group's chats in the order of `chats(of:)`.
   func chatList(_ args: JSON) throws -> [SessionSummary] { try chats(of: lookupGroup(args)).map { summary($0) } }
@@ -158,22 +160,7 @@ extension Service {
   /// The chat of the group that `ref` names by id, unique id prefix, or unique name. A session that is not a chat
   /// of the group is an error.
   func groupChat(_ ref: String, of group: String) throws -> String {
-    try resolveRef(
-      ref, "chat of group \(groups[group]?.name ?? group)",
-      entries.values.map(\.session).filter { $0.chat == group }.map { ($0.id, $0.name) })
-  }
-
-  /// A new chat of the group, in the group's chat folder. Without a name, it takes the first line of `prompt`, or
-  /// `Manager.untitled` until its first prompt names it. It runs on the state queue.
-  func createChat(
-    _ group: String, name: String?, prompt: String?, configure: (inout Session) -> Void = { _ in }
-  ) throws -> SessionSummary {
-    let folder = home.chatFolder(group)
-    let named = name ?? prompt.map(Manager.name(fromPrompt:)) ?? Manager.untitled
-    return try create(NewSession(path: folder, name: named, prompt: prompt), (folder, nil, nil)) {
-      $0.chat = group
-      configure(&$0)
-    }
+    try resolveSession(ref, noun: "chat of group \(groups[group]?.name ?? group)") { $0.chat == group }
   }
 
   func ensureChatFolder(_ group: String, description: String?) throws {

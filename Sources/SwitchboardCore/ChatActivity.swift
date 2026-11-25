@@ -64,25 +64,31 @@ public enum ChatMark: Equatable, Sendable {
     }
   }
 
-  /// The mark of a group's Chat button, which sums up the group's conversations. A conversation that waits on the
-  /// user wins. Else the unread counts add up, and the mark says working when any conversation is in a turn.
+  /// The mark of a group's Chat button, which sums up the group's conversations. The first conversation that waits on
+  /// the user wins. Else the unread counts add up, and the mark says working when any conversation is in a turn.
   public init(chats: [SessionSummary]) {
     guard !chats.isEmpty else {
       self = .none
       return
     }
-    let marks = chats.map { ChatMark($0) }
+    if let needsMe = chats.lazy.map(ChatMark.init).first(where: { $0.needsMeReason != nil }) {
+      self = needsMe
+      return
+    }
     let unread = chats.reduce(0) { $0 + ($1.activity?.unread ?? 0) }
     let working = chats.contains { $0.state == .working }
-    if let needsMe = marks.first(where: { $0.needsMeReason != nil }) {
-      self = needsMe
-    } else if unread > 0 {
+    if unread > 0 {
       self = .unread(unread, working: working)
     } else if working {
       self = .working
     } else {
-      self = .idle(lastMessageAt: chats.compactMap { $0.activity?.lastMessageAt }.max())
+      self = .idle(lastMessageAt: ChatMark.lastMessageAt(chats))
     }
+  }
+
+  /// The time of the newest message among the conversations.
+  public static func lastMessageAt(_ chats: [SessionSummary]) -> Int64? {
+    chats.compactMap { $0.activity?.lastMessageAt }.max()
   }
 
   /// Whether the chat waits on the user. It counts send cards, which

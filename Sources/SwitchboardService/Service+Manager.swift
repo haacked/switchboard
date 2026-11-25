@@ -27,7 +27,7 @@ extension Service {
       let (id, created) = try queue.sync { () -> (String, SessionSummary?) in
         if !isNew, let id = mostRecentManager() { return (id, nil) }
         let name = args["name"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-        let created = try createManager(name: name ?? (isNew ? nil : Manager.name), prompt: text)
+        let created = try createConversation(name: name ?? (isNew ? nil : Manager.name), prompt: text, mcp: [])
         return (created.id, created)
       }
       guard let created else { return try openOrSend(id, text) }
@@ -37,23 +37,30 @@ extension Service {
     }
   }
 
-  /// A new conversation, or the operator with `isOperator`, loads only the
-  /// switchboard MCP server, unless `mcp` names more, or is nil for the full setup. Without a name, it takes the
-  /// first line of `prompt`, or `Manager.untitled` until its first prompt names it. `account` is a Claude config
-  /// folder, kept as it is, so it need not be one that `sb account` knows. Without it, the conversation runs under
-  /// the active account.
-  func createManager(
-    name: String?, prompt: String?, isOperator: Bool = false, account: String? = nil, mcp: [String]? = []
+  /// A new chat of the group `chat` in the group's chat folder, or without `chat` a new Manager conversation, or the
+  /// operator with `isOperator`. Without a name, it takes the first line of `prompt`, or `Manager.untitled` until
+  /// its first prompt names it. `mcp` names the MCP servers that it loads beside the switchboard server: an empty
+  /// list loads only that server, and nil loads the full setup. `account` is a Claude config folder, kept as it is,
+  /// so it need not be one that `sb account` knows. Without it, the conversation runs under the active account. It
+  /// runs on the state queue.
+  func createConversation(
+    chat group: String? = nil, name: String?, prompt: String?, isOperator: Bool = false, account: String? = nil,
+    mcp: [String]?
   ) throws -> SessionSummary {
-    let folder = home.managerFolder
+    let folder = group.map(home.chatFolder) ?? home.managerFolder
     let named = name ?? prompt.map(Manager.name(fromPrompt:)) ?? Manager.untitled
     let created = try create(NewSession(path: folder, name: named, prompt: prompt), (folder, nil, nil)) {
-      $0.manager = true
       $0.claudeConfigDir = account
-      if isOperator { $0.isOperator = true }
       $0.mcp = mcp
-      $0.mcpScoped = true
+      if let group {
+        $0.chat = group
+      } else {
+        $0.manager = true
+        $0.mcpScoped = true
+        if isOperator { $0.isOperator = true }
+      }
     }
+    guard group == nil else { return created }
     // A new conversation is the most recent one, so it takes the Operator's items that no other session owns.
     syncOperatorItems()
     return summary(created.id)
@@ -113,7 +120,7 @@ extension Service {
   func ensureOperator() throws -> String {
     if let id = operatorID() { return id }
     try ensureManagerFolder()
-    return try createManager(name: Manager.operatorName, prompt: nil, isOperator: true).id
+    return try createConversation(name: Manager.operatorName, prompt: nil, isOperator: true, mcp: []).id
   }
 
   /// The operator's id, or nil when none exists. When the store holds more
@@ -254,19 +261,20 @@ extension Service {
 
   /// The conversation that `ref` names by id, unique id prefix, or unique name.
   func managerConversation(_ ref: String) throws -> String {
-    try conversation(ref, kinds: [.manager], noun: "Manager conversation")
+    try resolveSession(ref, noun: "Manager conversation") { $0.kind == .manager }
   }
 
-  /// The Manager conversation or group chat that `ref` names by id, unique id prefix, or unique name. An error names
-  /// the session as a Manager conversation, as it did before a group chat could be named.
+  /// The Manager conversation or group chat that `ref` names by id, unique id prefix, or unique name. An error calls
+  /// the session a Manager conversation whichever kind `ref` meant.
   func userConversation(_ ref: String) throws -> String {
-    try conversation(ref, kinds: [.manager, .chat], noun: "Manager conversation")
+    try resolveSession(ref, noun: "Manager conversation") { $0.kind.isUserConversation }
   }
 
-  /// The session of one of `kinds` that `ref` names by id, unique id prefix, or unique name. An error names the
-  /// session as `noun`.
-  func conversation(_ ref: String, kinds: Set<SessionKind>, noun: String) throws -> String {
-    try resolveRef(ref, noun, entries.values.map(\.session).filter { kinds.contains($0.kind) }.map { ($0.id, $0.name) })
+  /// The session that `include` accepts and that `ref` names by id, unique id prefix, or unique name. An error names
+  /// the session as `noun`.
+  func resolveSession(_ ref: String, noun: String, where include: (Session) -> Bool) throws -> String {
+    try resolveRef(
+      ref, noun, entries.values.compactMap { include($0.session) ? ($0.session.id, $0.session.name) : nil })
   }
 
   /// The conversation that `ref` names, or the most recent one without a ref.

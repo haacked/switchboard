@@ -4,11 +4,8 @@ import SwitchboardCore
 /// Where a group chat lists its conversations: a column on the leading side of the chat's view when the view has
 /// room for it beside the terminals, else a Conversations menu in the chat's header. The column takes its room
 /// before the side panel does.
-enum GroupConversationsColumn {
+enum GroupConversationsColumn: SideColumn {
   static let width: CGFloat = 200
-
-  /// True when `width` holds the column beside content that needs `beside` points.
-  static func fits(width: CGFloat, beside: CGFloat) -> Bool { width >= beside + Self.width }
 }
 
 /// A group chat's conversations, listed as the sidebar lists the Manager conversations. A click on a row selects
@@ -98,7 +95,7 @@ struct RenameSheet: View {
           Button("Cancel", role: .cancel, action: close).keyboardShortcut(.cancelAction)
           Button("Rename", action: save)
             .keyboardShortcut(.defaultAction)
-            .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            .disabled(name.isBlank)
         }
       }
       .padding(20)
@@ -109,7 +106,8 @@ struct RenameSheet: View {
   }
 
   private func save() {
-    guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let name = self.name.trimmed
+    guard !name.isEmpty else { return }
     model.rename(id, to: name)
     close()
   }

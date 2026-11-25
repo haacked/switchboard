@@ -61,8 +61,6 @@ extension BoardModel {
     guard let state = quickAsk, let question = state.asked else { return }
     closeQuickAsk()
     let text = QuickAsk.chatPrompt(question: question, answer: state.phase.answer)
-    perform("manager", ["new": true, "text": .string(text)]) { value in
-      if let id = value["id"]?.string { self.selectUnlisted(id) }
-    }
+    performAndSelect("manager", ["new": true, "text": .string(text)])
   }
 }

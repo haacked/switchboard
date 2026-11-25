@@ -5,12 +5,34 @@ import Foundation
 public enum Chat {
   public static func name(group: String) -> String { "\(group) chat" }
 
-  /// The chat's own name, or nil when it has the default name of its group.
-  public static func ownName(_ name: String, group: String) -> String? { name == Chat.name(group: group) ? nil : name }
+  /// "<group> chat", then ": <name>" for a chat whose name is not the group's default name.
+  public static func title(group: String, name: String?) -> String {
+    let own = name.flatMap { $0 == Chat.name(group: group) ? nil : $0 }
+    return Chat.name(group: group) + (own.map { ": \($0)" } ?? "")
+  }
 
-  /// "<group> chat", then ": <own name>" for a chat that has one.
-  public static func title(group: String, ownName: String?) -> String {
-    Chat.name(group: group) + (ownName.map { ": \($0)" } ?? "")
+  /// The order of a group's chats, which sbd and the app share: those not marked done first, then newest activity,
+  /// then newest created, then by id.
+  public struct Order: Comparable, Sendable {
+    var done: Bool
+    var lastActivity: Int64
+    var created: Int64
+    var id: String
+
+    public init(done: Bool, lastActivity: Int64, created: Int64, id: String) {
+      self.done = done
+      self.lastActivity = lastActivity
+      self.created = created
+      self.id = id
+    }
+
+    public init(_ s: SessionSummary) {
+      self.init(done: s.markedDone, lastActivity: s.lastActivity, created: s.created ?? 0, id: s.id)
+    }
+
+    public static func < (a: Order, b: Order) -> Bool {
+      (a.done ? 1 : 0, b.lastActivity, b.created, a.id) < (b.done ? 1 : 0, a.lastActivity, a.created, b.id)
+    }
   }
 
   /// The CLAUDE.md that sbd keeps in each chat's folder, with the group's

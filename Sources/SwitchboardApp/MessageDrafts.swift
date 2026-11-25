@@ -21,6 +21,8 @@ final class MessageDrafts {
   private var drafts: [String: MessageField.Draft] = [:]
   private var changes: [String: AnyCancellable] = [:]
   private var pendingSave: DispatchWorkItem?
+  /// True while a draft may be under a group's key. `load` finds such a key in a file that an older app saved.
+  private var hasGroupDrafts = false
   /// Writes run here in order, because an image file can be 20 MB.
   private let io = DispatchQueue(label: "switchboard.drafts")
   private let saveDelay: TimeInterval
@@ -112,8 +114,10 @@ final class MessageDrafts {
 
   /// Moves each draft kept under a group's key to the session that `chat` returns for the group, which is the
   /// group's most recent conversation. A session that already holds a draft gets the group's text after its own,
-  /// and the group's images after its own. The group's key then goes away.
+  /// and the group's images after its own. The group's key then goes away. It does nothing once no group's key
+  /// remains.
   func moveGroupDrafts(to chat: (String) -> String?) {
+    guard hasGroupDrafts else { return }
     var moved = false
     for (key, legacy) in drafts where key.hasPrefix(Self.groupKeyPrefix) {
       guard let id = chat(String(key.dropFirst(Self.groupKeyPrefix.count))) else { continue }
@@ -127,6 +131,7 @@ final class MessageDrafts {
       }
       moved = true
     }
+    hasGroupDrafts = drafts.keys.contains { $0.hasPrefix(Self.groupKeyPrefix) }
     if moved { scheduleSave() }
   }
 
@@ -215,5 +220,6 @@ final class MessageDrafts {
       }
       add(draft, for: key)
     }
+    hasGroupDrafts = saved.keys.contains { $0.hasPrefix(Self.groupKeyPrefix) }
   }
 }

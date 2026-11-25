@@ -10,7 +10,7 @@ struct GroupChatButton: View {
   var body: some View {
     let chats = model.chats(of: group.id)
     let mark = ChatMark(chats: chats)
-    let text = ChatButtonText(mark, lastMessageAt: chats.compactMap { $0.activity?.lastMessageAt }.max())
+    let text = ChatButtonText(mark, lastMessageAt: ChatMark.lastMessageAt(chats))
     Button {
       model.openChat(group.id)
     } label: {
