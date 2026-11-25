@@ -53,7 +53,7 @@ extension GitHubPoller {
     var read: Set<String> = []
     for chunk in GitHub.chunks(ids.sorted()) {
       do {
-        let response = try request(
+        let response = try client.request(
           GitHub.mergeDetailsQuery, idsVariable(chunk, with: ["threads": .bool(threads)]), stats: &stats)
         let nodes = response["data"]?["nodes"]?.array ?? []
         for (i, id) in chunk.enumerated() {

@@ -15,6 +15,12 @@ public enum ReadTrigger: String, CaseIterable, Sendable {
   case idle
   /// The PR isn't due, and the poller reads a comment body of it that an earlier poll failed to read.
   case retry
+  /// A source of PR changes reported that the PR changed.
+  case event
+  /// A source of PR changes started reporting the PR's changes, and changes from before that may be lost.
+  case catchup
+  /// One read showed a `ci` wait's outcome, and a second read confirms it.
+  case confirm
 }
 
 /// The GitHub requests and GraphQL points that sbd spent since it started. The totals count every request. The

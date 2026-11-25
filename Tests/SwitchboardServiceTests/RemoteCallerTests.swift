@@ -457,7 +457,7 @@ private let listedPR = FakeGraphQL.PR(id: "PR_77", repo: "secret/listed", number
     ]
     try withReadyService(host: ["repos": ["Secret/Listed": "~/listed"]], config: config) { _, service, facts in
       let p = poller(service)
-      p.transport = github.answer
+      p.client.transport = github.answer
       try body(service, p, facts)
     }
   }

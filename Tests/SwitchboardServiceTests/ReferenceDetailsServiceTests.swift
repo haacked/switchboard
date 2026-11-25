@@ -304,7 +304,7 @@ private func releaseLater(_ api: FakeReferenceAPI, after logged: Int = 0) {
     h.api.put(7, issueNode(7))
     var stats = GitHubPoller.Stats()
 
-    let response = try h.service.github!.request(
+    let response = try h.service.github!.client.request(
       GitHub.referenceQuery, ["o": "acme", "n": "widgets", "num": 7], stats: &stats)
 
     #expect(response["data"]?["repository"]?["issueOrPullRequest"]?["title"] == "Fetched title")
@@ -318,7 +318,8 @@ private func releaseLater(_ api: FakeReferenceAPI, after logged: Int = 0) {
     h.api.unauthorizeNext()
     var stats = GitHubPoller.Stats()
 
-    _ = try h.service.github!.request(GitHub.referenceQuery, ["o": "acme", "n": "widgets", "num": 7], stats: &stats)
+    _ = try h.service.github!.client.request(
+      GitHub.referenceQuery, ["o": "acme", "n": "widgets", "num": 7], stats: &stats)
 
     #expect(h.ghCalls == 2)
     #expect(h.api.requests.map(\.authorization) == ["bearer token-1", "bearer token-2"])
@@ -816,11 +817,11 @@ private func releaseLater(_ api: FakeReferenceAPI, after logged: Int = 0) {
     _ = try concurrently(2) { _ in
       var stats = GitHubPoller.Stats()
       let variables: JSON = ["o": "acme", "n": "widgets", "num": 7]
-      return (try? poller.request(GitHub.referenceQuery, variables, stats: &stats)) != nil
+      return (try? poller.client.request(GitHub.referenceQuery, variables, stats: &stats)) != nil
     }
 
     #expect(h.api.requests.count == 2)
-    #expect(poller.graphQLPausedUntil > nowMs() + 500_000)
+    #expect(poller.client.graphQLPausedUntil > nowMs() + 500_000)
   }
 
   /// A rate limit that one of 20 concurrent fetches meets pauses the next fetch, which fails without a request.
