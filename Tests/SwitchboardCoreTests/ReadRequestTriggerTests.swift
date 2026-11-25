@@ -276,6 +276,20 @@ import Testing
     #expect(trigger(Self.settled, polledAgo: Self.idleMs, requested: nil) == .idle)
   }
 
+  /// `cancel` withdraws a PR's timed read only when it was requested with the trigger it names.
+  @Test func cancelWithdrawsOnlyATimedReadWithItsTrigger() {
+    var r = ReadRequests()
+    _ = r.request(["A"], at: 1_000, trigger: .event)
+    _ = r.request(["B"], at: 1_000, trigger: .catchup)
+    r.readAtNextPoll(["C"], trigger: .event)
+
+    r.cancel("A", trigger: .event)
+    r.cancel("B", trigger: .event)
+    r.cancel("C", trigger: .event)
+
+    #expect(r.take(now: 1_000) == ["B": .catchup, "C": .event])
+  }
+
   /// `dueReads` reads a requested candidate under the trigger that `readTrigger` gives it.
   @Test(arguments: [false, true])
   func dueReadsCountsARequestedCandidateUnderItsTrigger(_ all: Bool) {

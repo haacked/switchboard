@@ -46,6 +46,12 @@ public struct ReadRequests: Equatable, Sendable {
     return at
   }
 
+  /// Withdraws the PR's timed read when it was requested with `trigger`. The scheduled wake stays, and it runs no poll
+  /// when nothing else is due.
+  public mutating func cancel(_ id: String, trigger: ReadTrigger) {
+    if timedReads[id]?.trigger == trigger { timedReads[id] = nil }
+  }
+
   /// Removes and returns the PRs that a poll at `now` reads, each with why it is read. A poll calls it once as it
   /// starts.
   public mutating func take(now: Int64) -> [String: ReadTrigger] {

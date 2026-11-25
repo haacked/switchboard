@@ -328,7 +328,7 @@ private func commentNode(_ id: String, _ author: String?, _ createdAt: String) -
 
     let pr = try #require(GitHub.parsePR(node)).pr
 
-    #expect(pr.dependsOn == [PRRef(repo: "PostHog/posthog", number: 122953, deploy: false)])
+    #expect(pr.dependsOn == [DependencyRef(repo: "PostHog/posthog", number: 122953, deploy: false)])
     #expect(pr.closesIssues == [IssueRef(repo: "PostHog/posthog", number: 174)])
   }
 
