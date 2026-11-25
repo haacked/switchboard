@@ -785,7 +785,7 @@ private final class HubPoller {
     h.signal()
     h.advance(by: 60_000)
 
-    #expect(h.reads.contains { $0.at >= t0 + 9_000 }, "\(h.reads)")
+    #expect(h.reads.map(\.at) == [t0 + 2_000, t0 + 8_000, t0 + 23_000], "\(h.reads)")
   }
 
   /// Of two live providers that report as many kinds of change, the one registered first keeps the PR.

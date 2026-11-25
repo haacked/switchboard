@@ -44,8 +44,8 @@ final class PRChangeHub {
   private var seen: [String: Int64] = [:]
   /// The time of each PR's last signal-caused read, by node id. A time after now is a read that hasn't run.
   private var signalReads: [String: Int64] = [:]
-  /// When the newest signal joined each PR's pending signal-caused read, by node id.
-  private var joinedAt: [String: Int64] = [:]
+  /// When each PR's newest signal arrived, by node id, until the poller stores a read from that time or later.
+  private var lastSignalAt: [String: Int64] = [:]
   /// The time of a read that a `head` signal needs after the PR's pending signal-caused read, by node id.
   /// `ReadRequests` keeps one time for each PR, so the hub asks for it at the end of the poll that ran the pending
   /// read.
@@ -121,13 +121,17 @@ final class PRChangeHub {
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
     // `ReadRequests` keeps the earlier of two times for a PR, so another trigger's read can run in place of the hub's.
-    // That read serves every signal that arrived before it.
-    for (id, signalled) in joinedAt {
-      guard let polled = known[id]?.polled, polled >= signalled else { continue }
-      joinedAt[id] = nil
+    // That read serves every signal that arrived before it. `owedReads` handles the opposite case, a read that
+    // `ReadRequests` drops because it comes later.
+    for (id, signalled) in lastSignalAt {
+      guard let polled = known[id]?.polled else {
+        lastSignalAt[id] = nil
+        continue
+      }
+      guard polled >= signalled else { continue }
+      lastSignalAt[id] = nil
       if let last = signalReads[id], last > polled { signalReads[id] = polled }
     }
-    joinedAt = joinedAt.filter { known[$0.key] != nil }
     signalReads = signalReads.filter { known[$0.key] != nil }
     owedReads = owedReads.filter { known[$0.key] != nil }
     requestOwedReads()
@@ -200,7 +204,7 @@ final class PRChangeHub {
   /// moves a read later.
   private func requestSignalRead(_ id: String, _ s: PRSignal, provider: String, now: Int64) {
     var at = now + (s.kind == .head ? Self.headDelayMs : Self.delayMs)
-    joinedAt[id] = now
+    lastSignalAt[id] = now
     if let last = signalReads[id], last > now {
       if s.kind == .head && at > last {
         owedReads[id] = max(owedReads[id] ?? 0, s.failed ? at : max(at, last + Self.spacingMs))
