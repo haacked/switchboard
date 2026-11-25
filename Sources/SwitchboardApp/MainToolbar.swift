@@ -4,8 +4,9 @@ import SwitchboardCore
 extension View {
   /// The main window's toolbar. macOS 26 draws each group in its own capsule and puts the system's gap between groups.
   /// Earlier versions draw no capsules and get no spacers. Apply it to the split view's detail column. On the split
-  /// view itself, SwiftUI puts every spacer in the sidebar's part of the toolbar.
-  @ViewBuilder func mainToolbar() -> some View {
+  /// view itself, SwiftUI puts every spacer in the sidebar's part of the toolbar. Import Sessions shows only when
+  /// `showsImport` is true.
+  @ViewBuilder func mainToolbar(showsImport: Bool) -> some View {
     if #available(macOS 26, *) {
       toolbar {
         NavHistoryControls()
@@ -13,7 +14,7 @@ extension View {
         ToolbarSpacer(.fixed)
         ToolbarItem { ViewPicker() }
         ToolbarSpacer(.flexible)
-        TrailingItems()
+        TrailingItems(showsImport: showsImport)
       }
     } else {
       toolbar {
@@ -21,7 +22,7 @@ extension View {
         ToolbarItem(placement: .navigation) { ViewPicker() }
         ToolbarItem(placement: .navigation) { SessionFilterMenu() }
         AccountItems()
-        ToolbarItem { ImportButton() }
+        if showsImport { ToolbarItem { ImportButton() } }
         ToolbarItem { NewSessionButton() }
       }
     }
@@ -32,13 +33,17 @@ extension View {
 /// `ToolbarContent` because the macOS 26 SDK's toolbar builder takes at most 10 items in one block.
 @available(macOS 26, *)
 private struct TrailingItems: ToolbarContent {
+  let showsImport: Bool
+
   var body: some ToolbarContent {
     ToolbarItem { SessionFilterMenu() }
     ToolbarSpacer(.fixed)
     AccountItems()
     ToolbarSpacer(.fixed)
-    ToolbarItem { ImportButton() }
-    ToolbarSpacer(.fixed)
+    if showsImport {
+      ToolbarItem { ImportButton() }
+      ToolbarSpacer(.fixed)
+    }
     ToolbarItem { NewSessionButton() }
   }
 }

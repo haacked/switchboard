@@ -180,6 +180,11 @@ final class BoardModel: ObservableObject {
   @Published var terminalFocus: String?
   /// The session whose empty Message Claude field shows under its terminal. A field with a draft always shows.
   @Published var revealedMessageField: String?
+  /// The session whose session view shows, in the detail column or beside the Inbox. The toolbar leaves out Import
+  /// Sessions while one shows, so that the session's own items fit at 1024 pt.
+  @Published var shownSession: String?
+  /// The session view that set `shownSession`. Two views of one session can overlap while one replaces the other.
+  var shownSessionOwner: ObjectIdentifier?
   /// The session whose Message Claude field takes keyboard focus when it shows. The field clears it.
   @Published var messageFieldFocus: String?
   /// The Board's open cards as it last drew them. BoardView keeps it current. The Go menu's ⌘T state and

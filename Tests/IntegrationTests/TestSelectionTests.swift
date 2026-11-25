@@ -423,7 +423,8 @@ private func expectFilteredRun(
     sourceLocation: sourceLocation)
   #expect(args.contains("--skip-build"), "\(args)", sourceLocation: sourceLocation)
   #expect(
-    run.result.stderr.contains("CI runs every other test on every push"), "\(run.result.stderr)",
+    run.result.stderr.contains("CI runs every other test that the change can affect once the PR is ready for review"),
+    "\(run.result.stderr)",
     sourceLocation: sourceLocation)
   return runIndex
 }

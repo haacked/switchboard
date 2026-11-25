@@ -974,10 +974,21 @@ func service(_ a: Args) {
       let output = (bootstrap.stderr + bootstrap.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
       die("launchctl bootstrap failed" + (output.isEmpty ? "" : ": \(output)"))
     }
-    for _ in 0..<50 {
+    // sbd opens its socket only after it loads every session. A rebuild makes every snapshot unusable, so the
+    // first start after an update replays every event. That took about 10 s for 57,000 events.
+    // SB_SERVICE_WAIT lets a test shorten the wait.
+    let wait = ProcessInfo.processInfo.environment["SB_SERVICE_WAIT"].flatMap(TimeInterval.init) ?? 60
+    let start = Date()
+    var told = false
+    while case let elapsed = Date().timeIntervalSince(start), elapsed < wait {
       if (try? client.call("ping", timeout: 1)) != nil {
         print("sbd runs as a launchd agent (\(label)), with state in \(client.home.path)")
         return
+      }
+      if !told && elapsed >= 2 {
+        print("waiting for sbd to load its sessions…")
+        fflush(stdout)
+        told = true
       }
       usleep(100_000)
     }

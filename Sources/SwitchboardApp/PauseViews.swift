@@ -23,12 +23,16 @@ enum GroupPause {
 struct PauseMenuItems: View {
   @EnvironmentObject var model: BoardModel
   let id: String
+  /// The menu's icon. A toolbar draws the icon in place of the title.
+  var systemImage: String?
 
   var body: some View {
-    Menu("Pause") {
+    Menu {
       Button("Until Resumed") { model.pause(id) }.help(PauseBanner.pauseHelp)
       Divider()
       TimePresetItems(pick: { model.pickingPauseTime = id }, choose: { model.pause(id, until: $0) })
+    } label: {
+      if let systemImage { Label("Pause", systemImage: systemImage) } else { Text("Pause") }
     }
   }
 }
