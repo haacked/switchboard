@@ -265,7 +265,7 @@ filter_bundles() {
 # the other bundles, which can predate the change. Leaves `run` empty when
 # filter_bundles fails.
 filtered() {
-  local target
+  local target targets json test_targets built
   filter_bundles "$@" || return 0
   echo "bin/test: only the bundles of $(paste -sd' ' - <<<"$targets") can hold tests that match the filters" >&2
   build_bundles $targets

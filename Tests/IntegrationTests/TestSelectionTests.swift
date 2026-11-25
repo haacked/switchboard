@@ -1399,6 +1399,18 @@ private func selectionLines(_ output: String) -> Set<String> {
     #expect(run.result.stderr.contains("so every test bundle builds"), "\(run.result.stderr)")
   }
 
+  @Test func anUnreadableSourceFileRunsPlainSwiftTest() throws {
+    let repo = try SelectionRepo()
+    let path = "\(repo.dir)/Tests/SwitchboardAppTests/FxAppTests.swift"
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: path) }
+
+    let run = try repo.run("--filter", "FxCoreTests")
+
+    #expect(run.builds.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns == [["test", "--filter", "FxCoreTests"]], "\(run.invocations)")
+  }
+
   @Test func aFilterWithAMissingBundleBuildsEveryBundleAndSkipsNone() throws {
     let repo = try SelectionRepo()
     repo.bundles.removeAll { $0 == "IntegrationTests" }

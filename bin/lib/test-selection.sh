@@ -421,7 +421,9 @@ filter_targets() {
 #   ^<target>\.<rest>  Every match lies inside <target> when each | in <rest>
 #                      sits inside parentheses, as in test_filters' patterns.
 #                      <rest> may hold only name characters, /, |, (, ), and
-#                      \., so no other syntax can hide a |.
+#                      \.. So every ( and ) opens or closes a group. An escape
+#                      or a bracket could make a parenthesis literal and let a
+#                      top-level | pass the depth count.
 #   <identifier>       A match cannot cross the dots, slashes, and parentheses
 #                      of a name. So it lies inside the target's name, a file
 #                      path, or a name that the target's source declares. A
