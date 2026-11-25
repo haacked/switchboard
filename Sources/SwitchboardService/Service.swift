@@ -1657,7 +1657,9 @@ public final class Service {
         "permission_mode": mode.map(JSON.string) ?? .null,
         "trigger": .string(trigger.rawValue),
       ])
-    hearGroupContext(id)
+    // The block carries only the number of notes. A resumed conversation therefore hears a change it missed as a
+    // notice at its next prompt.
+    if !resume { hearGroupContext(id) }
   }
 
   /// Whether the session's conversation has a transcript. `--resume` fails

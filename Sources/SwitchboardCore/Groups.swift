@@ -126,7 +126,8 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
       if let theirs = other.description {
         kept.describe(theirs, by: other.descriptionBy)
       } else {
-        kept.describe(try? Self.cleanDescription("Merged from \(name) and \(other.name)"), by: nil)
+        // Sessions can choose both group names.
+        kept.describe(try? Self.cleanDescription("Merged from \(name) and \(other.name)"), by: .claude)
       }
     } else if let theirs = other.description, theirs != kept.description {
       kept.notes.append(

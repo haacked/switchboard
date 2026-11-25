@@ -282,8 +282,10 @@ import Testing
     #expect(notices(sbd, s, g, after: 0).isEmpty, "\(contexts(sbd, s))")
   }
 
-  /// The change comes while claude runs or after it stopped. Either way the relaunch's system prompt has it.
-  @Test(arguments: [false, true]) func aRelaunchAfterTheChangeCountsAsHearingIt(changeWhileStopped: Bool) throws {
+  /// The change comes while claude runs or after it stopped, and the member has no prompt before claude stops. The
+  /// resumed conversation's block carries only the number of notes, so the member hears the change once after the
+  /// resume.
+  @Test(arguments: [false, true]) func aChangeBeforeAResumeIsHeardOnceAfterIt(changeWhileStopped: Bool) throws {
     let sbd = try Instance()
     let g = try addGroup(sbd, "Flags")
     let s = try member(sbd, g)
@@ -297,7 +299,7 @@ import Testing
     try conversations.launch(sbd, s, after: launches)
     try prompt(sbd, s, "again")
 
-    #expect(notices(sbd, s, g, after: before).isEmpty, "\(contexts(sbd, s))")
+    #expect(notices(sbd, s, g, after: before).count == 1, "\(contexts(sbd, s))")
   }
 
   @Test func aChangeAfterARelaunchIsHeard() throws {

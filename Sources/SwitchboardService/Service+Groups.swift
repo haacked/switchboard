@@ -361,7 +361,8 @@ extension Service {
     if let group = suggestion.group {
       id = group
     } else {
-      id = try createGroup(suggestion.name, description: suggestion.description).id
+      // Sessions choose the branch names and PR titles that the description comes from.
+      id = try createGroup(suggestion.name, description: suggestion.description, by: .claude).id
     }
     try place(suggestion.sessions, in: id)
     if let merged = suggestion.merge?.group, members(merged).isEmpty {
