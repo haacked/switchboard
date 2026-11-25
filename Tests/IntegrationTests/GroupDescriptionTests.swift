@@ -408,6 +408,7 @@ import Testing
 
     #expect(g.description == "Sessions on the flag-evaluations branch prefix")
     #expect(try listed(sbd, g.id).description == "Sessions on the flag-evaluations branch prefix")
+    #expect(g.descriptionBy == .claude)
   }
 
   @Test func acceptingThroughTheMCPToolDescribesThePrefix() throws {
@@ -488,6 +489,7 @@ import Testing
     #expect(description.hasPrefix("Merged from"))
     #expect(description.contains("Flags"))
     #expect(description.contains("Docs"))
+    #expect(try listed(l.sbd, l.flags.id).descriptionBy == .claude)
   }
 
   @Test func aMergeOfAGroupWithoutADescriptionAddsNoNote() throws {

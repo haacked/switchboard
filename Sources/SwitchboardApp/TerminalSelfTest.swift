@@ -45,6 +45,12 @@ enum TerminalSelfTest {
 
   static var window: NSWindow? { NSApp.switchboardWindow }
 
+  /// The text field under `view`, `view` included, whose placeholder is `placeholder`.
+  static func textField(placeholder: String, in view: NSView) -> NSTextField? {
+    if let field = view as? NSTextField, field.placeholderString == placeholder { return field }
+    return view.subviews.lazy.compactMap { textField(placeholder: placeholder, in: $0) }.first
+  }
+
   /// The window's terminals from left to right.
   static func panes() -> [TerminalView] {
     guard let root = window?.contentView else { return [] }

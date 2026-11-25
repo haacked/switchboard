@@ -88,13 +88,7 @@ enum DraftSelfTest {
   }
 
   private static func field() -> NSTextField? {
-    guard let root = NSApp.switchboardWindow?.contentView
-    else { return nil }
-    func find(_ view: NSView) -> NSTextField? {
-      if let field = view as? NSTextField, field.placeholderString == "Message Claude…" { return field }
-      return view.subviews.lazy.compactMap(find).first
-    }
-    return find(root)
+    NSApp.switchboardWindow?.contentView.flatMap { TerminalSelfTest.textField(placeholder: "Message Claude…", in: $0) }
   }
 
   /// Sends Esc through the window, so that SwiftUI's key handlers see it as they see a typed key.

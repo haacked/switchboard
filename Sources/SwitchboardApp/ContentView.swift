@@ -794,7 +794,7 @@ struct BoardFrameReport: ViewModifier {
 }
 
 /// A lane's header above its row of columns. A group lane also shows the group's
-/// description, its chat, and its plans' Follow up rows and pending updates.
+/// description, its chat, its links and notes, and its plans' Follow up rows and pending updates.
 private struct LaneHeader: View {
   @EnvironmentObject var model: BoardModel
   let title: String
@@ -829,6 +829,7 @@ private struct LaneHeader: View {
           GroupPauseButtons(group: group)
           GroupArtifactsLink(group: group)
           GroupLinksLink(group: group)
+          GroupNotesLink(group: group)
         }
       }
       if let group { GroupDescriptionView(group: group) }
