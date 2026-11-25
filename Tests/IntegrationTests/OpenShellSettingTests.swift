@@ -83,6 +83,8 @@ import Testing
     sbd.stopSbd()
     try sbd.startSbd()
     #expect(try shown(sbd) == ["openShell": false])
+    #expect(try JSON.parse(try sbd.sb("open-shell", "on", "--json")) == ["openShell": true])
+    #expect(try sbd.config()["openShell"] == true)
   }
 
   /// sbd reads the setting from config.json when it starts.
@@ -129,25 +131,29 @@ import Testing
     #expect(try sbd.hasTmuxSession(shell))
   }
 
-  /// sbd starts a session's shell again when claude resumes, so the resume must not read the setting.
+  /// A `terminals` request starts a missing shell again, so it must read the session's flag and not the setting.
   @Test func anExistingSessionKeepsItsShellWhenItResumesAfterOff() throws {
     let sbd = try Instance()
     let a = try sbd.idleSession(name: "a")
     try expectShellRuns(sbd, a.id)
+    let shell = try sbd.client.terminals(a.id).shell
 
     try setOpenShell(sbd, false)
+    #expect(try sbd.tmux("kill-session", "-t", "=\(shell)").status == 0)
     try AutoModeTests().resume(sbd, a.id, "again")
 
     try expectShellRuns(sbd, a.id)
   }
 
-  /// sbd starts each session's shell again when it restarts, so the restart must not read the setting.
+  /// A `terminals` request after a restart starts a missing shell again, so it must read the session's flag and not the setting.
   @Test func anExistingSessionKeepsItsShellAfterSbdRestartsWithTheSettingOff() throws {
     let sbd = try Instance()
     let a = try sbd.idleSession(name: "a")
     try expectShellRuns(sbd, a.id)
+    let shell = try sbd.client.terminals(a.id).shell
 
     try setOpenShell(sbd, false)
+    #expect(try sbd.tmux("kill-session", "-t", "=\(shell)").status == 0)
     sbd.stopSbd()
     try sbd.startSbd()
 
