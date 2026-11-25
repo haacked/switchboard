@@ -119,7 +119,7 @@ enum HostScope {
       "dependency-resolved", "activity", "activity-report", "activity-clear", "headless-usage", "draft-post",
       "draft-check", "issues",
       "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm", "issues-settings",
-      "issues-dismiss",
+      "issues-dismiss", "link-open",
     ] {
       refused[op] = actsHere
     }

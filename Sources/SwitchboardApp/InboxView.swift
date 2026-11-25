@@ -156,6 +156,7 @@ struct TriageRow: View {
         }
       }
       Spacer(minLength: 0)
+      if session.hasNewReply { NewReplyMark() }
       IssueBadge(session: session)
       NotesButton(session: session)
     }

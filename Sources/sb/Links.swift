@@ -1,8 +1,11 @@
 import Foundation
 import SwitchboardCore
 
-/// A session's link as `sb get` prints it: `  link: <id>  <title>  <url>  (<caption>)`.
-func linkLine(_ l: ExternalLink) -> String { "  link: \(l.id)  \(l.title)  \(l.url)  (\(l.caption()))".printable }
+/// A session's link as `sb get` prints it: `  link: <id>  <title>  <url>  (<caption>)`, then a Slack thread's status.
+func linkLine(_ l: ExternalLink) -> String {
+  let status = l.status.map { "  " + $0.line(now: nowMs()) } ?? ""
+  return "  link: \(l.id)  \(l.title)  \(l.url)  (\(l.caption()))\(status)".printable
+}
 
 /// `sb link add <session> <url> [--title T]` and `sb link rm <session> <link-id>`. Inside Claude, sbd takes the
 /// request as Claude's and allows it only on the session in SB_SESSION_ID.

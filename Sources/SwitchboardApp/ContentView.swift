@@ -481,6 +481,7 @@ struct SessionRow: View {
               .help(pause.line).accessibilityLabel("Paused")
           }
           Spacer()
+          if session.hasNewReply { NewReplyMark() }
           IssueBadge(session: session)
           if let pr = session.pr, let url = pr.link {
             HStack(spacing: 3) {
@@ -1194,6 +1195,7 @@ struct BoardCard: View {
           MergeNote(session: s)
           // A Board column is too narrow for the badge beside the PR number.
           HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if s.hasNewReply { NewReplyMark() }
             if let pr = s.pr { QueueBadge(pr: pr) }
             if let holder = s.holderBadge { HolderBadge(holder: holder) }
             if let until = s.snoozedUntil { SnoozeMark(until: until) }

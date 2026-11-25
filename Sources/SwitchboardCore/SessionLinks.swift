@@ -36,6 +36,19 @@ public enum SlackSendCall {
 }
 
 extension ExternalLink {
+  /// How long before sbd records a `link-open` request the user's click may be.
+  public static let openSkewMs: Int64 = 5 * 60 * 1000
+
+  /// The time of an Open from a `link-open` request's `at`, the time that the app read at the click. The app sends
+  /// the request through a queue, so sbd records it later, and a reply that arrives in between must not count as
+  /// seen. The result is no earlier than `openSkewMs` before `now` and no later than `now`, so a client can't move
+  /// "last looked" back far. Without `at` the result is `now`. It throws for an `at` that is not a whole number.
+  public static func openTime(_ at: JSON?, now: Int64) throws -> Int64 {
+    guard let at else { return now }
+    guard let ms = at.int else { throw APIError("at must be a whole number of ms since the epoch") }
+    return min(now, max(Int64(ms), now - openSkewMs))
+  }
+
   /// The id of a link that sbd found, from its target key, so a replay gives the same id. `f` keeps it apart from
   /// the `l` ids of added links. When an id in `taken` has it already, the next try hashes the key with `#1`,
   /// `#2`, and so on.
@@ -52,8 +65,10 @@ extension ExternalLink {
 }
 
 extension SessionFacts {
-  /// Records the links of known kinds in a prompt, and the link of a Slack message that the session sent. A link
-  /// whose page the list already holds changes nothing, so the first sighting's URL and time stay.
+  /// Records the links of known kinds in a prompt, the link of a Slack message that the session sent, and an Open
+  /// of a link from Switchboard. A link whose page the list already holds changes nothing, so the first sighting's
+  /// URL and time stay. An Open counts at its event's `at`, the time of the click, or at the event's time when the
+  /// event has no `at`.
   mutating func applyLinks(_ event: Event) {
     switch event.kind {
     case "UserPromptSubmit":
@@ -71,6 +86,10 @@ extension SessionFacts {
       }
     case "PostToolUse":
       if let sent = SlackSendCall.parse(event) { addFoundLink(url: sent.url, target: sent.target, t: event.t) }
+    case "link-opened":
+      guard let key = event.data["key"]?.string else { return }
+      let at = event.data["at"]?.int.map(Int64.init) ?? event.t
+      linkOpened[key] = max(linkOpened[key] ?? 0, at)
     default:
       break
     }

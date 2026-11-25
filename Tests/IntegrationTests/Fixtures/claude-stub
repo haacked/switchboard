@@ -179,6 +179,15 @@
 # sleep 30. Otherwise it prints $SB_HOME/topup-answer.json, a fixture that the
 # test writes, or {"picks":[],"skips":[]} when the file is missing, in the
 # same envelope.
+# A `claude -p` prompt that starts with <slack-self> or <slack-threads> is the
+# Slack profile call or the Slack thread poll. The stub checks them first. They
+# print stream-json as claude does with --output-format stream-json --verbose:
+# an init message, the tool call and tool result of each read, and the
+# envelope. See slack_init, slack_self, and slack_threads. Each run appends its
+# arguments, each with a NUL after it, to $SB_HOME/slack-self-calls.log or
+# $SB_HOME/slack-calls.log, and the poll appends its prompt to
+# $SB_HOME/slack-inputs.log. While $SB_HOME/slack-fail exists, both print
+# "slack poll failed" to stderr and exit 1 before the init message.
 # `claude agents ...` prints $CLAUDE_CONFIG_DIR/agents.json, a fixture that
 # the test writes, or [] when it can't be read. It adds a row for each session
 # that is in the middle of an interrupt or a slow tool call, which are the
@@ -231,9 +240,93 @@ envelope() {
     cache_creation_input_tokens: 40}, modelUsage: {($m): {inputTokens: 100, outputTokens: 20,
     cacheReadInputTokens: 300, cacheCreationInputTokens: 40}}}'
 }
+# Prints the init message of a Slack call. Like claude, it lists StructuredOutput, three Slack tools, and each
+# name in $SB_HOME/slack-extra-tools, then drops the names that a --disallowedTools entry names in full or as their
+# mcp__<server> prefix. A connector whose status in $SB_HOME/slack-status is not connected lists no Slack tools.
+slack_init() {
+  local status deny=() i v
+  status=$(cat "$SB_HOME/slack-status" 2>/dev/null) || status=connected
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[i]}" = --disallowedTools ] || continue
+    for v in "${args[@]:i+1}"; do
+      [[ $v == --* ]] && break
+      IFS=', ' read -ra parts <<<"$v"
+      deny+=("${parts[@]}")
+    done
+  done
+  {
+    printf '%s\n' StructuredOutput mcp__claude_ai_Slack__slack_read_thread \
+      mcp__claude_ai_Slack__slack_read_user_profile mcp__claude_ai_Slack__slack_send_message
+    cat "$SB_HOME/slack-extra-tools" 2>/dev/null
+  } | jq -Rnc --arg status "$status" --args '[inputs | select(. != "")] as $all
+    | ($ARGS.positional) as $deny
+    | [$all[] | . as $t | select([$deny[] | . as $d | select($t == $d or ($t | startswith($d + "__")))] | length == 0)
+      | select($status == "connected" or (startswith("mcp__claude_ai_Slack__") | not))]
+    | {type: "system", subtype: "init", tools: ., permissionMode: "dontAsk",
+      mcp_servers: [{name: "claude.ai Slack", status: $status, source: "claudeai"}]}' "${deny[@]}"
+}
+# The <slack-self> profile call: the init message, a slack_read_user_profile call with no user_id, its result as the
+# connector gives it, and the envelope. The id is $SB_HOME/slack-self-id, or U0EXAMPLESELF.
+slack_self() {
+  local id
+  id=$(cat "$SB_HOME/slack-self-id" 2>/dev/null) || id=U0EXAMPLESELF
+  slack_init
+  jq -nc '{type: "assistant", message: {content: [{type: "tool_use", id: "toolu_self",
+    name: "mcp__claude_ai_Slack__slack_read_user_profile", input: {}}]}}'
+  jq -nc --arg id "$id" '{type: "user", message: {content: [{type: "tool_result", tool_use_id: "toolu_self",
+    content: [{type: "text", text: ({result: "User ID: \($id)\nDisplay Name: You"} | tojson)}]}]}}'
+  envelope "$(jq -nc --arg id "$id" '{user_id: $id}')"
+}
+# The <slack-threads> poll. For each asked thread, unless $SB_HOME/slack-skip lists its channel/ts, it reads
+# $SB_HOME/slack-thread-<channel>-<ts>.json ({"replies":[{"ts","user","name"}]}, no file meaning no replies) and
+# keeps the replies after the asked oldest. It prints a slack_read_thread call with the asked input, a result as the
+# connector gives it, and an answer with the kept replies' count and the last one's ts, user, and name.
+slack_threads() {
+  local list i ask channel ts thread answers='[]'
+  list=${input#<slack-threads>}
+  list=${list%</slack-threads>*}
+  slack_init
+  for ((i = 0; i < $(jq length <<<"$list"); i++)); do
+    ask=$(jq -c ".[$i]" <<<"$list")
+    channel=$(jq -r .channel_id <<<"$ask")
+    ts=$(jq -r .message_ts <<<"$ask")
+    grep -qxF "$channel/$ts" "$SB_HOME/slack-skip" 2>/dev/null && continue
+    thread=$(cat "$SB_HOME/slack-thread-$channel-$ts.json" 2>/dev/null) || thread='{"replies":[]}'
+    thread=$(jq -c --argjson ask "$ask" '[.replies[] | select(.ts > ($ask.oldest // ""))] | sort_by(.ts)' <<<"$thread")
+    jq -nc --argjson ask "$ask" --arg id "toolu_$i" '{type: "assistant", message: {content: [{type: "tool_use",
+      id: $id, name: "mcp__claude_ai_Slack__slack_read_thread", input: $ask}]}}'
+    jq -nc --argjson ask "$ask" --argjson kept "$thread" --arg id "toolu_$i" '
+      ("=== THREAD PARENT MESSAGE ===\nFrom: Bob (U0ROOT)\nMessage TS: \($ask.message_ts)\nCan someone review this?\n\n"
+        + if ($kept | length) == 0 then "No thread messsages"
+          else "=== THREAD REPLIES (\($kept | length) total) ===\n\n"
+            + ([$kept[] | "From: \(.name) (\(.user))\nMessage TS: \(.ts)\nLooks good.\n"] | join("\n")) end) as $text
+      | {type: "user", message: {content: [{type: "tool_result", tool_use_id: $id,
+        content: [{type: "text", text: ({messages: $text,
+          pagination_info: "There are no more messages in this thread.\n"} | tojson)}]}]}}'
+    answers=$(jq -c --argjson ask "$ask" --argjson kept "$thread" '. + [{channel_id: $ask.channel_id,
+      message_ts: $ask.message_ts, ok: true, reply_count: ($kept | length)}
+      + if ($kept | length) == 0 then {} else ($kept | last | {last_reply_ts: .ts, last_reply_user_id: .user,
+        last_reply_user_name: .name}) end]' <<<"$answers")
+  done
+  envelope "$(jq -c '{threads: .}' <<<"$answers")"
+}
 if [ "${1-}" = -p ]; then
   input=$(cat)
   printf '%s\0' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/headless-accounts.log"
+  # The Slack inputs start with their tags and hold only JSON, so they come first.
+  if [[ $input == "<slack-self>"* ]]; then
+    printf '%s\0' "$@" >>"$SB_HOME/slack-self-calls.log"
+    [ -e "$SB_HOME/slack-fail" ] && echo "slack poll failed" >&2 && exit 1
+    slack_self
+    exit 0
+  fi
+  if [[ $input == "<slack-threads>"* ]]; then
+    printf '%s\0' "$@" >>"$SB_HOME/slack-calls.log"
+    printf '%s\n' "$input" >>"$SB_HOME/slack-inputs.log"
+    [ -e "$SB_HOME/slack-fail" ] && echo "slack poll failed" >&2 && exit 1
+    slack_threads
+    exit 0
+  fi
   if [[ $input == "<session-name-request>"* ]]; then
     printf '%s\0' "$@" >"$SB_HOME/session-name-args"
     echo "$$" >>"$SB_HOME/session-name-calls.log"

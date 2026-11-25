@@ -28,6 +28,15 @@ enum LinkFixtures {
   static let grafana = "https://grafana.example.com/d/abc123/api-latency?orgId=1&from=now-6h&to=now"
 
   static let githubPR = "https://github.com/example/widgets/pull/42"
+
+  /// A second thread, in another channel.
+  static let otherThread = "https://example.slack.com/archives/C0EXAMPLE02/p1794965100000200"
+  static let otherThreadKey = "slack:example/C0EXAMPLE02/1794965100.000200"
+
+  /// The event of an Open of link `link` from Switchboard.
+  static func opened(_ t: Int64, key: String = slackRootKey, link: String = "l1") -> Event {
+    event("link-opened", t, ["link": .string(link), "key": .string(key)])
+  }
 }
 
 /// One URL that the parser accepts, and the target it must give.

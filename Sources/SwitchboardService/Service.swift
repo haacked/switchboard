@@ -360,6 +360,11 @@ public final class Service {
     return jobs
   }()
   var docketPoll = DocketPoll()
+  /// The stored Slack threads by `LinkTarget.key`.
+  var slackThreads: [String: SlackThread] = [:]
+  var slackPoll = SlackPollState()
+  /// Only `Service.slackQueue` touches it.
+  var slackAccounts: [String: SlackAccountState] = [:]
   let keeper: SnapshotKeeper
 
   /// The panes and processes from one tmux and ps pass.
@@ -437,6 +442,7 @@ public final class Service {
     for s in try store.claudeSessions() { remembered[s.id] = s }
     for g in try store.groups() { groups[g.id] = g }
     for p in try store.plans() { plans[p.id] = p }
+    slackThreads = try store.slackThreads()
     pruneDeclinedSuggestions()
     mac.snapshot = buildSnapshot() ?? Snapshot()
     for (id, texts) in uncertain {
@@ -848,6 +854,8 @@ public final class Service {
       return try noteRequest(op, args, origin: origin)
     case "link-add", "link-rm":
       return try sessionLinkRequest(op, args, origin: origin)
+    case "link-open":
+      return try linkOpenRequest(args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "rm-retry", "rm-keep", "rm-cancel", "removal-notices", "removal-notice-dismiss":
@@ -2909,6 +2917,7 @@ public final class Service {
       expireGroupMessages(now: now)
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
+      pollSlackThreadsIfDue(now: now)
       applyMCPChanges(now: now)
       autoContinueSessions(now: now)
       pruneActivityIfDue(now: now)
@@ -2938,16 +2947,20 @@ public final class Service {
 
   func summaries(for origin: RequestOrigin = .mac) -> [SessionSummary] {
     let rowFollowups = planRowFollowups()
-    return entries.keys.map { summary($0, rowFollowups: rowFollowups, for: origin) }.sorted {
+    let watched = watchedSlackKeys(now: nowMs())
+    return entries.keys.map { summary($0, rowFollowups: rowFollowups, watchedSlack: watched, for: origin) }.sorted {
       $0.state != $1.state ? $0.state < $1.state : $0.since < $1.since
     }
   }
 
   /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
-  /// data only where `showsGitHub` allows it.
-  func summary(_ id: String, rowFollowups: PlanRowFollowups? = nil, for origin: RequestOrigin = .mac)
-    -> SessionSummary
-  {
+  /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil
+  /// and the session lists a Slack link. A caller that builds many summaries computes the set once and passes it to
+  /// each call.
+  func summary(
+    _ id: String, rowFollowups: PlanRowFollowups? = nil, watchedSlack: Set<String>? = nil,
+    for origin: RequestOrigin = .mac
+  ) -> SessionSummary {
     let e = entries[id]!
     let now = nowMs()
     let facts = shownFacts(id, for: origin)
@@ -3004,7 +3017,9 @@ public final class Service {
     if !facts.dependencies.isEmpty { out.dependencies = facts.dependencies }
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     if !facts.artifacts.isEmpty { out.artifacts = facts.artifacts }
-    let links = s.links(found: facts.links)
+    let listed = s.links(found: facts.links)
+    let watched = watchedSlack ?? (listed.contains { $0.kind == .slack } ? watchedSlackKeys(now: now) : [])
+    let links = listed.map { withSlackStatus($0, facts: facts, watched: watched) }
     if !links.isEmpty { out.links = links }
     out.conversationStarted = facts.conversationStarted
     out.docket = s.docket.map { DocketSummary($0, facts.docket) }
