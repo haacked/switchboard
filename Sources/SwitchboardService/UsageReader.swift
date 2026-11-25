@@ -72,7 +72,7 @@ final class UsageReader: @unchecked Sendable {
   }
 
   private func readAll() -> [AccountUsage] {
-    let accounts = service.queue.sync { service.listedAccounts() }
+    let accounts = service.queue.sync { service.usageAccounts() }
     return keep(concurrentMap(accounts) { reading($0) })
   }
 

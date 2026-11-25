@@ -65,6 +65,21 @@ private let loginMessage = "Login reached its time limit · Please run /login"
     #expect(reply == loginMessage)
   }
 
+  /// Discovery never lists /accounts/.claude-orchid, so only the failure puts it in the usage reader's polls.
+  @Test(.timeLimit(.minutes(1)))
+  func theUsageReaderPollsTheAccountWhoseLoginFailed() throws {
+    let folders = try failedTurn(error: "authentication_failed") { $0.usageAccounts().map(\.folder) }
+
+    #expect(folders.contains("/accounts/.claude-orchid"))
+  }
+
+  @Test(.timeLimit(.minutes(1)))
+  func aRateLimitFailureAddsNoAccountToThePolls() throws {
+    let folders = try failedTurn(error: "rate_limit") { $0.usageAccounts().map(\.folder) }
+
+    #expect(!folders.contains("/accounts/.claude-orchid"))
+  }
+
   /// An ack would leave the item in Needs you, so the request says why instead of doing nothing.
   @Test(.timeLimit(.minutes(1)))
   func anAckOfTheLoginFailureIsRefused() throws {

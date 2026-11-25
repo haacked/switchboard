@@ -139,6 +139,18 @@ extension LoginFailureTests {
 
 extension LoginFailureTests {
   @Suite struct Verdicts {
+    /// A finished PR with a clean worktree reads Done, which would hide a later turn that the login stopped.
+    @Test func aFinishedPRDoesNotHideAnExpiredLogin() throws {
+      let f = try prFacts(
+        samplePR(state: .merged), dirty: 0,
+        then: [event("UserPromptSubmit", 10, ["prompt": "next"]), stopFailure(11)])
+
+      let verdict = Attention.evaluate(onAccount(failedFolder), f, now: 12)
+
+      #expect(verdict.state == .needsYou)
+      #expect(verdict.loginFailed)
+    }
+
     @Test func anExpiredLoginNeedsYou() {
       let f = facts(failedTurn(stopFailure(4)))
 

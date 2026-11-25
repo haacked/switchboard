@@ -17,6 +17,20 @@ extension Service {
     }
   }
 
+  /// The accounts that the usage reader polls: the listed ones, then each other local account whose login stopped a
+  /// session's turn. `loginWorks` sees such an account recover only through these reads.
+  func usageAccounts() -> [Account] {
+    var all = listedAccounts()
+    for id in entries.keys.sorted() {
+      guard let failure = entries[id]?.facts.turnFailure, failure.isLogin, failure.resumable,
+        let folder = failure.account, let account = claudeAccount(folder: folder).map(Account.claude),
+        !all.contains(account)
+      else { continue }
+      all.append(account)
+    }
+    return all
+  }
+
   /// `account` is the key of the account that the session's claude runs under now. `live` is this Mac's count of
   /// live sessions. A session on a host counts against its host's cap.
   func loginResumeBlocker(_ id: String, account: String, live: Int, now: Int64) -> String? {

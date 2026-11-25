@@ -731,10 +731,10 @@ public enum Attention {
       return v
     }
     if let ask { return ask }
+    // No wait, PR rule, or held wait may hide a turn that a failed login stopped.
+    if !facts.turnRunning, let v = loginFailureVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning { return workingVerdict(facts, now: now) }
-    // No wait, PR rule, or held wait may hide a turn that a failed login stopped.
-    if let v = loginFailureVerdict(facts) { return v }
     let idle = idleRules(session, facts, now: now, stateOf: stateOf)
     // A merge wait watches for Ready to merge, which `openPR` gives below the session's own waits, and a `session` wait
     // settles on Stale and on its wanted state, so a routed held wait must hide none of them. It comes before every
