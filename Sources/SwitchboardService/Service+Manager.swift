@@ -254,7 +254,13 @@ extension Service {
 
   /// The conversation that `ref` names by id, unique id prefix, or unique name.
   func managerConversation(_ ref: String) throws -> String {
-    try resolveRef(ref, "Manager conversation", managerSessions.map { ($0.id, $0.name) })
+    try conversation(ref, kinds: [.manager], noun: "Manager conversation")
+  }
+
+  /// The session of one of `kinds` that `ref` names by id, unique id prefix, or unique name. An error names the
+  /// session as `noun`.
+  func conversation(_ ref: String, kinds: Set<SessionKind>, noun: String) throws -> String {
+    try resolveRef(ref, noun, entries.values.map(\.session).filter { kinds.contains($0.kind) }.map { ($0.id, $0.name) })
   }
 
   /// The conversation that `ref` names, or the most recent one without a ref.

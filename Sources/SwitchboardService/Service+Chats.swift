@@ -15,12 +15,12 @@ extension Service {
         return group
       }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-      if let id = queue.sync(execute: { chatID(group) }) { return try openOrSend(id, text) }
+      if let id = queue.sync(execute: { mostRecentChat(of: group) }) { return try openOrSend(id, text) }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
       let (id, created, queued) = try queue.sync { () -> (String, SessionSummary?, Bool) in
-        if let id = chatID(group) { return (id, nil, false) }
+        if let id = mostRecentChat(of: group) { return (id, nil, false) }
         guard let name = groups[group]?.name else { throw APIError("group \(group) was removed") }
         let folder = home.chatFolder(group)
         let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
@@ -119,7 +119,7 @@ extension Service {
       id = try lookup(args)
     } else {
       let group = try lookupGroup(args)
-      guard let chat = chatID(group) else {
+      guard let chat = mostRecentChat(of: group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
       }
       id = chat
@@ -131,9 +131,17 @@ extension Service {
     return id
   }
 
-  func chatID(_ group: String) -> String? {
-    entries.values.first { $0.session.chat == group }?.session.id
+  /// The ids of the group's chats, newest activity first, with the done ones last and ties broken by id. It orders by
+  /// the fields that `Manager.newestFirst` compares, read from the entries without building summaries.
+  func chats(of group: String) -> [String] {
+    entries.values.filter { $0.session.chat == group }.sorted {
+      ($0.session.done ? 1 : 0, $1.facts.lastActivity, $1.session.created, $0.session.id)
+        < ($1.session.done ? 1 : 0, $0.facts.lastActivity, $0.session.created, $1.session.id)
+    }.map(\.session.id)
   }
+
+  /// The group's newest chat that is not done, or its newest done chat when every chat is done.
+  func mostRecentChat(of group: String) -> String? { chats(of: group).first }
 
   private func ensureChatFolder(_ group: String, description: String?) throws {
     let folder = home.chatFolder(group)
@@ -161,13 +169,13 @@ extension Service {
   /// check reads `live` and not the pane.
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
-    guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }
+    guard let id = mostRecentChat(of: group), let e = entries[id], !e.session.done, e.facts.live else { return }
     _ = try send(id, Chat.describedNotice(groups[group]?.description), by: .sbd, trigger: .chat)
   }
 
   /// Marks the group's chat done, because its tools can no longer find the group.
   func retireChat(of group: String) throws {
-    guard let id = chatID(group), entries[id]?.session.done == false else { return }
+    guard let id = mostRecentChat(of: group), entries[id]?.session.done == false else { return }
     try update(id) { $0.done = true }
     record(id, "done")
   }

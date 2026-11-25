@@ -113,6 +113,13 @@ import Testing
     #expect(kind.isConversation == isConversation)
   }
 
+  @Test(
+    arguments: [(SessionKind.work, false), (.manager, true), (.chat, true), (.operator, false)] as [(SessionKind, Bool)]
+  )
+  func onlyAManagerConversationOrAGroupChatIsAUserConversation(_ kind: SessionKind, _ isUserConversation: Bool) {
+    #expect(kind.isUserConversation == isUserConversation)
+  }
+
   @Test func theOperatorsLabelIsTheOperator() {
     #expect(SessionKind.operator.label == "the operator")
   }

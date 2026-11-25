@@ -1,8 +1,7 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The sidebar's Manager conversations: pinned first, then the others newest
-/// activity first, then a closed Archive group. The header shows with no
+/// The sidebar's Manager conversations. The header shows with no
 /// conversations, because its button is the sidebar's way to start one.
 struct ConversationsSection: View {
   @EnvironmentObject var model: BoardModel
@@ -11,7 +10,33 @@ struct ConversationsSection: View {
   let removableSelection: Int
 
   var body: some View {
-    let c = model.conversations
+    ConversationListSection(
+      title: "Conversations", sessions: model.managers, activeAccount: activeAccount,
+      newHelp: AppShortcut.newConversation.help("Start a Manager conversation"), newLabel: "New Manager conversation",
+      removableSelection: removableSelection
+    ) {
+      model.openManager(new: true)
+    }
+  }
+}
+
+/// A list of conversations: pinned first, then the others newest activity first, then a closed Archive group. Its
+/// header holds the title and a button that starts a conversation.
+struct ConversationListSection: View {
+  @EnvironmentObject var model: BoardModel
+  let title: String
+  let sessions: [SessionSummary]
+  let activeAccount: String
+  /// The help text of the header's new-conversation button.
+  let newHelp: String
+  /// The accessibility label of the header's new-conversation button.
+  let newLabel: String
+  /// The number of multi-selected sessions that the row's Delete item deletes.
+  let removableSelection: Int
+  let new: () -> Void
+
+  var body: some View {
+    let c = Conversations.sidebar(sessions)
     Section {
       ForEach(c.pinned + c.active) { row($0) }
       if !c.archived.isEmpty {
@@ -24,16 +49,14 @@ struct ConversationsSection: View {
       }
     } header: {
       HStack {
-        Text("Conversations")
+        Text(title)
         Spacer()
-        Button {
-          model.openManager(new: true)
-        } label: {
+        Button(action: new) {
           Image(systemName: "plus")
         }
         .buttonStyle(.borderless)
-        .help(AppShortcut.newConversation.help("Start a Manager conversation"))
-        .accessibilityLabel("New Manager conversation")
+        .help(newHelp)
+        .accessibilityLabel(newLabel)
       }
     }
   }

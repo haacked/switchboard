@@ -179,6 +179,15 @@ public enum SessionKind: String, Codable, Sendable {
     }
   }
 
+  /// Whether the session is a conversation that the user starts and talks to: a Manager conversation or a group
+  /// chat. The operator is not one, because it runs in the background.
+  public var isUserConversation: Bool {
+    switch self {
+    case .work, .operator: false
+    case .manager, .chat: true
+    }
+  }
+
   /// Whether sbd starts a session of this kind in the Manager folder: a Manager conversation or the operator.
   public var runsInManagerFolder: Bool {
     switch self {
