@@ -344,6 +344,8 @@ final class BoardModel: ObservableObject {
   @Published var liveCap: Int?
   /// Whether new sessions start in auto mode, as sbd last answered it, or nil before the Settings window reads it.
   @Published var defaultAutoMode: Bool?
+  /// Whether new sessions open a shell, as sbd last answered it, or nil before the Settings window reads it.
+  @Published var openShellByDefault: Bool?
   /// sbd's refusal of the last change in Settings ▸ General. The tab shows it instead of the main window's banner.
   @Published var settingsError: String?
   /// The Settings ▸ General writes that sbd hasn't answered yet, by op. A reply applies only when no newer write of
