@@ -38,7 +38,10 @@ import SwiftUI
 /// [<container>]` scrolls each click anchor whose name starts with the prefix into view, in every window, and
 /// reports `none` or the sorted names joined by commas, each followed by `:in` when the anchor lies inside its
 /// window's content and inside the container anchor's frame, else `:out`. `click-anchor <name>` clicks the view
-/// with that click anchor in the main window, as `click-delete-selected` does.
+/// with that click anchor, as `click-delete-selected` does. It looks in the main window first, then in the app's other
+/// windows, such as a popover's. `fill <placeholder>|<text>` types the text into the field with that placeholder,
+/// in any of the app's windows. `submit <placeholder>|<text>` types the text the same way and then presses Return in
+/// the field.
 @MainActor
 enum ShellSelfTest {
   static let folder = ProcessInfo.processInfo.environment["SB_SHELL_TEST"]
@@ -192,6 +195,10 @@ enum ShellSelfTest {
       return anchors(prefix: prefix, container: args.count > 1 ? args[1] : nil)
     case "click-anchor":
       return click(anchor: rest, throughWindow: false)
+    case "fill", "submit":
+      let parts = rest.split(separator: "|", maxSplits: 1).map(String.init)
+      guard parts.count == 2 else { return "\(words[0]) needs <placeholder>|<text>" }
+      return fill(placeholder: parts[0], with: parts[1], submit: words[0] == "submit")
     case "board-selection":
       let ids = model.multiSelection.sorted()
       return ids.isEmpty ? "none" : ids.joined(separator: ",")
@@ -284,10 +291,12 @@ enum ShellSelfTest {
   /// goes to that view. A window that is not key drops a first click on a button, and a hidden launch never makes
   /// its window key. A sidebar row needs the window, because the window's handling of the mouse-down selects the row.
   private static func click(anchor name: String, throughWindow: Bool) -> String {
-    guard let window, let root = window.contentView else { return "no window" }
-    guard let anchor = ClickAnchorView.find(name, in: root) ?? scrollIntoView(name, in: root) else {
-      return "no \(name)"
-    }
+    guard let main = window?.contentView else { return "no window" }
+    guard
+      let anchor = roots.lazy.compactMap({ ClickAnchorView.find(name, in: $0) }).first
+        ?? scrollIntoView(name, in: main),
+      let window = anchor.window, let root = window.contentView
+    else { return "no \(name)" }
     // A row near the edge of the sidebar can be built but partly hidden under another view.
     anchor.scrollToVisible(anchor.bounds)
     root.layoutSubtreeIfNeeded()
@@ -305,6 +314,21 @@ enum ShellSelfTest {
       return "no event"
     }
     return "clicked at \(Int(point.x)),\(Int(point.y)) on \(type(of: hit))"
+  }
+
+  /// Types `text` into the text field whose placeholder is `placeholder`, in any of the app's windows, as an input
+  /// method inserts it. With `submit`, it then presses Return in the field.
+  private static func fill(placeholder: String, with text: String, submit: Bool) -> String {
+    guard let field = roots.lazy.compactMap({ TerminalSelfTest.textField(placeholder: placeholder, in: $0) }).first
+    else { return "no field \(placeholder)" }
+    guard field.window?.makeFirstResponder(field) == true, let editor = field.currentEditor() as? NSTextView else {
+      return "no focus"
+    }
+    editor.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+    guard submit else { return "filled" }
+    // The field editor ends editing on a new line, and the field then runs its SwiftUI onSubmit.
+    editor.insertNewline(nil)
+    return "submitted"
   }
 
   private static func setWidth(_ arg: String) -> String {
@@ -331,7 +355,7 @@ enum ShellSelfTest {
 
   private static func anchors(prefix: String, container: String?) -> String {
     var found: [String] = []
-    for root in NSApp.windows.compactMap(\.contentView) {
+    for root in roots {
       // The frame view is the window's whole area. A content view can be larger than it, and a click outside it
       // hits nothing.
       let frameView = root.superview ?? root
@@ -454,6 +478,12 @@ enum ShellSelfTest {
   }
 
   private static var window: NSWindow? { TerminalSelfTest.window }
+
+  /// The content views of the app's windows, the main window's first. A popover draws in a window of its own.
+  private static var roots: [NSView] {
+    let main = window?.contentView
+    return [main].compactMap { $0 } + NSApp.windows.compactMap(\.contentView).filter { $0 !== main }
+  }
 
   private static func panes() -> [TerminalView] { TerminalSelfTest.panes() }
 

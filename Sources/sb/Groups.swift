@@ -9,6 +9,14 @@ func group(_ a: Args) {
     let result = call("group-ls")
     if a.json { return printJSON(result) }
     printGroups(decode(result, as: GroupList.self))
+  case "show":
+    // From a host, sbd answers only for the group of the session that `session` names. So the CLI always sends it.
+    var args: [String: JSON] = [:]
+    if let ref = words.first { args["group"] = .string(ref) }
+    if let session = ProcessInfo.processInfo.environment["SB_SESSION_ID"] { args["session"] = .string(session) }
+    let result = call("group-show", args)
+    if a.json { return printJSON(result) }
+    printGroupDetail(decode(result, as: GroupSummary.self))
   case "add":
     guard let name = words.first else { die("group add needs a name") }
     var args: [String: JSON] = [
@@ -95,7 +103,7 @@ func group(_ a: Args) {
     }
     print("\nAccept one with: sb group suggest --accept <id>, or decline it with --decline <id>")
   default:
-    die("usage: sb group ls|add|rm|move|note|describe|link|account|suggest")
+    die("usage: sb group ls|show|add|rm|move|note|describe|link|account|suggest")
   }
 }
 
@@ -125,13 +133,14 @@ private func printGroup(_ result: JSON, json: Bool) {
   if json { return printJSON(result) }
   let g = decode(result, as: GroupSummary.self)
   print("\(g.id)  \(g.name)  \(g.sessions.count == 1 ? "1 session" : "\(g.sessions.count) sessions")".printable)
-  if let description = descriptionLine(g) { print("  \(description)".printable) }
-  if let account = g.account { print("  \(accountLine(account))".printable) }
-  printLinks(g)
+  printGroupHeader(g)
 }
 
-/// Such as `link: l4k2m  Flag Evaluations RFC  https://…`.
-private func printLinks(_ g: GroupSummary) {
+/// The lines under a group's name: its description, its account, and a `link:` line per link, such as
+/// `link: l4k2m  Flag Evaluations RFC  https://…`.
+private func printGroupHeader(_ g: GroupSummary) {
+  if let description = descriptionLine(g) { print("  \(description)".printable) }
+  if let account = g.account { print("  \(accountLine(account))".printable) }
   for link in g.links ?? [] { print("  link: \(link.id)  \(link.title)  \(link.url)".printable) }
 }
 
@@ -144,24 +153,40 @@ private func printGroups(_ list: GroupList) {
   }
   for g in list.groups {
     print("\(g.name)  (\(g.id))".printable)
-    if let description = descriptionLine(g) { print("  \(description)".printable) }
-    if let account = g.account { print("  \(accountLine(account))".printable) }
-    printLinks(g)
+    printGroupHeader(g)
     for note in g.notes { print("  note: \(oneLine(note.text, max: 200))".printable) }
-    for a in g.artifacts ?? [] {
-      let source = [a.sessionName.map { "by \($0)" }, a.link.map { "link \($0)" }].compactMap { $0 }
-      print(
-        "  artifact: \(a.title)  \(a.url)  \(source.joined(separator: ", "))\(a.removed == nil ? "" : " (removed)")"
-          .printable)
-    }
-    for p in g.plans ?? [] { printPlan(p, indent: "  ") }
-    print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))
+    printArtifactsPlansAndSessions(g)
   }
   if !list.ungrouped.isEmpty {
     if !list.groups.isEmpty { print("") }
     print(BoardRows.ungroupedTitle)
     print("  " + list.ungrouped.joined(separator: " "))
   }
+}
+
+/// One group with every note in full and each note's author, for `sb group show`.
+private func printGroupDetail(_ g: GroupSummary) {
+  print("\(g.name)  (\(g.id))".printable)
+  printGroupHeader(g)
+  for note in g.notes {
+    let lines = note.text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+    print("  note by \(authorName(note.by)): \(lines.first ?? "")".printable)
+    for line in lines.dropFirst() { print("    \(line)".printable) }
+  }
+  printArtifactsPlansAndSessions(g)
+}
+
+private func authorName(_ author: Author) -> String { author == .claude ? "Claude" : "you" }
+
+private func printArtifactsPlansAndSessions(_ g: GroupSummary) {
+  for a in g.artifacts ?? [] {
+    let source = [a.sessionName.map { "by \($0)" }, a.link.map { "link \($0)" }].compactMap { $0 }
+    print(
+      "  artifact: \(a.title)  \(a.url)  \(source.joined(separator: ", "))\(a.removed == nil ? "" : " (removed)")"
+        .printable)
+  }
+  for p in g.plans ?? [] { printPlan(p, indent: "  ") }
+  print(g.sessions.isEmpty ? "  no sessions" : "  " + g.sessions.joined(separator: " "))
 }
 
 /// Lists the group's targets, asks the user to confirm, then sends. Session

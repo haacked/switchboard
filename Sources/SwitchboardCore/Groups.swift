@@ -71,6 +71,10 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
     text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
   }
 
+  /// The text as a one-line Markdown quote. A line break would end the quote, so every whitespace run becomes one
+  /// space.
+  static func quoted(_ text: String) -> String { "> " + collapsingWhitespace(text) }
+
   /// The text on one line, or nil when nothing remains. It refuses text over `limit` characters.
   /// The refusal names the text as `noun`.
   static func cleanLine(_ text: String?, limit: Int, noun: String) throws -> String? {
@@ -122,7 +126,8 @@ public struct SessionGroup: Codable, Equatable, Sendable, Identifiable {
       if let theirs = other.description {
         kept.describe(theirs, by: other.descriptionBy)
       } else {
-        kept.describe(try? Self.cleanDescription("Merged from \(name) and \(other.name)"), by: nil)
+        // Sessions can choose both group names.
+        kept.describe(try? Self.cleanDescription("Merged from \(name) and \(other.name)"), by: .claude)
       }
     } else if let theirs = other.description, theirs != kept.description {
       kept.notes.append(

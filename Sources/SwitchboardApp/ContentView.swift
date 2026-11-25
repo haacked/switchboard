@@ -69,7 +69,8 @@ struct ContentView: View {
   }
 
   var body: some View {
-    NavigationSplitView {
+    let deleteConfirmation = model.confirmingDelete.map(DeleteConfirmation.init)
+    return NavigationSplitView {
       Sidebar()
         .navigationSplitViewColumnWidth(min: Self.sidebarMinWidth, ideal: Self.sidebarIdealWidth, max: 420)
     } detail: {
@@ -110,12 +111,12 @@ struct ContentView: View {
     }
     .removingToolbarTitle()
     .confirmationDialog(
-      "Delete \(model.confirmingDelete?.name ?? "this session")?", isPresented: model.isPresent(\.confirmingDelete),
-      presenting: model.confirmingDelete.map { ($0, TodoDeletion($0)) }
-    ) { session, todos in
-      Button(todos.button("Delete"), role: .destructive) { model.deleteSession(session, resolve: todos.ids) }
-    } message: { session, todos in
-      Text(model.sessionNames.replacingIDs(in: todos.message(before: BoardModel.deletePlan(session).message)))
+      deleteConfirmation?.title ?? "Delete this session?", isPresented: model.isPresent(\.confirmingDelete),
+      presenting: deleteConfirmation
+    ) { confirmation in
+      Button(confirmation.button, role: .destructive) { confirmation.confirm(model) }
+    } message: { confirmation in
+      Text(model.sessionNames.replacingIDs(in: confirmation.message))
     }
     .sheet(item: $model.newSession) {
       NewSessionView(request: $0).environmentObject(model)
@@ -792,7 +793,7 @@ struct BoardFrameReport: ViewModifier {
 }
 
 /// A lane's header above its row of columns. A group lane also shows the group's
-/// description, its chat, and its plans' Follow up rows and pending updates.
+/// description, its chat, its links and notes, and its plans' Follow up rows and pending updates.
 private struct LaneHeader: View {
   @EnvironmentObject var model: BoardModel
   let title: String
@@ -827,6 +828,7 @@ private struct LaneHeader: View {
           GroupPauseButtons(group: group)
           GroupArtifactsLink(group: group)
           GroupLinksLink(group: group)
+          GroupNotesLink(group: group)
         }
       }
       if let group { GroupDescriptionView(group: group) }
