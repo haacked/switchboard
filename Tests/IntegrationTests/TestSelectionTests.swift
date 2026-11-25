@@ -1411,6 +1411,20 @@ private func selectionLines(_ output: String) -> Set<String> {
     #expect(run.testRuns == [["test", "--filter", "FxCoreTests"]], "\(run.invocations)")
   }
 
+  /// A test's name carries its source line and column. The digit appears in the App
+  /// sources, but a line number of any bundle can match it too.
+  @Test func anAllDigitFilterRunsPlainSwiftTest() throws {
+    let repo = try SelectionRepo(files: [
+      "Tests/SwitchboardAppTests/FxRetryTests.swift":
+        "import Testing\n\nstruct FxRetryTests {\n  @Test func retries() { #expect(3 > 0) }\n}\n"
+    ])
+
+    let run = try repo.run("--filter", "3")
+
+    #expect(run.builds.isEmpty, "\(run.invocations)")
+    #expect(run.testRuns == [["test", "--filter", "3"]], "\(run.invocations)")
+  }
+
   @Test func aFilterWithAMissingBundleBuildsEveryBundleAndSkipsNone() throws {
     let repo = try SelectionRepo()
     repo.bundles.removeAll { $0 == "IntegrationTests" }

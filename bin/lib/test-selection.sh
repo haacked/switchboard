@@ -415,7 +415,8 @@ filter_targets() {
 # pattern_targets <package-json> <pattern>
 # Prints, one per line, the test targets that can hold a test that the
 # swift test --filter regular expression <pattern> matches. A test's name is
-# <target>.<suite>/<test>(), and its source location can add <target>/<file>.
+# <target>.<suite>/<test>(), and its source location can add
+# <target>/<file>:<line>:<column>.
 # Fails when it cannot show where the matches live. It shows that for two
 # shapes of pattern:
 #   ^<target>\.<rest>  Every match lies inside <target> when each | in <rest>
@@ -424,9 +425,11 @@ filter_targets() {
 #                      \.. So every ( and ) opens or closes a group. An escape
 #                      or a bracket could make a parenthesis literal and let a
 #                      top-level | pass the depth count.
-#   <identifier>       A match cannot cross the dots, slashes, and parentheses
-#                      of a name. So it lies inside the target's name, a file
-#                      path, or a name that the target's source declares. A
+#   <identifier>       A match cannot cross the dots, slashes, colons, and
+#                      parentheses of a name. The identifier holds a letter or
+#                      an underscore, which no line or column number holds. So
+#                      the match lies inside the target's name, a file path,
+#                      or a name that the target's source declares. A
 #                      mention in a comment builds one bundle more than needed.
 pattern_targets() {
   local targets name dir rc target rest depth=0 i
@@ -445,7 +448,7 @@ pattern_targets() {
     echo "$target"
     return 0
   fi
-  [[ $2 =~ ^[A-Za-z0-9_]+$ ]] || return 1
+  [[ $2 =~ ^[A-Za-z0-9_]+$ && $2 =~ [A-Za-z_] ]] || return 1
   while IFS=$'\t' read -r name dir; do
     if [[ $name == *"$2"* ]] || [ -n "$(find "$dir" -name '*.swift' -path "*$2*" -print -quit)" ]; then
       echo "$name"
