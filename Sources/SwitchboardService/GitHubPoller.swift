@@ -14,7 +14,7 @@ final class GitHubPoller {
   let queue = DispatchQueue(label: "sbd.github")
   private var timer: DispatchSourceTimer?
 
-  /// Sends the poller's requests to GitHub. A later source of PR changes shares it.
+  /// Sends the poller's requests to GitHub.
   let client: GitHubClient
   var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id. `store` writes each entry.
@@ -293,7 +293,6 @@ final class GitHubPoller {
     interest.keys.formUnion(dependencyKeys(sessions))
     interest.keys.formUnion(planKeys())
     targets = targets.filter { interest.keys.contains($0.key) }
-    var readRequested = false
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
       var waited = waitedOn(interest)
@@ -310,17 +309,19 @@ final class GitHubPoller {
         }
       }
       try readPRs(all: all, now: now, waited: waited, requested: requested, queued: queuedPRs(), stats: &stats)
-      readRequested = true
       try checkDeploys(
         deployTargets(interest) + edgeDeployTargets(sessions, now: now), all: all, now: now, stats: &stats)
     } catch {
       failure = "\(error)"
       logLine("github: \(error)")
     }
-    // The next poll reads the requests that a failed lookup or read took. A timed request would schedule a wake
-    // that fails again at once while GitHub keeps failing.
-    if !readRequested {
-      for (id, trigger) in requested { readRequests.readAtNextPoll([id], trigger: trigger) }
+    // The next poll reads the requested PRs that a failed poll didn't read and that a session, wait, or merge
+    // trigger still names. A timed request would schedule a wake that fails again at once while GitHub keeps failing.
+    if failure != nil {
+      let named = Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
+      for (id, trigger) in requested where named.contains(id) && prs[id]?.polled != now {
+        readRequests.readAtNextPoll([id], trigger: trigger)
+      }
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
     let issuesError = refreshIssues(all: all, now: now, stats: &stats)

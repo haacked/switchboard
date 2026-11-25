@@ -13,10 +13,16 @@ import Foundation
 public struct ReadRequests: Equatable, Sendable {
   /// The PRs that the next poll reads, each with why it is read.
   public private(set) var nextPoll: [String: ReadTrigger] = [:]
-  /// The PRs requested from a set time, by id, each with the time from which its read is due, in ms.
-  public private(set) var timed: [String: Int64] = [:]
-  /// Why each PR in `timed` is read.
-  public private(set) var timedTriggers: [String: ReadTrigger] = [:]
+  /// A read requested from a set time.
+  public struct TimedRead: Equatable, Sendable {
+    /// The time from which the read is due, in ms.
+    public var at: Int64
+    public var trigger: ReadTrigger
+  }
+  /// The PRs requested from a set time, by id.
+  public private(set) var timedReads: [String: TimedRead] = [:]
+  /// The time from which each timed request is due, in ms, by id.
+  public var timed: [String: Int64] { timedReads.mapValues(\.at) }
   /// The time of the wake that the poller scheduled, in ms, or nil when none is scheduled.
   public private(set) var wake: Int64?
 
@@ -31,9 +37,8 @@ public struct ReadRequests: Equatable, Sendable {
   /// when no scheduled wake comes at or before `at`. The new wake replaces the scheduled one.
   public mutating func request(_ ids: some Sequence<String>, at: Int64, trigger: ReadTrigger) -> Int64? {
     for id in ids {
-      guard timed[id].map({ at < $0 }) ?? true else { continue }
-      timed[id] = at
-      timedTriggers[id] = trigger
+      guard timedReads[id].map({ at < $0.at }) ?? true else { continue }
+      timedReads[id] = TimedRead(at: at, trigger: trigger)
     }
     guard at < (wake ?? .max) else { return nil }
     wake = at
@@ -43,11 +48,9 @@ public struct ReadRequests: Equatable, Sendable {
   /// Removes and returns the PRs that a poll at `now` reads, each with why it is read. A poll calls it once as it
   /// starts.
   public mutating func take(now: Int64) -> [String: ReadTrigger] {
-    let due = timed.filter { $0.value <= now }
-    let taken = timedTriggers.filter { due[$0.key] != nil }.merging(nextPoll) { $1 }
+    let taken = timedReads.filter { $0.value.at <= now }.mapValues(\.trigger).merging(nextPoll) { $1 }
     nextPoll = [:]
-    timed = timed.filter { $0.value > now }
-    timedTriggers = timedTriggers.filter { timed[$0.key] != nil }
+    timedReads = timedReads.filter { $0.value.at > now }
     return taken
   }
 
@@ -55,13 +58,13 @@ public struct ReadRequests: Equatable, Sendable {
   /// before the wake can have taken them all, and then the wake runs no poll.
   public mutating func fire(now: Int64) -> Bool {
     wake = nil
-    return timed.values.contains { $0 <= now }
+    return timedReads.values.contains { $0.at <= now }
   }
 
   /// The time of a wake for the timed requests that remain, or nil when the scheduled wake comes no later than the
   /// first of them.
   public mutating func rearm() -> Int64? {
-    guard let next = timed.values.min(), next < (wake ?? .max) else { return nil }
+    guard let next = timedReads.values.map(\.at).min(), next < (wake ?? .max) else { return nil }
     wake = next
     return next
   }

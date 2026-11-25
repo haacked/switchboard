@@ -21,9 +21,14 @@ import Testing
     var sets: [ChangeSignals] = [[]]
     sets.append(contentsOf: ChangeSignalsTests.members)
     sets.append([.reviews, .state])
-    sets.append(ChangeSignals(ChangeSignalsTests.members))
+    sets.append(.all)
     return sets
   }()
+
+  /// `all` holds every member.
+  @Test func allHoldsEveryMember() {
+    #expect(ChangeSignals(Self.members) == .all)
+  }
 
   /// Each member is a change of its own, which no other member includes.
   @Test func eachMemberIsDistinctFromTheOthers() {
@@ -122,21 +127,6 @@ import Testing
   func noSignalsGiveTheBaseRates(_ pr: PullRequest?) {
     for needs in Self.needsSets {
       #expect(PollRates.of(pr, needs: needs, signals: nil, base: Self.rates) == Self.rates, "needs \(needs.rawValue)")
-    }
-  }
-
-  /// The policy of `GitHubSettings` gives every PR the settings' rates whatever it needs.
-  @Test(
-    arguments: [nil, ChangeSignalsTests.pending, ChangeSignalsTests.awaitingReview, ChangeSignalsTests.settled]
-      as [PullRequest?])
-  func theSettingsPolicyGivesTheSettingsRatesWhateverThePRNeeds(_ pr: PullRequest?) {
-    var settings = GitHubSettings()
-    settings.pollSeconds = 20
-    settings.idlePollSeconds = 200
-    let expected = PollRates(pendingMs: settings.pendingMs, idleMs: settings.idleMs)
-
-    for needs in Self.needsSets {
-      #expect(settings.pollPolicy.rates(pr, needs) == expected, "needs \(needs.rawValue)")
     }
   }
 }

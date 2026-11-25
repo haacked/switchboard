@@ -22,13 +22,14 @@ public struct ChangeSignals: OptionSet, Hashable, Sendable {
     .head, .checkSuites, .checkRuns, .commitStatuses, .reviews, .state, .conflict, .comments, .mergeQueue, .labels,
   ]
 
-  /// What a PR in Trunk's merge queue needs. Trunk reports the queue in a comment on the PR.
+  /// What a PR in Trunk's merge queue needs. Trunk reports the queue in a comment on the PR. Trunk's queue is not
+  /// GitHub's merge queue, so the PR doesn't need `mergeQueue`.
   public static let trunkQueue: ChangeSignals = [.comments, .state]
 }
 
 extension Wait.Kind {
-  /// The changes that a wait of this kind needs the poller to see. Every kind needs at least one, so a PR with an
-  /// open wait polls at the pending rate. A kind that doesn't name a PR needs every change.
+  /// The changes that a wait of this kind needs the poller to see. Every kind needs at least one. A kind that doesn't
+  /// name a PR needs every change.
   public var needs: ChangeSignals {
     switch self {
     case .ci: [.head, .checkSuites, .checkRuns, .commitStatuses]
@@ -38,5 +39,13 @@ extension Wait.Kind {
     case .deploy: [.comments, .state]
     case .session, .date, .manual: .all
     }
+  }
+}
+
+extension Wait {
+  /// The changes that the wait needs the poller to see on its PR. A wait that doesn't need its PR read at the
+  /// pending rate needs none. Otherwise a PR with the wait polls at the pending rate.
+  public func needs(for pr: SwitchboardCore.PullRequest?) -> ChangeSignals {
+    readsPRWhilePending(pr) ? kind.needs : []
   }
 }

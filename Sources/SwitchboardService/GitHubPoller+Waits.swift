@@ -59,7 +59,7 @@ extension GitHubPoller {
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session) else { continue }
       waited.created[id] = max(waited.created[id] ?? 0, wait.created)
-      if wait.readsPRWhilePending(prs[id]?.pr) { waited.needs[id, default: []].formUnion(wait.kind.needs) }
+      waited.needs[id, default: []].formUnion(wait.needs(for: prs[id]?.pr))
     }
     return waited
   }

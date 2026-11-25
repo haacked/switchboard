@@ -15,12 +15,9 @@ public struct PollRates: Equatable, Sendable {
 }
 
 extension PollRates {
-  /// The rates of a PR from its last read, or nil before its first one, the changes that its open waits and queue
-  /// need, and the changes that a source of PR changes reports for it. With `signals` nil no source reports the
-  /// PR's changes, and the PR polls at `base`.
-  ///
-  /// No source of PR changes exists yet, so a PR polls at `base` whatever `signals` holds. Slower rates for a PR
-  /// whose source reports every change it needs come with the first source.
+  /// The rates of a PR, given its last read or nil before its first one, the changes that its open waits and queue
+  /// need, and the changes that a source of PR changes reports for it. Every PR polls at `base`, because no source
+  /// of PR changes exists yet.
   public static func of(_ pr: PullRequest?, needs: ChangeSignals, signals: ChangeSignals?, base: PollRates)
     -> PollRates
   {
