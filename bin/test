@@ -153,6 +153,24 @@ if [ "${1:-}" = --claude ]; then
   fi
 fi
 
+# build_bundles <package-json> <test-target>…
+# Builds the named test targets' bundles and sets `built` to those targets, one
+# per line. When a test target has no bundle of its own, it builds every bundle
+# and sets `built` to every test target (test_bundles_exist).
+build_bundles() {
+  local all
+  all=$(jq -r '.targets[] | select(.type == "test") | .name' <<<"$1")
+  shift
+  if test_bundles_exist $all; then
+    built=$(printf '%s\n' "$@" | sort -u)
+    build_test_bundles $built
+  else
+    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
+    build_tests
+    built=$all
+  fi
+}
+
 # Builds the bundles of the tests it selects and sets `run` to the swift test
 # arguments that filter them to the selection. It never selects all of a
 # ci-only target (bin/lib/test-selection.sh), which CI runs on every push. Exits
@@ -184,17 +202,10 @@ targeted() {
     echo "bin/test: no test reads the files changed against origin/main. bin/test --all runs every test." >&2
     exit 0
   fi
-  if test_bundles_exist $(jq -r '.targets[] | select(.type == "test") | .name' <<<"$json"); then
-    built=$(selection_targets <<<"$selection")
-    build_test_bundles $built
-    filters=$(test_filters <<<"$selection")
-    missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
-    if [ -n "$missing" ]; then build_test_bundles $missing; fi
-  else
-    echo "bin/test: a test target has no bundle of its own in the build folder, so every test bundle builds" >&2
-    build_tests
-    filters=$(test_filters <<<"$selection")
-  fi
+  build_bundles "$json" $(selection_targets <<<"$selection")
+  filters=$(test_filters <<<"$selection")
+  missing=$(comm -13 <(sort <<<"$built") <(filter_targets <<<"$filters"))
+  if [ -n "$missing" ]; then build_test_bundles $missing; fi
   run=(--skip-build)
   while IFS= read -r filter; do
     echo "bin/test: runs the tests that match $filter" >&2
