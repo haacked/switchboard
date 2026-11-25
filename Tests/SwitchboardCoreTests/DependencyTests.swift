@@ -6,7 +6,7 @@ import Testing
 private let own = "acme/widgets"
 
 /// Each ref as owner/repo#N, with " deploy" for a deploy ref.
-private func names(_ refs: [PRRef]) -> [String] {
+private func names(_ refs: [DependencyRef]) -> [String] {
   refs.map { "\($0.repo)#\($0.number)\($0.deploy ? " deploy" : "")" }
 }
 
@@ -93,7 +93,7 @@ private func refs(_ body: String) -> [String] {
 }
 
 /// The one ref that `body` names.
-private func ref(_ body: String) throws -> PRRef {
+private func ref(_ body: String) throws -> DependencyRef {
   let found = Dependencies.refs(inBody: body, repo: own)
   try #require(found.count == 1)
   return found[0]
@@ -103,7 +103,7 @@ private func ref(_ body: String) throws -> PRRef {
   @Test func serviceNamesTheChartsStateFile() throws {
     let r = try ref("Depends on PostHog/statuspage#54 (deployed, service: statuspage-metrics-api)")
 
-    #expect(r == PRRef(repo: "PostHog/statuspage", number: 54, deploy: true, service: "statuspage-metrics-api"))
+    #expect(r == DependencyRef(repo: "PostHog/statuspage", number: 54, deploy: true, service: "statuspage-metrics-api"))
   }
 
   @Test(arguments: [
@@ -174,7 +174,7 @@ private func ref(_ body: String) throws -> PRRef {
     "Depends on PostHog/statuspage#54, service: statuspage-metrics-api, merged to dev",
   ])
   func lineWithoutDeployIgnoresServiceAndTo(_ body: String) throws {
-    #expect(try ref(body) == PRRef(repo: "PostHog/statuspage", number: 54))
+    #expect(try ref(body) == DependencyRef(repo: "PostHog/statuspage", number: 54))
   }
 
   @Test func everyRefOnTheLineGetsItsServiceAndEnvironments() {
@@ -183,8 +183,8 @@ private func ref(_ body: String) throws -> PRRef {
 
     #expect(
       found == [
-        PRRef(repo: own, number: 5, deploy: true, service: "statuspage-metrics-api", environments: [.dev]),
-        PRRef(
+        DependencyRef(repo: own, number: 5, deploy: true, service: "statuspage-metrics-api", environments: [.dev]),
+        DependencyRef(
           repo: "PostHog/statuspage", number: 54, deploy: true, service: "statuspage-metrics-api", environments: [.dev]),
       ])
   }
@@ -195,8 +195,8 @@ private func ref(_ body: String) throws -> PRRef {
 
     #expect(
       found == [
-        PRRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]),
-        PRRef(repo: own, number: 6, deploy: true),
+        DependencyRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]),
+        DependencyRef(repo: own, number: 6, deploy: true),
       ])
   }
 
@@ -216,7 +216,7 @@ private func ref(_ body: String) throws -> PRRef {
   @Test func repeatOfANonDeployLineTakesOnlyTheDeployLinesEnvironments() throws {
     let r = try ref("Depends on #5\nDepends on #5 (deployed to dev, service: feature-flags)")
 
-    #expect(r == PRRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]))
+    #expect(r == DependencyRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]))
   }
 
   /// A bare deploy line waits on both prod regions, so its union with dev names all three.
@@ -233,7 +233,7 @@ private func ref(_ body: String) throws -> PRRef {
   @Test func repeatStaysADeployRefWhenALaterLineIsNot() throws {
     let r = try ref("Depends on #5 (deployed to dev, service: feature-flags)\nDepends on #5")
 
-    #expect(r == PRRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]))
+    #expect(r == DependencyRef(repo: own, number: 5, deploy: true, service: "feature-flags", environments: [.dev]))
   }
 }
 
@@ -295,23 +295,23 @@ private func ref(_ body: String) throws -> PRRef {
   }
 
   @Test func prRefRoundTrips() throws {
-    let r = PRRef(repo: "PostHog/posthog", number: 456, deploy: true)
+    let r = DependencyRef(repo: "PostHog/posthog", number: 456, deploy: true)
 
-    #expect(try JSONCoding.decode(PRRef.self, from: try JSON(encoding: r).text) == r)
+    #expect(try JSONCoding.decode(DependencyRef.self, from: try JSON(encoding: r).text) == r)
   }
 
   @Test func pullRequestKeepsItsDependsOn() throws {
     var pr = samplePR()
-    pr.dependsOn = [PRRef(repo: own, number: 41, deploy: false)]
+    pr.dependsOn = [DependencyRef(repo: own, number: 41, deploy: false)]
 
     let decoded = try JSONCoding.decode(PullRequest.self, from: try JSON(encoding: pr).text)
 
-    #expect(decoded.dependsOn == [PRRef(repo: own, number: 41, deploy: false)])
+    #expect(decoded.dependsOn == [DependencyRef(repo: own, number: 41, deploy: false)])
   }
 
   @Test func pullRequestThatAnOlderSbdRecordedHasNoDependsOn() throws {
     var pr = samplePR()
-    pr.dependsOn = [PRRef(repo: own, number: 41, deploy: false)]
+    pr.dependsOn = [DependencyRef(repo: own, number: 41, deploy: false)]
     var object = try #require(try JSON(encoding: pr).object)
     object["dependsOn"] = nil
 
@@ -321,15 +321,16 @@ private func ref(_ body: String) throws -> PRRef {
   }
 
   @Test func prRefWithAServiceAndEnvironmentsRoundTrips() throws {
-    let r = PRRef(repo: "PostHog/statuspage", number: 54, deploy: true, service: "x", environments: [.dev, .prodEU])
+    let r = DependencyRef(
+      repo: "PostHog/statuspage", number: 54, deploy: true, service: "x", environments: [.dev, .prodEU])
 
-    #expect(try JSONCoding.decode(PRRef.self, from: try JSON(encoding: r).text) == r)
+    #expect(try JSONCoding.decode(DependencyRef.self, from: try JSON(encoding: r).text) == r)
   }
 
   @Test func prRefThatAnOlderSbdRecordedHasNoServiceOrEnvironments() throws {
-    let r = try JSONCoding.decode(PRRef.self, from: #"{"repo":"PostHog/posthog","number":456,"deploy":true}"#)
+    let r = try JSONCoding.decode(DependencyRef.self, from: #"{"repo":"PostHog/posthog","number":456,"deploy":true}"#)
 
-    #expect(r == PRRef(repo: "PostHog/posthog", number: 456, deploy: true, service: nil, environments: nil))
+    #expect(r == DependencyRef(repo: "PostHog/posthog", number: 456, deploy: true, service: nil, environments: nil))
   }
 
   @Test func dependencyWithAServiceEnvironmentsAndProblemRoundTrips() throws {
@@ -374,9 +375,9 @@ private func ref(_ body: String) throws -> PRRef {
 
   @Test func pullRequestInitTakesDependsOnLast() {
     let pr = PullRequest(
-      id: "PR_1", number: 1, url: "u", repo: own, dependsOn: [PRRef(repo: own, number: 2, deploy: true)])
+      id: "PR_1", number: 1, url: "u", repo: own, dependsOn: [DependencyRef(repo: own, number: 2, deploy: true)])
 
-    #expect(pr.dependsOn == [PRRef(repo: own, number: 2, deploy: true)])
+    #expect(pr.dependsOn == [DependencyRef(repo: own, number: 2, deploy: true)])
   }
 }
 
