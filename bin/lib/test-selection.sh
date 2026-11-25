@@ -36,6 +36,17 @@ files_matching() {
   tr '\n' '\0' | xargs -0 grep -l "$@" 2>/dev/null | sort || true
 }
 
+# folder_readers <folder> <dir>…
+# Prints the Swift files under the dirs that read the repo's <folder> at run
+# time. Such a file finds the repo root through #filePath or Instance.root and
+# names <folder> as a path in a string.
+folder_readers() {
+  local folder=$1
+  shift
+  find "$@" -name '*.swift' | files_matching -E '#filePath|Instance\.root' |
+    files_matching -E "[\"/]$folder([/\"]|\$)"
+}
+
 ere_escape() {
   sed 's/[][\.*^$+?(){}|]/\\&/g' <<<"$1"
 }
@@ -238,8 +249,7 @@ select_tests() {
         [ -n "$file" ] || continue
         echo "bin/test: $file reads Sources/ at run time" >&2
         add_test_file "$name" "$dir" "$file"
-      done < <(find "$dir" -name '*.swift' | files_matching -E '#filePath|Instance\.root' |
-        files_matching -E '["/]Sources([/"]|$)')
+      done < <(folder_readers Sources "$dir")
     done <<<"$graph"
   fi
 
