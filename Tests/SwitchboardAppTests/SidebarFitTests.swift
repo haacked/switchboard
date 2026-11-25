@@ -313,3 +313,67 @@ enum ZeroWidthStart: String, CaseIterable, Sendable {
     #expect(fit == before)
   }
 }
+
+/// At launch, SwiftUI passes the sidebar state that the window restored from the last run to the setter, before the
+/// first measurement.
+@MainActor
+@Suite struct SidebarFitRestored {
+  @Test func aHiddenSidebarThatTheRuleHidShowsOnASessionView() {
+    var fit = SidebarFit(ruleHidLastRun: true)
+    fit.userSet(.detailOnly)
+
+    fit.update(windowWidth: narrow, isListDetail: false)
+
+    #expect(fit.showsSidebar)
+  }
+
+  @Test func aHiddenSidebarThatTheRuleHidStaysHiddenOnTheInboxAndShowsWhenASessionOpens() {
+    var fit = SidebarFit(ruleHidLastRun: true)
+    fit.userSet(.detailOnly)
+
+    fit.update(windowWidth: narrow, isListDetail: true)
+    let onTheInbox = fit.showsSidebar
+    fit.update(windowWidth: narrow, isListDetail: false)
+
+    #expect(!onTheInbox)
+    #expect(fit.showsSidebar)
+  }
+
+  @Test func aHiddenSidebarThatTheRuleHidShowsInAWideWindow() {
+    var fit = SidebarFit(ruleHidLastRun: true)
+    fit.userSet(.detailOnly)
+
+    fit.update(windowWidth: wide, isListDetail: true)
+
+    #expect(fit.showsSidebar)
+  }
+
+  @Test(arguments: [(narrow, false), (narrow, true), (wide, false), (wide, true)] as [(CGFloat, Bool)])
+  func aHiddenSidebarThatTheUserHidStaysHidden(_ width: CGFloat, _ listDetail: Bool) {
+    var fit = SidebarFit(ruleHidLastRun: false)
+    fit.userSet(.detailOnly)
+
+    fit.update(windowWidth: width, isListDetail: listDetail)
+    fit.update(windowWidth: width, isListDetail: !listDetail)
+
+    #expect(!fit.showsSidebar)
+  }
+
+  @Test func theRuleRecordsThatItHidTheSidebarAndThatItShowedItAgain() {
+    var fit = measured(narrow, listDetail: false)
+
+    fit.update(windowWidth: narrow, isListDetail: true)
+    let hid = fit.autoHidden
+    fit.update(windowWidth: narrow, isListDetail: false)
+
+    #expect(hid)
+    #expect(!fit.autoHidden)
+  }
+
+  @Test func aUserToggleClearsTheRecord() {
+    var fit = measured(narrow, listDetail: true)
+    fit.userSet(.all)
+
+    #expect(!fit.autoHidden)
+  }
+}

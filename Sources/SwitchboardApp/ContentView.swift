@@ -55,7 +55,7 @@ struct ContentView: View {
   static func viewLabel(_ name: String, _ count: Int) -> String { count > 0 ? "\(name) \(count)" : name }
 
   @EnvironmentObject var model: BoardModel
-  @State private var sidebar = SidebarFit()
+  @State private var sidebar = SidebarFit(ruleHidLastRun: UserDefaults.standard.bool(forKey: SidebarFit.autoHiddenKey))
   @State private var windowWidth: CGFloat = 0
 
   private var sidebarVisibility: Binding<NavigationSplitViewVisibility> {
@@ -129,6 +129,7 @@ struct ContentView: View {
       fitSidebar()
     }
     .onChange(of: model.showsListDetail) { fitSidebar() }
+    .onChange(of: sidebar.autoHidden) { UserDefaults.standard.set($1, forKey: SidebarFit.autoHiddenKey) }
     .confirmationDialog(
       deleteConfirmation?.title ?? "Delete this session?", isPresented: model.isPresent(\.confirmingDelete),
       presenting: deleteConfirmation
