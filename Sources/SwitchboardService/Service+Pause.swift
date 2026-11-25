@@ -280,13 +280,11 @@ extension Service {
     guard let session = entries[id]?.session, let pause = session.pause else { throw APIError("\(id) isn't paused") }
     if let refusal = beingDeletedRefusal(id) { throw refusal }
     try requireRead(id)
-    var folderGone: Error?
+    var folderGone: FolderGone?
     do {
       try requireFolder(session)
-    } catch let error as HostUnread {
-      throw error
-    } catch {
-      folderGone = error
+    } catch let gone as FolderGone {
+      folderGone = gone
     }
     let now = nowMs()
     try update(id) { s in
