@@ -7,8 +7,8 @@ extension Service {
   /// and a turn that is running also refuses, so a refusal changes nothing.
   /// The checks run again after `finishPaneStop` returns, which waits for
   /// claude, the panes' processes, and every process with the folder open to
-  /// exit. A refusal at that point leaves the session, the folder, and the
-  /// branch.
+  /// exit, and stops the session's leftover processes. A refusal at that point
+  /// leaves the session, the folder, and the branch.
   /// After the worktree is gone, the session records the cleanup whatever
   /// happens to the branch, because its folder is missing. A failed delete
   /// keeps the branch and throws. A caller inside the session is refused

@@ -44,9 +44,11 @@ private func runsSleep(_ pid: pid_t) -> Bool {
   return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("sleep")
 }
 
-/// Copies /bin/sleep to the path. macOS kills a copy of a system program that keeps Apple's signature, so the copy
-/// gets an ad hoc signature.
+/// Copies /bin/sleep to the path, and creates the path's folder first. macOS kills a copy of a system program that
+/// keeps Apple's signature, so the copy gets an ad hoc signature.
 private func copySleep(to path: String) throws {
+  try FileManager.default.createDirectory(
+    atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
   try FileManager.default.copyItem(atPath: "/bin/sleep", toPath: path)
   let r = try runCommand("/usr/bin/codesign", ["--force", "-s", "-", path])
   guard r.status == 0 else { throw TestError(description: "codesign: \(r.stderr)") }
@@ -69,12 +71,13 @@ private final class Strays {
     return fromFiles.compactMap { $0 } + spawned.map(\.processIdentifier)
   }
 
-  /// Starts the program in the folder, outside every pane.
-  func spawn(_ path: String, _ args: [String], cwd: String) throws {
+  /// Starts the program in the folder, outside every pane, with the test's environment and `environment` over it.
+  func spawn(_ path: String, _ args: [String], cwd: String, environment: [String: String] = [:]) throws {
     let p = Process()
     p.executableURL = URL(fileURLWithPath: path)
     p.arguments = args
     p.currentDirectoryURL = URL(fileURLWithPath: cwd)
+    p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 }
     p.standardInput = FileHandle.nullDevice
     p.standardOutput = FileHandle.nullDevice
     p.standardError = FileHandle.nullDevice
@@ -190,6 +193,30 @@ private final class Strays {
     for pid in pids { #expect(Processes.exists(Int(pid)), "sbd ended \(pid)") }
   }
 
+  /// Runs the script under sh in the session's folder, with the pid file's path as `$1` and a copy of sleep outside
+  /// the worktree as `$2`, and waits for sh to exit. The script starts a background process and writes its pid to
+  /// `$1`. sh's environment holds `SB_SESSION_ID` set to `sessionId`, which is the session's id unless given. The
+  /// result is that process, once it runs sleep. macOS can hide the environment of /bin/sleep, so the copy stands
+  /// in for a dev watcher such as python.
+  private func startOrphan(
+    _ s: SessionSummary, _ strays: Strays, sessionId: String? = nil,
+    _ script: String = "\"$2\" 100 </dev/null >/dev/null 2>&1 & echo $! > \"$1\""
+  ) throws -> pid_t {
+    let file = "orphan.pid"
+    strays.pidFiles.append(file)
+    let path = "\(strays.sbd.home.path)/\(file)"
+    let sleep = "\(strays.sbd.home.path)/orphan-bin/sleep"
+    if !FileManager.default.fileExists(atPath: sleep) { try copySleep(to: sleep) }
+    try strays.spawn(
+      "/bin/sh", ["-c", script, "sh", path, sleep], cwd: s.cwd, environment: ["SB_SESSION_ID": sessionId ?? s.id])
+    strays.spawned.last?.waitUntilExit()
+    let pid = try #require(strays.sbd.stubPid(file), "sh wrote no pid to \(path)")
+    let ppid = ProcessTable.readLocal().row(Int(pid))?.ppid
+    try #require(ppid == 1, "the parent of \(pid) is \(String(describing: ppid)), not launchd")
+    try strays.sbd.waitFor("\(pid) to run sleep") { runsSleep(pid) }
+    return pid
+  }
+
   // MARK: claude that has not exited
 
   /// The stub outlives the first 4 s wait and exits within the retry's wait. The refusal leaves the Claude pane
@@ -263,12 +290,16 @@ private final class Strays {
     }
   }
 
-  /// A plain `&` job dies from the SIGHUP that closing the pane sends, so the shell starts it with nohup.
+  /// A plain `&` job dies from the SIGHUP that closing the pane sends, so the shell starts it with nohup. The job
+  /// runs a signed copy of sleep, so macOS always shows its environment. Once the pane closes, the job meets every other
+  /// condition of a leftover, and only its descent from the shell pane keeps sbd from stopping it.
   @Test(arguments: WorktreeRemoval.allCases)
   func refusesUntilAProcessFromTheShellPaneExits(_ how: WorktreeRemoval) throws {
     try expectRefusalUntilTheyExit(how) { sbd, _, terminals, strays in
       strays.pidFiles = ["shell.pid"]
-      try sbd.typeInShell(terminals, "nohup sleep 100 >/dev/null 2>&1 & echo $! > \"$SB_HOME/shell.pid\"")
+      let sleep = "\(sbd.home.path)/job-bin/sleep"
+      try copySleep(to: sleep)
+      try sbd.typeInShell(terminals, "nohup \"\(sleep)\" 100 >/dev/null 2>&1 & echo $! > \"$SB_HOME/shell.pid\"")
     }
   }
 
@@ -312,7 +343,6 @@ private final class Strays {
       try FileManager.default.createDirectory(
         atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
       try ".build/\n".write(toFile: exclude, atomically: true, encoding: .utf8)
-      try FileManager.default.createDirectory(atPath: "\(s.cwd)/.build", withIntermediateDirectories: true)
       try copySleep(to: "\(s.cwd)/.build/sleep")
       try strays.spawn("\(s.cwd)/.build/sleep", ["100"], cwd: "/")
     }
@@ -337,7 +367,6 @@ private final class Strays {
   func removesWhileAnSSHMultiplexerWorksInTheFolder(_ how: WorktreeRemoval) throws {
     try expectRemovalWhileTheyRun(how) { s, strays in
       let bin = "\(strays.sbd.home.path)/fake-ssh"
-      try FileManager.default.createDirectory(atPath: bin, withIntermediateDirectories: true)
       try copySleep(to: "\(bin)/ssh")
       try strays.spawn(
         "/bin/bash", ["-c", "exec -a \"ssh: $0/sock [mux]\" \"$0/ssh\" 100", bin], cwd: s.cwd)
@@ -381,6 +410,95 @@ private final class Strays {
 
     #expect(r.status == 0, Comment(rawValue: r.stderr))
     try expectRemoved(how, sbd, s)
+  }
+
+  // MARK: Leftovers that launchd adopted
+
+  /// The process works in the worktree, launchd is its parent, it started after the session, and its environment
+  /// holds the session's id, so the removal stops it and goes ahead. launchd reaps it after the removal, so the test
+  /// waits a short time for it to go.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func removesAfterItStopsAnOrphanThatWorksInTheFolder(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(s, strays)
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(how, sbd, s)
+    try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+    let log = try String(contentsOfFile: sbd.home.log, encoding: .utf8)
+    #expect(log.contains("sending signal \(SIGTERM) to leftover \(orphan) "), Comment(rawValue: log))
+  }
+
+  /// The subshell ignores SIGTERM before it execs sleep, and sleep keeps that disposition. Only the SIGKILL after
+  /// the stop wait can end it. The test sends its own SIGTERM first to show that the fixture ignores it.
+  @Test func rmStopsAnOrphanThatIgnoresSIGTERM() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(
+      s, strays, "(trap '' TERM; exec \"$2\" 100) </dev/null >/dev/null 2>&1 & echo $! > \"$1\"")
+    kill(orphan, SIGTERM)
+    Thread.sleep(forTimeInterval: 0.3)
+    try #require(runsSleep(orphan), "\(orphan) ended on SIGTERM")
+
+    let r = try sbd.removeWorktree(.rm, s.id)
+
+    #expect(r.status == 0, Comment(rawValue: r.stderr))
+    try expectRemoved(.rm, sbd, s)
+    try sbd.waitFor("sbd to end \(orphan)", timeout: 3) { !Processes.exists(Int(orphan)) }
+    let log = try String(contentsOfFile: sbd.home.log, encoding: .utf8)
+    let sentTerm = try #require(
+      log.range(of: "sending signal \(SIGTERM) to leftover \(orphan) "), Comment(rawValue: log))
+    let sentKill = try #require(
+      log.range(of: "sending signal \(SIGKILL) to leftover \(orphan) "), Comment(rawValue: log))
+    #expect(sentTerm.lowerBound < sentKill.lowerBound, Comment(rawValue: log))
+  }
+
+  /// The child of the test runner has a live parent, so it is not a leftover. sbd stops leftovers only when every
+  /// process in the folder is one, so it refuses and sends the orphan no signal either.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func refusesAndSparesTheOrphanWhileAProcessWithALiveParentWorksInTheFolder(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(s, strays)
+    try strays.spawn("/bin/sleep", ["100"], cwd: s.cwd)
+    let child = try #require(strays.spawned.last).processIdentifier
+    try sbd.waitFor("\(child) to run sleep") { runsSleep(child) }
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    try #require(r.status != 0, Comment(rawValue: r.stderr))
+    #expect(names(r.stderr, child), Comment(rawValue: "\(child) is not in: \(r.stderr)"))
+    #expect(runsSleep(orphan), "sbd ended \(orphan)")
+    #expect(runsSleep(child), "sbd ended \(child)")
+    try expectKept(sbd, repo, s)
+  }
+
+  /// The orphan's environment holds another session's id, as a process that another session started in this
+  /// worktree would. launchd is its parent and it started after the session, but sbd refuses and sends it no signal.
+  @Test(arguments: WorktreeRemoval.allCases)
+  func refusesAndSparesAnOrphanThatAnotherSessionStarted(_ how: WorktreeRemoval) throws {
+    let github = try FakeGitHub()
+    let (sbd, repo, s) = try finishedSession(github, config: Instance.shortStopWait)
+    let strays = Strays(sbd)
+    defer { strays.killAll() }
+    let orphan = try startOrphan(
+      s, strays, sessionId: "swb_other")
+
+    let r = try sbd.removeWorktree(how, s.id)
+
+    try #require(r.status != 0, Comment(rawValue: r.stderr))
+    #expect(names(r.stderr, orphan), Comment(rawValue: "\(orphan) is not in: \(r.stderr)"))
+    #expect(runsSleep(orphan), "sbd ended \(orphan)")
+    try expectKept(sbd, repo, s)
   }
 
   // MARK: To-dos
