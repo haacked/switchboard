@@ -788,6 +788,35 @@ private final class HubPoller {
     #expect(h.reads.map(\.at) == [t0 + 2_000, t0 + 8_000, t0 + 23_000], "\(h.reads)")
   }
 
+  /// A catch-up read that `ReadRequests` runs in place of a `head` signal's read comes too soon for the new head's
+  /// suites, so the hub asks for the `head` read again.
+  @Test func anEarlierCatchUpDoesNotTakeTheHeadSignalsRead() {
+    let h = HubHarness()
+    h.coverage(.live(.pr(prRef(7)), since: t0 - 4_000, gap: true))
+
+    h.signal(kind: .head)
+    h.advance(by: 60_000)
+
+    #expect(
+      h.reads == [
+        .init(id: "PR_7", at: t0 + 1_000, trigger: .catchup), .init(id: "PR_7", at: t0 + 5_000, trigger: .event),
+      ],
+      "\(h.reads)")
+  }
+
+  /// The spacing counts from the time a signal's read ran, not from the time the hub asked for it.
+  @Test func theSpacingCountsFromALateReadsTime() {
+    let h = HubHarness()
+    h.signal()
+    h.setNow(t0 + 10_000)
+    h.poll()
+
+    h.setNow(t0 + 11_000)
+    h.signal()
+
+    #expect(h.reader.requests.timed["PR_7"] == t0 + 25_000)
+  }
+
   /// Of two live providers that report as many kinds of change, the one registered first keeps the PR.
   @Test func onATieTheFirstProviderKeepsThePR() {
     let a = FakeProvider(id: "a")

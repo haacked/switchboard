@@ -42,14 +42,13 @@ final class PRChangeHub {
   private var ids: [PRRef: String] = [:]
   /// The signal ids of the last `dedupeMs`, by provider and id, with when each arrived.
   private var seen: [String: Int64] = [:]
-  /// The time of each PR's last signal-caused read, by node id. A time after now is a read that hasn't run.
+  /// The time of each PR's last signal-caused read, by node id. It is the time the hub asked for until the poller
+  /// stores a read that serves the PR's signals, and then the time of that read. A time after now is a read that
+  /// hasn't run.
   private var signalReads: [String: Int64] = [:]
-  /// When each PR's newest signal arrived, by node id, until the poller stores a read from that time or later.
-  private var lastSignalAt: [String: Int64] = [:]
-  /// The time of a read that a `head` signal needs after the PR's pending signal-caused read, by node id.
-  /// `ReadRequests` keeps one time for each PR, so the hub asks for it at the end of the poll that ran the pending
-  /// read.
-  private var owedReads: [String: Int64] = [:]
+  /// The time from which a stored read serves each PR's signals, by node id, until the poller stores such a read. A
+  /// `head` signal needs a read from the end of its delay. Any other signal needs a read from after its arrival.
+  private var neededReads: [String: Int64] = [:]
 
   /// A provider's last report for one scope. `since` is nil when the scope went down. `order` is the report's
   /// place among all reports, so the latest report for a PR wins over an earlier one for a wider scope.
@@ -120,21 +119,8 @@ final class PRChangeHub {
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
-    // `ReadRequests` keeps the earlier of two times for a PR, so another trigger's read can run in place of the hub's.
-    // That read serves every signal that arrived before it. `owedReads` handles the opposite case, a read that
-    // `ReadRequests` drops because it comes later.
-    for (id, signalled) in lastSignalAt {
-      guard let polled = known[id]?.polled else {
-        lastSignalAt[id] = nil
-        continue
-      }
-      guard polled >= signalled else { continue }
-      lastSignalAt[id] = nil
-      if let last = signalReads[id], last > polled { signalReads[id] = polled }
-    }
+    settleNeededReads()
     signalReads = signalReads.filter { known[$0.key] != nil }
-    owedReads = owedReads.filter { known[$0.key] != nil }
-    requestOwedReads()
     for (provider, scopes) in coverage {
       coverage[provider] = scopes.filter { scope, _ in
         guard case .pr(let ref) = scope else { return true }
@@ -198,18 +184,12 @@ final class PRChangeHub {
   }
 
   /// Asks for a read of the PR after the signal's delay, and no sooner than `spacingMs` after the PR's last
-  /// signal-caused read unless a check failed. A signal that comes while that read hasn't run shares it, because the
-  /// read comes after the signal. Two cases differ. A failed check whose delay ends sooner moves the read to that
-  /// time. A `head` signal whose delay ends later is owed a read of its own after the pending one. A delay only
-  /// moves a read later.
+  /// signal-caused read unless a check failed. A signal that comes while that read hasn't run shares it, unless a
+  /// failed check's delay ends sooner, which moves the read to that time. A delay only moves a read later.
   private func requestSignalRead(_ id: String, _ s: PRSignal, provider: String, now: Int64) {
     var at = now + (s.kind == .head ? Self.headDelayMs : Self.delayMs)
-    lastSignalAt[id] = now
+    neededReads[id] = max(neededReads[id] ?? 0, s.kind == .head ? at : now + 1)
     if let last = signalReads[id], last > now {
-      if s.kind == .head && at > last {
-        owedReads[id] = max(owedReads[id] ?? 0, s.failed ? at : max(at, last + Self.spacingMs))
-        counts[provider, default: Counts()].reads += 1
-      }
       guard s.failed, at < last else { return }
     } else if let last = signalReads[id], !s.failed {
       at = max(at, last + Self.spacingMs)
@@ -219,12 +199,25 @@ final class PRChangeHub {
     reader?.requestRead([id], after: at - now, trigger: .event)
   }
 
-  /// Asks for each owed read whose PR has no pending signal-caused read. An owed read whose time has passed waits for
-  /// the next poll, so a poll that fails doesn't wake another at once.
-  private func requestOwedReads() {
+  /// Ends each PR's need for a read once the poller stores a read from the needed time, and measures the spacing from
+  /// that read. `ReadRequests` keeps one time for each PR, so a read that another trigger asked for can take the place
+  /// of the hub's read and run too early. While the need remains, the hub asks again: at its pending read's time, or
+  /// `spacingMs` after that time once it has passed. A time that has passed waits for the next poll, so a poll that
+  /// fails doesn't wake another at once.
+  private func settleNeededReads() {
     let now = now()
-    for (id, at) in owedReads.sorted(by: { $0.key < $1.key }) where (signalReads[id] ?? 0) <= now {
-      owedReads[id] = nil
+    for (id, needed) in neededReads.sorted(by: { $0.key < $1.key }) {
+      guard let polled = known[id]?.polled else {
+        neededReads[id] = nil
+        continue
+      }
+      if polled >= needed {
+        neededReads[id] = nil
+        signalReads[id] = polled
+        continue
+      }
+      let last = signalReads[id] ?? 0
+      let at = last > now ? last : max(needed, last + Self.spacingMs)
       signalReads[id] = at
       if at > now {
         reader?.requestRead([id], after: at - now, trigger: .event)
