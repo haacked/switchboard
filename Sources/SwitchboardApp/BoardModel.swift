@@ -712,7 +712,8 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
-  /// True while the sidebar has no rows and sbd answers. It is false when the filters or the search field hide
+  /// True while the sidebar has no work sessions and no conversations and sbd answers. The Conversations header
+  /// still shows then. It is false when the filters or the search field hide
   /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
     workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
