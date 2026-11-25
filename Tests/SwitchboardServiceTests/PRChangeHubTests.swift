@@ -25,6 +25,10 @@ private final class FakeReader: PRReader {
   func readAtNextPoll(_ ids: some Sequence<String>, trigger: ReadTrigger) {
     requests.readAtNextPoll(ids, trigger: trigger)
   }
+
+  func cancelRead(_ id: String, trigger: ReadTrigger) {
+    requests.cancel(id, trigger: trigger)
+  }
 }
 
 /// A hub with fake providers and a fake poller on a test clock. The poller knows PR_7 and PR_8 in acme/widgets and
@@ -815,6 +819,37 @@ private final class HubPoller {
     h.signal()
 
     #expect(h.reader.requests.timed["PR_7"] == t0 + 25_000)
+  }
+
+  /// After a failed read, a later read that serves the signal withdraws the hub's timed retry, so the next signal's
+  /// read keeps the 15 s spacing.
+  @Test func aReadThatServesTheSignalWithdrawsTheTimedRetry() throws {
+    let h = HubHarness()
+    h.signal()
+    h.setNow(t0 + 2_000)
+    _ = h.reader.requests.take(now: h.now)
+    h.reader.requests.readAtNextPoll(["PR_7"], trigger: .event)
+    h.endCycle()
+    try #require(h.reader.requests.timed["PR_7"] == t0 + 17_000)
+    h.setNow(t0 + 10_000)
+    h.poll()
+
+    h.setNow(t0 + 11_000)
+    h.signal()
+
+    #expect(h.reader.requests.timed["PR_7"] == t0 + 25_000)
+  }
+
+  /// A `head` signal that needs a read of its own after a pending read counts that read in `sb sources`.
+  @Test func aHeadSignalsSecondReadCountsInTheReport() {
+    let h = HubHarness()
+    h.signal(kind: .checks)
+    h.setNow(t0 + 1_000)
+    h.signal(kind: .head)
+    h.advance(by: 60_000)
+
+    #expect(h.reads.count == 2)
+    #expect(h.queue.sync { h.hub.report() }.providers.first?.reads == 2)
   }
 
   /// Of two live providers that report as many kinds of change, the one registered first keeps the PR.

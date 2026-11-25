@@ -42,4 +42,5 @@ protocol PRChangeSink: AnyObject {
 protocol PRReader: AnyObject {
   func requestRead(_ ids: some Sequence<String>, after: Int64, trigger: ReadTrigger)
   func readAtNextPoll(_ ids: some Sequence<String>, trigger: ReadTrigger)
+  func cancelRead(_ id: String, trigger: ReadTrigger)
 }

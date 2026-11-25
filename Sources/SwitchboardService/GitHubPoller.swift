@@ -242,6 +242,12 @@ final class GitHubPoller {
     readRequests.readAtNextPoll(ids, trigger: trigger)
   }
 
+  /// Withdraws the PR's timed read when it was requested with `trigger`. It runs on `queue`.
+  func cancelRead(_ id: String, trigger: ReadTrigger) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    readRequests.cancel(id, trigger: trigger)
+  }
+
   /// Runs the poll that a request scheduled, unless an earlier poll read every due request. Then it schedules a
   /// wake for the requests that remain.
   func readWake() {

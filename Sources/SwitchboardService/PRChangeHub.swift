@@ -190,6 +190,9 @@ final class PRChangeHub {
     var at = now + (s.kind == .head ? Self.headDelayMs : Self.delayMs)
     neededReads[id] = max(neededReads[id] ?? 0, s.kind == .head ? at : now + 1)
     if let last = signalReads[id], last > now {
+      // A `head` signal whose delay ends after the pending read needs a read of its own, which `settleNeededReads`
+      // asks for once the pending read has run.
+      if s.kind == .head && at > last { counts[provider, default: Counts()].reads += 1 }
       guard s.failed, at < last else { return }
     } else if let last = signalReads[id], !s.failed {
       at = max(at, last + Self.spacingMs)
@@ -212,6 +215,8 @@ final class PRChangeHub {
         continue
       }
       if polled >= needed {
+        // A timed read that the hub asked for and that hasn't run would come sooner than the spacing allows.
+        if let last = signalReads[id], last > now { reader?.cancelRead(id, trigger: .event) }
         neededReads[id] = nil
         signalReads[id] = polled
         continue
