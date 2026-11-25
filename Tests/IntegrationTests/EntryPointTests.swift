@@ -4,13 +4,19 @@ import Testing
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct EntryPointTests {
   /// A launchctl stand-in that records its calls, prints `stderr`,
-  /// and exits with `status` on bootstrap and 0 otherwise.
-  private func fakeLaunchctl(in dir: String, status: Int = 0, stderr: String = "") throws -> String {
+  /// and exits with `status` on bootstrap and 0 otherwise. With `startingSbdAfter`, bootstrap also starts sbd on
+  /// the home in `dir` after that many seconds, as launchd starts an sbd that loads its sessions before it answers.
+  private func fakeLaunchctl(
+    in dir: String, status: Int = 0, stderr: String = "", startingSbdAfter delay: Int? = nil
+  ) throws -> String {
     let path = "\(dir)/launchctl"
+    let start = delay.map {
+      "(sleep \($0); exec \(shellQuote("\(Instance.bin)/sbd")) --home \(shellQuote(dir))) </dev/null >>\(shellQuote("\(dir)/sbd.log")) 2>&1 &\n"
+    }
     let script =
       "#!/bin/sh\necho \"$@\" >>\"\(dir)/launchctl.log\"\n"
       + (stderr.isEmpty ? "" : "echo \(shellQuote(stderr)) >&2\n")
-      + "case \"$1\" in bootstrap) exit \(status);; *) exit 0;; esac\n"
+      + "case \"$1\" in bootstrap) \(start ?? "")exit \(status);; *) exit 0;; esac\n"
     try script.write(toFile: path, atomically: true, encoding: .utf8)
     chmod(path, 0o755)
     return path
@@ -57,6 +63,33 @@ import Testing
     #expect(r.status == 1)
     #expect(r.stderr.contains("launchctl bootstrap failed"))
     #expect(r.stderr.contains("Bootstrap failed: 5: Input/output error"))
+  }
+
+  /// The first start after an update replays every event before sbd opens its socket. That can take longer
+  /// than 5 s.
+  @Test func serviceInstallWaitsForAnSbdThatAnswersLate() throws {
+    let sbd = try Instance(startingSbd: false)
+    let fakeHome = sbd.home.path
+    let launchctl = try fakeLaunchctl(in: fakeHome, startingSbdAfter: 7)
+    let r = try sbd.run(
+      ["service", "install"], env: ["SB_LAUNCH_AGENTS": "\(fakeHome)/Library/LaunchAgents", "SB_LAUNCHCTL": launchctl])
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(r.stdout.contains("waiting for sbd to load its sessions…"), "\(r.stdout)")
+    #expect(r.stdout.contains("sbd runs as a launchd agent"), "\(r.stdout)")
+  }
+
+  @Test func serviceInstallFailsWhenSbdNeverAnswers() throws {
+    let sbd = try Instance(startingSbd: false)
+    let fakeHome = sbd.home.path
+    let launchctl = try fakeLaunchctl(in: fakeHome)
+    let r = try sbd.run(
+      ["service", "install"],
+      env: [
+        "SB_LAUNCH_AGENTS": "\(fakeHome)/Library/LaunchAgents", "SB_LAUNCHCTL": launchctl, "SB_SERVICE_WAIT": "3",
+      ])
+    #expect(r.status == 1, "\(r.stdout)")
+    #expect(r.stderr.contains("sbd did not answer. See \(sbd.home.log)"), "\(r.stderr)")
+    #expect(r.stdout.contains("waiting for sbd to load its sessions…"), "\(r.stdout)")
   }
 
   @Test func pollJSONExitsNonZeroWhenThePollFails() throws {
