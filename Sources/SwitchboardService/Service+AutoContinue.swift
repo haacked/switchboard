@@ -33,8 +33,14 @@ extension Service {
   }
 
   private func autoContinue(_ id: String, offer: String) -> Delivery? {
-    let message = config.autoContinue.message
-    var data: [String: JSON] = ["text": .string(message), "offer": .string(offer)]
+    sendOnOwn(id, config.autoContinue.message, event: AutoContinue.eventKind, data: ["offer": .string(offer)])
+  }
+
+  /// Sends `message` to the session as sbd, then records `event` with `data`, the text, and the delivery or the
+  /// error. It returns the delivery, or nil when the send failed.
+  func sendOnOwn(_ id: String, _ message: String, event: String, data extra: [String: JSON]) -> Delivery? {
+    var data = extra
+    data["text"] = .string(message)
     var delivery: Delivery?
     do {
       let sent = try send(id, message, by: .sbd, trigger: .autoContinue)
@@ -44,7 +50,7 @@ extension Service {
       logLine("can't continue \(id): \(error)")
       data["error"] = .string("\(error)")
     }
-    record(id, AutoContinue.eventKind, .object(data))
+    record(id, event, .object(data))
     return delivery
   }
 

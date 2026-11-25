@@ -176,6 +176,14 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public func lastSeen(viewed: Int64) -> Int64 { max(lastTouched, viewed) }
   /// When sbd continued the session on its own, within the last hour.
   public var autoContinues: [Int64] = []
+  /// The main session's last turn, when it ended in a StopFailure and no prompt or Stop came after it. The box
+  /// keeps `SessionFacts` small enough for the server threads' stacks.
+  public var turnFailure: Box<TurnFailure>?
+  /// When sbd tried to continue a turn that stopped on a failed login, within the last hour. A send that failed
+  /// counts too.
+  public var loginResumes: [Int64] = []
+  /// When sbd last delivered the message that continues a turn that stopped on a failed login.
+  public var loginResumeSent: Int64?
   /// The PRs that the session's open PR waits on, as the poller last found them.
   public var dependencies: [Dependency] = []
   /// What a docket row's `docket` events say.
@@ -420,8 +428,9 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       lastReply = d["last_assistant_message"]?.string
       promptSinceReply = false
     case "StopFailure", "idle":
-      // An API or usage limit error ends the turn without a Stop. So does
-      // Escape, which sbd finds out from `claude agents` and records as idle.
+      // An API, login, or usage limit error ends the turn without a Stop. So
+      // does Escape, which sbd finds out from `claude agents` and records as
+      // idle. `applyTurnFailure` keeps the error.
       endTurn()
     case "skill_blocked":
       // Claude Code sends no Stop after it blocks a prompt. A subagent's blocked call leaves the main call running.
@@ -497,6 +506,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     applyDecisions(event, turnEnded: turnEnded)
     applyDraftReplies(event)
     applyAutoContinue(event, userPrompt: userPrompt)
+    applyTurnFailure(event)
     applyAcknowledgment(event, promptsBefore: promptsBefore)
     applySnooze(event, before: snoozeBefore, touchedBefore: touchedBefore)
     applyRequest(event, userPrompt: userPrompt, turnEnded: turnEnded)
@@ -615,6 +625,8 @@ public struct Verdict: Equatable, Sendable {
   public var savedAtAsk = false
   /// True for a verdict that the operator's routed asks or waits gave. Its item has source `.report`.
   public var fromOperator = false
+  /// True for the Needs you of a turn that a failed login stopped. An acknowledgment does not move it to Waiting.
+  public var loginFailed = false
 
   public static func == (a: Verdict, b: Verdict) -> Bool { a.state == b.state && a.reason == b.reason }
 }
@@ -731,6 +743,8 @@ public enum Attention {
       return v
     }
     if let ask { return ask }
+    // No wait, PR rule, or held wait may hide a turn that a failed login stopped.
+    if !facts.turnRunning, let v = loginFailureVerdict(facts) { return v }
     if let v = finishedPR(session, facts, now: now) { return v }
     if facts.turnRunning { return workingVerdict(facts, now: now) }
     let idle = idleRules(session, facts, now: now, stateOf: stateOf)

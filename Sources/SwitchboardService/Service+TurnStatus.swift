@@ -140,7 +140,7 @@ enum SessionAccount: Hashable {
     switch self {
     case .local(let account): account.folder
     case .codex(let account): account.folder
-    case .host(let host): "\(host):~/.claude"
+    case .host(let host): Account.key(ofHost: host)
     }
   }
 }

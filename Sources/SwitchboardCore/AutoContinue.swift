@@ -25,12 +25,16 @@ public protocol QuotaBudget: Sendable {
   /// Whether the Claude account in the config folder may spend more on an
   /// automatic continue.
   func hasBudget(account: String) -> Bool
+  /// Whether a read of the account in the config folder succeeded after `since`, so its login works.
+  func loginWorks(account: String, since: Int64) -> Bool
 }
 
 /// Says yes for every account.
 public struct UnlimitedBudget: QuotaBudget {
   public init() {}
   public func hasBudget(account: String) -> Bool { true }
+  /// It reads no account, so it never knows that a login works.
+  public func loginWorks(account: String, since: Int64) -> Bool { false }
 }
 
 /// What `AutoContinue.blocker` decides from.

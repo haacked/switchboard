@@ -1001,10 +1001,15 @@ public final class Service {
   /// time. The result is nil, and nothing is recorded, when the id is already recorded. It throws, and
   /// records nothing, when the store can't keep the event.
   func hook(_ args: JSON, stamp: HostEventStamp? = nil) throws -> (event: Event, answer: JSON)? {
-    guard let id = args["session"]?.string, let session = entries[id]?.session, let payload = args["payload"] else {
+    guard let id = args["session"]?.string, let session = entries[id]?.session, var payload = args["payload"] else {
       return nil
     }
     let kind = payload["hook_event_name"]?.string ?? "unknown"
+    // The facts replay from the log, so the event itself names the account whose login may have failed.
+    if kind == "StopFailure", case .object(var fields) = payload {
+      fields["account"] = .string(claudeAccount(of: id).key)
+      payload = .object(fields)
+    }
     if let stamp, try store.hasHostEvent(stamp.id) { return nil }
     let before = entries[id]!.facts
     // A job starts inside a turn, and the tick skips a running turn. The count
@@ -2920,6 +2925,7 @@ public final class Service {
       pollSlackThreadsIfDue(now: now)
       applyMCPChanges(now: now)
       autoContinueSessions(now: now)
+      resumeFailedLogins(now: now)
       pruneActivityIfDue(now: now)
       compactSnapshots()
       pruneHostEvents(now: now)
@@ -2971,7 +2977,7 @@ public final class Service {
       claudeSessionId: s.claudeSessionId, state: verdict.state, reason: verdict.reason, since: facts.stateSince,
       lastActivity: facts.lastActivity,
       live: facts.live, claudePid: claudePid(id),
-      attached: attached(id), lastReply: facts.lastReply,
+      attached: attached(id), lastReply: facts.shownReply,
       waits: s.waits ?? [], notes: s.notes ?? [], cards: facts.cards,
       openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)

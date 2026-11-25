@@ -31,7 +31,10 @@
 #                    job runs, as claude does
 #   interrupt ...    starts a tool call and stops, as Escape does. Claude
 #                    Code sends no hook after Escape
-#   fail ...         ends the turn with StopFailure, as an API error does
+#   fail ...         ends the turn with StopFailure, as an API error does.
+#                    fail authentication_failed sends that error with the
+#                    message of an expired login. Any other fail sends
+#                    rate_limit
 #   clear <uuid>     switches to another conversation, as /clear does
 #   context <n>      writes an assistant line of model claude-test whose
 #                    usage gives an input context of n tokens, as an API
@@ -1112,7 +1115,11 @@ turn() {
     ;;
   fail*)
     event turn UserPromptSubmit | emit "$(vars "$p" "")"
-    hook StopFailure '{"error":"rate_limit"}'
+    if [ "${p#fail }" = authentication_failed ]; then
+      hook StopFailure '{"error":"authentication_failed","last_assistant_message":"Login reached its time limit · Please run /login"}'
+    else
+      hook StopFailure '{"error":"rate_limit"}'
+    fi
     echo "⏺ API Error"
     return
     ;;

@@ -58,6 +58,13 @@ final class UsageReader: @unchecked Sendable {
     latest(account)?.budget().isSpent != true
   }
 
+  /// Whether a read of the account succeeded after `since`. A failed read keeps the last good read's `checked`,
+  /// so only a reading without an error counts.
+  func loginWorks(account: String, since: Int64) -> Bool {
+    guard let reading = latest(account), reading.error == nil, let checked = reading.checked else { return false }
+    return checked > since
+  }
+
   /// Reads one account now and returns the reading. The caller must not be on
   /// the service's queue.
   func read(_ account: Account) -> AccountUsage {
@@ -65,7 +72,7 @@ final class UsageReader: @unchecked Sendable {
   }
 
   private func readAll() -> [AccountUsage] {
-    let accounts = service.queue.sync { service.listedAccounts() }
+    let accounts = service.queue.sync { service.usageAccounts() }
     return keep(concurrentMap(accounts) { reading($0) })
   }
 
