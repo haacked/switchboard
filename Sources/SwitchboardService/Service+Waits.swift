@@ -267,7 +267,7 @@ extension Service {
   /// Sends the message of a `resume` wait, then removes the wait. A failed
   /// send leaves the wait open, so the next tick or the poller tries again.
   /// A send that fails because the session's folder is gone still removes the wait, because a retry would fail on
-  /// every tick. The `wait-resolved` event records the failure in `unsent`, and sbd logs it once.
+  /// every tick. The `wait-resolved` event records the failure in `error`, and sbd logs it once.
   /// A met action wait starts its action and stays, unless its action waits for an answer, a retry, or a run.
   ///
   /// An unmet outcome resolves a held or questioned action wait with a message that says sbd did not run the action.
@@ -291,7 +291,7 @@ extension Service {
         _ = try send(
           id, wait.message(outcome: outcome, met: met), by: .sbd, trigger: .wait, extra: handedFromData(id, wait))
       } catch let gone as FolderGone {
-        extra["unsent"] = .string(gone.description)
+        extra["error"] = .string(gone.description)
         logLine("closed wait \(wait.id) of \(id) without resuming it: \(gone)")
       }
     }

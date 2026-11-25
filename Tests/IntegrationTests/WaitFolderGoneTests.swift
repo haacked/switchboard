@@ -42,7 +42,7 @@ import Testing
     let resolved = try sbd.events(s.id, after: mark).filter { $0.kind == "wait-resolved" }
     #expect(resolved.count == 1)
     #expect(resolved.first?.data["outcome"]?.string == "the time came")
-    #expect(resolved.first?.data["unsent"]?.string?.contains("is gone") == true, "\(resolved)")
+    #expect(resolved.first?.data["error"]?.string?.contains("is gone") == true, "\(resolved)")
     #expect(try sbd.launchEvents(s.id, after: mark).isEmpty)
     #expect(try sbd.events(s.id, after: mark).filter { $0.kind == "sent" }.isEmpty)
     let lines = logLines(sbd, naming: wait)
@@ -62,7 +62,7 @@ import Testing
     #expect(try sbd.get(s.id).waits.isEmpty)
     let resolved = try sbd.events(s.id, after: mark).filter { $0.kind == "wait-resolved" }
     #expect(resolved.count == 1)
-    #expect(resolved.first?.data["unsent"]?.string?.contains("is gone") == true, "\(resolved)")
+    #expect(resolved.first?.data["error"]?.string?.contains("is gone") == true, "\(resolved)")
     try sbd.tickThrice()
     #expect(try sbd.launchEvents(s.id, after: mark).isEmpty)
   }
