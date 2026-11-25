@@ -293,6 +293,7 @@ final class GitHubPoller {
     interest.keys.formUnion(dependencyKeys(sessions))
     interest.keys.formUnion(planKeys())
     targets = targets.filter { interest.keys.contains($0.key) }
+    var readRequested = false
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
       var waited = waitedOn(interest)
@@ -309,11 +310,17 @@ final class GitHubPoller {
         }
       }
       try readPRs(all: all, now: now, waited: waited, requested: requested, queued: queuedPRs(), stats: &stats)
+      readRequested = true
       try checkDeploys(
         deployTargets(interest) + edgeDeployTargets(sessions, now: now), all: all, now: now, stats: &stats)
     } catch {
       failure = "\(error)"
       logLine("github: \(error)")
+    }
+    // The next poll reads the requests that a failed lookup or read took. A timed request would schedule a wake
+    // that fails again at once while GitHub keeps failing.
+    if !readRequested {
+      for (id, trigger) in requested { readRequests.readAtNextPoll([id], trigger: trigger) }
     }
     let depotError = refreshDepot(all: all, now: now, stats: &stats)
     let issuesError = refreshIssues(all: all, now: now, stats: &stats)
