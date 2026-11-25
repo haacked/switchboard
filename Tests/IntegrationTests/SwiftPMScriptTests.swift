@@ -121,6 +121,12 @@ private final class ScriptRig {
     return result
   }
 
+  /// The calls that build or run tests. `bin/test --filter` also reads the package
+  /// with `swift package dump-package`, which compiles nothing.
+  func compilingCalls() -> [SwiftCall] {
+    swiftCalls().filter { $0.args.first != "package" && !$0.args.contains("--show-bin-path") }
+  }
+
   /// Starts a helper that holds the only slot until the test releases "H".
   func holdTheSlot() throws {
     try queue.startHolder("H")
@@ -329,8 +335,8 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     #expect(r.status == 0, "\(r.stderr)")
     #expect(!r.stderr.contains(SlotQueue.waitingPrefix), "\(r.stderr)")
     let calls = rig.swiftCalls()
-    #expect(calls.count == 1, "\(calls)")
-    #expect(calls.first?.tickets == 1, "\(calls)")
+    #expect(rig.compilingCalls().count == 1, "\(calls)")
+    #expect(!calls.isEmpty && calls.allSatisfy { $0.tickets == 1 }, "\(calls)")
     #expect(!rig.queue.logLines().contains("end H"))
   }
 
@@ -349,7 +355,9 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     #expect(rig.swiftCalls().isEmpty)
     rig.queue.release("H")
     #expect(try rig.queue.waitForExit(id).terminationStatus == 0, "\(rig.queue.stderr(id))")
-    #expect(rig.swiftCalls().count == 1)
+    let calls = rig.swiftCalls()
+    #expect(rig.compilingCalls().count == 1, "\(calls)")
+    #expect(!calls.isEmpty && calls.allSatisfy { $0.tickets == 1 }, "\(calls)")
   }
 
   /// With the queue off, the helper runs the script without setting
@@ -365,7 +373,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     let r = try rig.run(script, ["--filter", "X"], env: ["SB_BUILD_SLOTS": "0"], timeout: 30)
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(rig.swiftCalls().count == 1, "\(rig.swiftCalls())")
+    #expect(rig.compilingCalls().count == 1, "\(rig.swiftCalls())")
     #expect(!rig.queue.logLines().contains("end H"))
   }
 }
