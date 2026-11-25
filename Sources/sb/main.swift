@@ -547,6 +547,8 @@ let usage = """
     poll --stats                  show the GitHub requests and points since sbd
                                   started, by why each PR was read, without
                                   polling
+    sources [--json]              list the sources of PR changes that sbd reads
+                                  besides polling, with their state and counts
     snapshots [--write]           show how the last start built each session,
                                   from a snapshot or a full replay; --write
                                   first saves a snapshot of every session
@@ -1285,6 +1287,13 @@ case "issues":
   issues(a)
 case "ref":
   refCommand(a)
+case "sources":
+  let result = call("sources")
+  if a.json {
+    printJSON(result)
+  } else {
+    for line in decode(result, as: PRSources.self).lines(now: nowMs()) { print(line) }
+  }
 case "poll" where a.switches.contains("--stats"):
   let result = call("poll", ["stats": true])
   if a.json { printJSON(result) } else { printPollStats(result) }

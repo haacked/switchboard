@@ -353,6 +353,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// awaits a review.
   public var awaitsReview: Bool { ready && !reviewSatisfied }
 
+  /// Whether the PR polls at the pending rate. `needed` says whether an open wait or a queue needs the pending rate.
+  public func pollsAtPendingRate(needed: Bool) -> Bool { needed || isPending || awaitsReview }
+
   /// Whether the head commit's checks have not finished.
   public var checksRunning: Bool { ChecksRollup(checks) == .running }
 }
