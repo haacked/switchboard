@@ -25,6 +25,11 @@ enum SlashSelfTest {
     var field: NSTextField!
     var editor: NSTextView!
     func reveal() async -> Bool {
+      // The old field can stay in the window for a moment after the view hides it, and `waitForField` would return
+      // it. Keys typed into it never reach the draft.
+      if let old = field, model.revealedMessageField != session {
+        for _ in 0..<120 where old.window != nil { await pause() }
+      }
       guard let shown = await DraftSelfTest.waitForField(model, session, reveal: true) else { return false }
       shown.window?.makeFirstResponder(shown)
       await pause()
