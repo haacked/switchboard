@@ -456,7 +456,8 @@ public final class Service {
       afterTrack(id, Attention.evaluate(e.session, e.facts, now: nowMs(), stateOf: lastState))
     }
     try startMCPServers()
-    github = GitHubPoller(service: self, settings: config.github, depot: config.depot, trunk: config.trunk)
+    github = GitHubPoller(
+      service: self, settings: config.github, depot: config.depot, trunk: config.trunk, gitlab: config.gitlab)
     let reader = UsageReader(service: self, settings: config.usage)
     usageReader = reader
     quota = reader
@@ -1248,8 +1249,8 @@ public final class Service {
     try worktreeEntries(repo, at: site).first { try site.samePath($0.path, path) }
   }
 
-  /// The owner/name that the origin remote of `checkout` names on GitHub.
-  /// This returns nil until a lookup off the queue has read it.
+  /// The owner/name, or GitLab project path, that the origin remote of
+  /// `checkout` names. This returns nil until a lookup off the queue has read it.
   func repository(_ checkout: String, of s: Session) -> String? {
     let site = self.site(for: s)
     let key = SitePath(checkout, at: site)
@@ -1262,7 +1263,8 @@ public final class Service {
       DispatchQueue.global().async { [self] in
         let result = try? site.machine.run(site.git(), ["-C", checkout, "remote", "get-url", "origin"])
         let url = result?.status == 0 ? result?.stdout.trimmingCharacters(in: .whitespacesAndNewlines) : nil
-        let repository = url.flatMap(GitHub.repo(remoteURL:))
+        let hosts = config.gitlab.hostSet
+        let repository = url.flatMap { GitHub.repo(remoteURL: $0) ?? GitLab.project(remoteURL: $0, extraHosts: hosts) }
         // git exits 2 when the checkout has no origin remote, and 128 when it can't read the checkout.
         let failed = result.map { $0.status != 0 && $0.status != 2 } ?? true
         queue.async { [self] in

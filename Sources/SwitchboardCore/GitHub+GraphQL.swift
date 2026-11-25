@@ -380,6 +380,7 @@ extension GitHub {
   /// One query with an alias per key. Each key's values go in variables, so
   /// no branch name appears in the query text.
   public static func lookupQuery(_ keys: [PRKey]) -> (query: String, variables: JSON) {
+    let keys = keys.filter { !$0.isGitLab }
     var declarations: [String] = []
     var fields: [String] = []
     var variables: [String: JSON] = [:]
@@ -398,6 +399,8 @@ extension GitHub {
         declarations.append("$k\(i): Int!")
         variables["k\(i)"] = .number(Double(number))
         field = "pullRequest(number: $k\(i)) { id }"
+      case .gitlabBranch, .gitlabNumber:
+        continue
       }
       let (owner, name) = ownerAndName(repo)
       declarations += ["$o\(i): String!", "$n\(i): String!"]
@@ -417,6 +420,7 @@ extension GitHub {
   /// a merged or closed one, then the newest, and a PR from another owner's
   /// fork doesn't count.
   public static func parseLookup(_ response: JSON, _ keys: [PRKey]) -> [PRKey: String?] {
+    let keys = keys.filter { !$0.isGitLab }
     let errors = errorTypes(response)
     var found: [PRKey: String?] = [:]
     for (i, key) in keys.enumerated() {
@@ -430,6 +434,8 @@ extension GitHub {
         found[key] = .some((mine.first { $0["state"]?.string == PRState.open.rawValue } ?? mine.first)?["id"]?.string)
       case .number:
         found[key] = .some(repository?["pullRequest"]?["id"]?.string)
+      case .gitlabBranch, .gitlabNumber:
+        continue
       }
     }
     return found

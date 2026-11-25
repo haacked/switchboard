@@ -407,6 +407,10 @@ extension Service {
       return outcome(of: verdict, input: nil)
     }
     let pr = facts.pr!
+    if GitLab.isMR(pr.id) {
+      return .judgment(
+        question: "Merge !\(pr.number) from the session. sbd doesn't merge a GitLab merge request from a wait.")
+    }
     var input = MergeGuard.Input(
       mergeRepos: mergeRepos, verdict: read.verdict, facts: facts, live: livePR(pr), behindBy: nil, baseTip: nil,
       baseRollup: nil, files: nil, earlierFiles: [], lastSbdMerge: read.lastSbdMerge, approval: read.approval)

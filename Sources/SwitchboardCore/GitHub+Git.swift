@@ -10,10 +10,11 @@ extension GitHub {
   /// GitHub's SSH host for port 443 counts as github.com.
   static let githubHosts: Set<String> = ["github.com", "ssh.github.com"]
 
-  /// owner/name for a GitHub remote URL in the https, ssh, or scp form, or
-  /// nil for any other host. As in git, an address with a slash before its
-  /// first colon is a local path, not the scp form.
-  public static func repo(remoteURL: String) -> String? {
+  /// The lowercased host and the path of a remote URL in the https, ssh, or
+  /// scp form, without a leading slash or a trailing `.git`. nil for a local
+  /// path. As in git, an address with a slash before its first colon is a
+  /// local path, not the scp form.
+  static func remoteParts(_ remoteURL: String) -> (host: String, path: String)? {
     let authority: Substring
     var path: Substring
     if let scheme = remoteURL.range(of: "://") {
@@ -29,10 +30,17 @@ extension GitHub {
     }
     var host = authority.split(separator: "@").last ?? ""
     if let port = host.firstIndex(of: ":") { host = host[..<port] }
-    guard githubHosts.contains(host.lowercased()) else { return nil }
     path = path.drop { $0 == "/" }
     if path.hasSuffix("/") { path = path.dropLast() }
     if path.hasSuffix(".git") { path = path.dropLast(4) }
+    guard !host.isEmpty, !path.isEmpty else { return nil }
+    return (host.lowercased(), String(path))
+  }
+
+  /// owner/name for a GitHub remote URL in the https, ssh, or scp form, or
+  /// nil for any other host.
+  public static func repo(remoteURL: String) -> String? {
+    guard let (host, path) = remoteParts(remoteURL), githubHosts.contains(host) else { return nil }
     let parts = path.split(separator: "/", omittingEmptySubsequences: false)
     guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
     return parts.joined(separator: "/")
@@ -164,11 +172,16 @@ extension GitHub {
 
   /// The key of the branch's PR, as `git pr` finds it: the PR from the
   /// branch's upstream name in gh's base repo, whose head repository belongs
-  /// to the owner of the branch's push remote. `config` holds the git config
-  /// values by key, and `remoteHead` gives a remote's default branch. nil
-  /// when the push remote isn't on GitHub, or when the branch is the push
-  /// remote's default branch.
-  public static func branchKey(branch: String, config: [String: String], remoteHead: (String) -> String?) -> PRKey? {
+  /// to the owner of the branch's push remote. A push remote on GitLab names
+  /// the merge request the same way, in the upstream project when the branch
+  /// is pushed to a fork. `config` holds the git config values by key, and
+  /// `remoteHead` gives a remote's default branch. `gitlabHosts` adds hosts
+  /// that count as GitLab besides gitlab.com and a host whose name contains
+  /// "gitlab". nil when the push remote is on neither, or when the branch is
+  /// the push remote's default branch.
+  public static func branchKey(
+    branch: String, config: [String: String], gitlabHosts: Set<String> = [], remoteHead: (String) -> String?
+  ) -> PRKey? {
     let b = "branch.\(branch)"
     var push = config["\(b).pushremote"] ?? config["remote.pushdefault"] ?? config["\(b).remote"] ?? "origin"
     var upstream = upstreamName(of: branch, config: config) ?? branch
@@ -177,9 +190,7 @@ extension GitHub {
       push = "origin"
       upstream = branch
     }
-    guard let head = config["remote.\(push).url"].flatMap(repo(remoteURL:)), remoteHead(push) != upstream else {
-      return nil
-    }
+    guard let pushURL = config["remote.\(push).url"], remoteHead(push) != upstream else { return nil }
     // gh asks the remote that `gh repo set-default` marked, then upstream,
     // then origin. A branch pushed to a fork has its PR in that repo.
     let remotes = config.keys.compactMap { key -> String? in
@@ -189,7 +200,15 @@ extension GitHub {
     let base =
       remotes.first { config["remote.\($0).gh-resolved"] == "base" }
       ?? ["upstream", "origin"].first(where: remotes.contains)
-    let baseRepo = base.flatMap { config["remote.\($0).url"] }.flatMap(repo(remoteURL:)) ?? head
+    let baseURL = base.flatMap { config["remote.\($0).url"] }
+    if let pushRemote = GitLab.remote(remoteURL: pushURL, extraHosts: gitlabHosts) {
+      let baseRemote = baseURL.flatMap { GitLab.remote(remoteURL: $0, extraHosts: gitlabHosts) }
+      return .gitlabBranch(
+        host: baseRemote?.host ?? pushRemote.host, project: baseRemote?.project ?? pushRemote.project,
+        branch: upstream, source: pushRemote.project)
+    }
+    guard let head = repo(remoteURL: pushURL) else { return nil }
+    let baseRepo = baseURL.flatMap(repo(remoteURL:)) ?? head
     return .branch(repo: baseRepo, branch: upstream, owner: String(head.split(separator: "/")[0]))
   }
 }

@@ -10,8 +10,8 @@ import Testing
   }
 
   /// The sessions in the order of `ids`, once each session in a git folder
-  /// has its checkout, and each session in a checkout with a GitHub origin has
-  /// its repository. sbd reads both off its state queue, after the first
+  /// has its checkout, and each session in a checkout with a GitHub or GitLab
+  /// origin has its repository. sbd reads both off its state queue, after the first
   /// summary of the session.
   private func listed(_ sbd: Instance, _ ids: [String], inGit: Set<String>, withOrigin: Set<String> = [])
     throws -> [SessionSummary]
@@ -93,10 +93,10 @@ import Testing
   }
 
   @Test(arguments: [
-    ("no origin", nil as String?),
-    ("a GitLab origin", "https://gitlab.com/acme/beta.git"),
+    ("no origin", nil as String?, nil as String?),
+    ("a GitLab origin", "https://gitlab.com/acme/beta.git", "acme/beta"),
   ])
-  func givesNoRepositoryToACheckoutWithoutAGitHubOrigin(_ name: String, _ origin: String?) throws {
+  func givesTheRepositoryOfAGitHubOrGitLabOrigin(_ name: String, _ origin: String?, _ repository: String?) throws {
     let sbd = try Instance()
     let beta = try sbd.makeRepo("beta", origin: origin)
     let external = try new(sbd, try sbd.addWorktree(beta, "feat-b"), "external")
@@ -104,11 +104,12 @@ import Testing
     // A checkout with a GitHub origin, read after the one under test.
     let control = try new(
       sbd, try sbd.makeRepo("gamma", origin: "https://github.com/acme/gamma.git"), "control")
+    let withOrigin = Set([control.id] + (repository == nil ? [] : [external.id, main.id]))
 
     let sessions = try listed(
-      sbd, [external.id, main.id, control.id], inGit: [external.id, main.id, control.id], withOrigin: [control.id])
+      sbd, [external.id, main.id, control.id], inGit: [external.id, main.id, control.id], withOrigin: withOrigin)
 
-    #expect(sessions.map(\.repository) == [nil, nil, "acme/gamma"])
+    #expect(sessions.map(\.repository) == [repository, repository, "acme/gamma"])
   }
 
   @Test func keepsTheRepositoryOfAnSbdWorktreeWhoseFolderIsGone() throws {

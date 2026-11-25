@@ -70,10 +70,10 @@ extension KeyFilter {
   }
 }
 
-/// The GitHub orgs whose sessions the app shows. It only decides what the
-/// app shows. sbd runs every session whatever the filter says.
+/// The GitHub orgs and GitLab groups whose sessions the app shows. It only
+/// decides what the app shows. sbd runs every session whatever the filter says.
 public struct OrgFilter: KeyFilter {
-  /// The key of sessions with no GitHub remote. GitHub logins can't contain
+  /// The key of sessions with no GitHub or GitLab remote. GitHub logins can't contain
   /// parentheses, so it never matches an org.
   public static let localKey = "(local)"
   public static let localTitle = "Local"

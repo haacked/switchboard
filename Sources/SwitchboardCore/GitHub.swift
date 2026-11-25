@@ -45,11 +45,35 @@ public enum PRKey: Hashable, Sendable {
   /// belongs to `owner`, the owner of the branch's push remote.
   case branch(repo: String, branch: String, owner: String)
   case number(repo: String, number: Int)
+  /// A GitLab merge request from `branch` in `project` (`group/name`, or
+  /// `group/sub/name`) on `host`. `source` is the project the branch is
+  /// pushed to. A fork's merge request is looked up in `project` and kept
+  /// only when it comes from `source`.
+  case gitlabBranch(host: String, project: String, branch: String, source: String)
+  case gitlabNumber(host: String, project: String, number: Int)
 
-  /// The repo (owner/name) that the lookup reads.
+  /// The repo (owner/name, or a GitLab project path) that the lookup reads.
   public var repo: String {
     switch self {
     case .branch(let repo, _, _), .number(let repo, _): repo
+    case .gitlabBranch(_, let project, _, _), .gitlabNumber(_, let project, _): project
+    }
+  }
+
+  /// Whether the lookup reads GitLab rather than GitHub.
+  public var isGitLab: Bool {
+    switch self {
+    case .gitlabBranch, .gitlabNumber: true
+    case .branch, .number: false
+    }
+  }
+
+  /// The repository and branch a branch lookup names.
+  public var branchIdentity: (repo: String, branch: String)? {
+    switch self {
+    case .branch(let repo, let branch, _): (repo, branch)
+    case .gitlabBranch(_, let project, let branch, _): (project, branch)
+    case .number, .gitlabNumber: nil
     }
   }
 }

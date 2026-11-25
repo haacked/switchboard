@@ -59,12 +59,12 @@ import Testing
 
     #expect(
       repository == [
-        "posthog": "PostHog/posthog", "fork": "haacked/fork", "gitlab": nil, "plain": nil, "upstream-only": nil,
+        "posthog": "PostHog/posthog", "fork": "haacked/fork", "gitlab": "acme/x", "plain": nil, "upstream-only": nil,
         "ssh-443": "PostHog/ssh",
       ])
     #expect(
       keys == [
-        "posthog": "posthog", "fork": "haacked", "gitlab": OrgFilter.localKey, "plain": OrgFilter.localKey,
+        "posthog": "posthog", "fork": "haacked", "gitlab": "acme", "plain": OrgFilter.localKey,
         "upstream-only": OrgFilter.localKey, "ssh-443": "posthog",
       ])
     #expect(posthog["repository"] == .string("PostHog/posthog"))
@@ -80,12 +80,12 @@ import Testing
     let cases: [([String], Set<String>)] = [
       (["--org", "POSTHOG"], ["posthog", "ssh-443"]),
       (["--org", "haacked"], ["fork"]),
-      (["--local"], ["gitlab", "plain", "upstream-only"]),
-      (["--org", "posthog", "--local"], ["posthog", "ssh-443", "gitlab", "plain", "upstream-only"]),
-      (["--org", "posthog,haacked", "--local"], Set(Self.names)),
+      (["--local"], ["plain", "upstream-only"]),
+      (["--org", "posthog", "--local"], ["posthog", "ssh-443", "plain", "upstream-only"]),
+      (["--org", "posthog,haacked", "--local"], Set(Self.names).subtracting(["gitlab"])),
       (["--org", "posthog", "--org", "haacked"], ["posthog", "ssh-443", "fork"]),
-      (["--org", OrgFilter.localKey, "--local"], ["gitlab", "plain", "upstream-only"]),
-      (["--org", "acme"], []),
+      (["--org", OrgFilter.localKey, "--local"], ["plain", "upstream-only"]),
+      (["--org", "acme"], ["gitlab"]),
     ]
 
     for (args, names) in cases {

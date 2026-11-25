@@ -23,7 +23,7 @@ struct SessionFilterMenu: View {
       }
       .foregroundStyle(on ? Color.accentColor : .primary)
     }
-    .help("Show sessions from some GitHub orgs or groups only (⇧⌘O)")
+    .help("Show sessions from some GitHub or GitLab groups, or session groups, only (⇧⌘O)")
     .accessibilityIdentifier("session-filter")
     .popover(isPresented: $model.showingFilter, arrowEdge: .bottom) {
       SessionFilterList(orgEntries: orgEntries, groupEntries: groupEntries)
@@ -41,9 +41,11 @@ private struct SessionFilterList: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 0) {
         FilterSection(
-          heading: "Orgs", filter: $model.orgFilter, entries: orgEntries, empty: "No sessions in a GitHub org yet."
+          heading: "Orgs", filter: $model.orgFilter, entries: orgEntries,
+          empty: "No sessions on GitHub or GitLab yet."
         ) { entry in
-          entry.key == OrgFilter.localKey ? "Sessions with no GitHub remote" : "Sessions in \(entry.title) repos"
+          entry.key == OrgFilter.localKey
+            ? "Sessions with no GitHub or GitLab remote" : "Sessions in \(entry.title) repos"
         }
         Divider().padding(.vertical, 4)
         FilterSection(heading: "Groups", filter: $model.groupFilter, entries: groupEntries, empty: "No groups yet.") {

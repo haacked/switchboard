@@ -51,7 +51,9 @@ extension GitHubPoller {
   /// next key. Returns the first failure.
   func readCodeOwners(all: Bool, now: Int64, stats: inout Stats) -> String? {
     var failure: String?
-    let open = Set(tracked.values.compactMap(\.prId)).sorted().compactMap { prs[$0]?.pr }.filter { $0.state == .open }
+    let open = Set(tracked.values.compactMap(\.prId)).sorted().compactMap { prs[$0]?.pr }.filter {
+      $0.state == .open && !GitLab.isMR($0.id)
+    }
     var seen: Set<CodeOwnerReads.ConfigKey> = []
     for key in open.map(configKey) where seen.insert(key).inserted {
       guard all || GitHub.elapsed(since: codeOwners.configs[key]?.read, settings.idleMs, now: now) else { continue }

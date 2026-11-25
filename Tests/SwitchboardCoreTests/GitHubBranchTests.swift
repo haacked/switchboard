@@ -64,9 +64,10 @@ import Testing
   }
 
   @Test(arguments: [
-    [:], ["remote.origin.url": "https://gitlab.com/a/b.git"], ["branch.haacked/x.remote": "gone"] as [String: String],
+    [:], ["remote.origin.url": "https://git.example.com/a/b.git"],
+    ["branch.haacked/x.remote": "gone"] as [String: String],
   ])
-  func pushRemoteOffGitHubHasNoPR(_ config: [String: String]) {
+  func pushRemoteOffGitHubAndGitLabHasNoPR(_ config: [String: String]) {
     #expect(Self.key(config) == nil)
   }
 

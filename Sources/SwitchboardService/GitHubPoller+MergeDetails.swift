@@ -16,7 +16,7 @@ extension GitHubPoller {
     var wantsThreadComments: [String: Bool] = [:]
     var decisions: Set<String> = []
     for s in sessions {
-      guard let id = tracked[s.id]?.prId, wantsThreadComments[id] == nil, let read = prs[id],
+      guard let id = tracked[s.id]?.prId, !GitLab.isMR(id), wantsThreadComments[id] == nil, let read = prs[id],
         let pr = shown(id, last: s.facts.pr)
       else { continue }
       let cached = mergeDetails[id].flatMap { $0.head == pr.headSha ? $0 : nil }

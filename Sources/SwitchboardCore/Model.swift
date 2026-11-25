@@ -257,9 +257,9 @@ public struct SessionSummary: Codable, Equatable, Sendable, Identifiable {
   /// resolved, or nil when `cwd` is in no git repo. Unlike `repo`, it does
   /// not mean that sbd made the worktree.
   public var checkout: String?
-  /// The owner/name that the `origin` remote of `checkout` names on GitHub,
-  /// or nil when that remote is missing or isn't on GitHub. An sbd that
-  /// predates it sends nil.
+  /// The owner/name, or GitLab project path, that the `origin` remote of
+  /// `checkout` names, or nil when that remote is missing or is on neither
+  /// GitHub nor GitLab. An sbd that predates it sends nil.
   public var repository: String?
   /// True once sbd has read `checkout` and its origin remote. While it is
   /// nil, a nil `repository` means sbd hasn't looked yet, not that the

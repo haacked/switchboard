@@ -10,6 +10,7 @@ import os
 final class GitHubPoller {
   unowned let service: Service
   let settings: GitHubSettings
+  let gitlab: GitLabSettings
   let depot: DepotPoller?
   let trunk: TrunkPoller
   let queue = DispatchQueue(label: "sbd.github")
@@ -27,6 +28,23 @@ final class GitHubPoller {
     var restPausedUntil: Int64 = 0
   }
   private let http = OSAllocatedUnfairLock(initialState: HTTPState())
+  /// The GitLab token for each host, and whether that host accepted it as a
+  /// personal access token rather than a bearer token. A request can run off
+  /// `queue`, so the state sits behind a lock.
+  struct GitLabHTTPState {
+    var credentials: [String: GitLabCredential] = [:]
+    var pausedUntil: Int64 = 0
+    var missingCLI = false
+  }
+  struct GitLabCredential {
+    var token: String
+    /// True when GitLab rejected `Authorization: Bearer` and accepted `PRIVATE-TOKEN`.
+    var privateToken: Bool
+  }
+  /// Visible to `GitHubPoller+GitLab.swift`. `private` would hide it from that file.
+  let gitlabHTTP = OSAllocatedUnfairLock(initialState: GitLabHTTPState())
+  /// GitLab project ids by `host` and lowercased project path. Lookups run on `queue`.
+  var gitlabProjectIDs: [String: Int] = [:]
   /// The requests and points since sbd started. `send` and `request` can run off `queue`, so the counts sit
   /// behind a lock.
   private let usage = OSAllocatedUnfairLock(initialState: GitHubUsage(since: nowMs()))
@@ -218,9 +236,13 @@ final class GitHubPoller {
     var issueReads = 0
   }
 
-  init(service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings) {
+  init(
+    service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings,
+    gitlab: GitLabSettings = GitLabSettings()
+  ) {
     self.service = service
     self.settings = settings
+    self.gitlab = gitlab
     self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
     self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
   }
@@ -465,7 +487,7 @@ final class GitHubPoller {
         }
       }
       let config = configs[repo] ?? [:]
-      key = GitHub.branchKey(branch: branch, config: config) { remote in
+      key = GitHub.branchKey(branch: branch, config: config, gitlabHosts: gitlab.hostSet) { remote in
         // A remote's HEAD is a symbolic ref, which git never packs.
         read("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
           GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
@@ -567,7 +589,9 @@ final class GitHubPoller {
     }
     guard !keys.isEmpty else { return }
     var found: [PRKey: String?] = [:]
-    for chunk in GitHub.chunks(Array(keys), size: GitHub.lightChunkSize) {
+    let gitlabKeys = keys.filter(\.isGitLab)
+    if !gitlabKeys.isEmpty { found.merge(lookUpGitLab(Array(gitlabKeys))) { $1 } }
+    for chunk in GitHub.chunks(Array(keys.filter { !$0.isGitLab }), size: GitHub.lightChunkSize) {
       let (query, variables) = GitHub.lookupQuery(chunk)
       found.merge(GitHub.parseLookup(try request(query, variables, stats: &stats), chunk)) { $1 }
     }
@@ -605,6 +629,7 @@ final class GitHubPoller {
     }
     let triggers = GitHub.dueReads(candidates, all: all, now: now, policy: settings.pollPolicy)
     let ids = triggers.keys.sorted()
+    let gitlabIDs = ids.filter(GitLab.isMR)
     // A request's cost goes to its PRs after the request returns, because a PR's repo is known only after its first read.
     func count(_ prIds: [String], from before: Stats, to after: Stats, countsReads: Bool) {
       let served = prIds.map { id in
@@ -618,7 +643,7 @@ final class GitHubPoller {
     }
     var stacked: [String] = []
     var gone: Set<String> = []
-    for chunk in GitHub.chunks(ids) {
+    for chunk in GitHub.chunks(ids.filter { !GitLab.isMR($0) }) {
       let before = stats
       var parsed = false
       // A request that throws still cost what `send` counted, so the split keeps it.
@@ -634,6 +659,7 @@ final class GitHubPoller {
       stats.polled += read.count
       parsed = true
     }
+    gone.formUnion(readGitLab(gitlabIDs, now: now))
     for (id, var t) in tracked {
       if let prId = t.branch.prId, gone.contains(prId) {
         t.branch.prId = nil
@@ -649,7 +675,7 @@ final class GitHubPoller {
       // in this repo or another, because a session can open its PR from
       // another worktree.
       t.hidden = []
-      if t.branch.prId == nil, t.branch.lookedUp != nil, case .branch(let repo, let branch, _)? = t.branch.key {
+      if t.branch.prId == nil, t.branch.lookedUp != nil, let (repo, branch) = t.branch.key?.branchIdentity {
         for id in [t.transcript.prId, t.recordedPRId].compactMap({ $0 }) {
           guard let pr = prs[id]?.pr else { continue }
           switch GitHub.earlierStanding(
@@ -700,7 +726,8 @@ final class GitHubPoller {
   private func refreshDepot(all: Bool, now: Int64, stats: inout Stats) -> String? {
     guard let depot else { return nil }
     let result = depot.refresh(
-      prs.values.map(\.pr), all: all, now: now, pendingMs: settings.pendingMs, idleMs: settings.idleMs)
+      prs.values.map(\.pr).filter { !GitLab.isMR($0.id) }, all: all, now: now, pendingMs: settings.pendingMs,
+      idleMs: settings.idleMs)
     for (id, read) in result.reads { prs[id]?.pr.depot = read.run }
     stats.depotRequests = result.requests
     stats.depotRuns = result.reads.values.count { $0.run != nil }

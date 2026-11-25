@@ -153,9 +153,11 @@ extension Followup {
 }
 
 extension Wait.PullRequest {
-  /// GitHub compares repository names without case.
+  /// GitHub compares repository names without case. A GitLab merge request
+  /// also names its host, so the same project on another host is a different request.
   public func same(as other: Wait.PullRequest) -> Bool {
     number == other.number && repository?.lowercased() == other.repository?.lowercased()
+      && host?.lowercased() == other.host?.lowercased()
   }
 }
 

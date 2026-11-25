@@ -30,6 +30,15 @@ extension GitHubPoller {
   /// The key of the PR, or nil when `mayRead` refuses its repo for the session's host. A PR without a repo takes
   /// the session's repo, which the box can change at any time. The check therefore runs at each poll.
   private func key(of pr: Wait.PullRequest, session: Session?) -> PRKey? {
+    if let host = pr.host {
+      guard let repo = pr.repository, mayRead(repo, for: session?.host) else { return nil }
+      return .gitlabNumber(host: host, project: repo, number: pr.number)
+    }
+    if pr.repository == nil, let own = session.flatMap({ tracked[$0.id]?.branch.key }),
+      case .gitlabBranch(let host, let project, _, _) = own, mayRead(project, for: session?.host)
+    {
+      return .gitlabNumber(host: host, project: project, number: pr.number)
+    }
     guard let repo = pr.repository ?? session.flatMap({ ownRepository($0.id) }), mayRead(repo, for: session?.host)
     else { return nil }
     return .number(repo: repo, number: pr.number)
@@ -141,6 +150,7 @@ extension GitHubPoller {
     let ids = Set(
       settled.filter {
         $0.mayResolveOnOneRead(window: settings.pendingMs) && confirming[$0.wait.id]?.sha != $0.pr.headSha
+          && !GitLab.isMR($0.prId)
       }.map(\.prId))
     var reads: [String: ActionsRead] = [:]
     for chunk in GitHub.chunks(ids.sorted()) {

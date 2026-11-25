@@ -177,6 +177,7 @@ public struct Config: Codable, Equatable, Sendable {
   /// ~/.codex and ~/.codex-* folder. An entry need not be named like ~/.codex-*.
   public var codexHomes: [String]?
   public var github = GitHubSettings()
+  public var gitlab = GitLabSettings()
   public var depot = DepotSettings()
   public var trunk = TrunkSettings()
   /// How many new events a session collects before sbd saves a snapshot of its
@@ -205,7 +206,7 @@ public struct Config: Codable, Equatable, Sendable {
     case testClock, machineLog, hostWaitSeconds, pasteSettleSeconds, stopWaitSeconds, reviewTimeoutSeconds, mcpServers,
       ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
       cleanupDeletes, supacode, removalDelaySeconds, conversationHintTokens
-    case claudeConfigDirs, codexHomes, github, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket,
+    case claudeConfigDirs, codexHomes, github, gitlab, depot, trunk, snapshotEvery, triage, autoContinue, usage, docket,
       planUpdates,
       quickAsk, managerSkills, sessionNames
     case manager
@@ -309,6 +310,7 @@ public struct Config: Codable, Equatable, Sendable {
     claudeConfigDirs = try c.decodeIfPresent([String].self, forKey: .claudeConfigDirs)
     codexHomes = try c.decodeIfPresent([String].self, forKey: .codexHomes)
     github = try c.decodeIfPresent(GitHubSettings.self, forKey: .github) ?? d.github
+    gitlab = try c.decodeIfPresent(GitLabSettings.self, forKey: .gitlab) ?? d.gitlab
     depot = try c.decodeIfPresent(DepotSettings.self, forKey: .depot) ?? d.depot
     trunk = try c.decodeIfPresent(TrunkSettings.self, forKey: .trunk) ?? d.trunk
     snapshotEvery = try c.decodeIfPresent(Int.self, forKey: .snapshotEvery) ?? d.snapshotEvery

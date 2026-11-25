@@ -21,6 +21,7 @@ The app's Settings window (Switchboard ▸ Settings…, or ⌘,) changes the mos
   "branchPrefix": "haacked/",
   "followupsFile": "~/dev/haacked/notes/PostHog/Followups.md",
   "github": {"pollSeconds": 30, "idlePollSeconds": 300, "deployPollSeconds": 120},
+  "gitlab": {"hosts": ["git.example.com"]},
   "depot": {"enabled": true},
   "trunk": {"path": "trunk", "timeoutSeconds": 30},
   "docket": {"path": "docket", "pollSeconds": 30, "timeoutSeconds": 120, "startTimeoutSeconds": 240},
@@ -29,6 +30,8 @@ The app's Settings window (Switchboard ▸ Settings…, or ⌘,) changes the mos
   "conversationHintTokens": 120000
 }
 ```
+
+`gitlab.hosts` lists GitLab hosts besides gitlab.com and any host whose name contains `gitlab`, such as `git.example.com`. `gitlab.glab` (default `glab`) is the CLI whose `glab auth login` stores the token sbd reads. A merge request polls on the same intervals as a GitHub pull request.
 
 `model` (default `opus`) is the model that each new work session starts on: one from `sb new`, the app's New Session sheet, `sb spawn`, the `spawn` MCP tool, an issue, a follow-up, or the work queue. `manager.model` (default `sonnet`) is the model of Manager conversations and group chats, and `operator.model` (default `sonnet`) is the operator's. sbd passes the model to claude with `--model`, so the account's own `model` setting, which `/model` in any session changes, doesn't pick it, and a session never takes its parent's model. A `--model` on `sb new` or `sb spawn`, or `model` on the `spawn` tool, wins. A work session stores its model when it is created and resumes on it. A Manager conversation and a group chat read `manager.model` each time their claude starts, so `sb manager model <name>` moves them at their next start. The operator reads `operator.model` the same way. A work session created before work sessions stored their model resumes without `--model`, on the model it ran. `"default"` gives the account's own model. sbd logs a value that is empty, contains a space, or starts with a dash, and keeps the default.
 

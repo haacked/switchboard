@@ -72,7 +72,14 @@ extension Service {
   /// done gets neither. A failed command throws its error after the record. The caller must not hold the state
   /// queue, because the gh command runs outside it.
   func landPR(_ id: String, pr: PullRequest, method: MergeMethod) throws -> MergeAttempt {
-    let error = method == .trunk ? runTrunkEnqueue(pr) : runMerge(pr)
+    let error: String?
+    if GitLab.isMR(pr.id) {
+      error = runGitLabMerge(pr)
+    } else if method == .trunk {
+      error = runTrunkEnqueue(pr)
+    } else {
+      error = runMerge(pr)
+    }
     return try queue.sync {
       let landed: MergeAttempt.Result = method.enqueues ? .enqueued : .merged
       let attempt = MergeAttempt(head: pr.headSha, result: error == nil ? landed : .failed, error: error)
@@ -118,6 +125,19 @@ extension Service {
           + matches.map(\.mention).joined(separator: ", "))
     }
     return matches[0].id
+  }
+
+  /// Merges the merge request through GitLab's API and returns the error, or
+  /// nil when GitLab merged it. The request names the head commit, so a push
+  /// that landed after the session became Ready to merge is refused.
+  private func runGitLabMerge(_ pr: PullRequest) -> String? {
+    guard let github else { return "GitLab isn't configured" }
+    do {
+      try github.mergeGitLab(pr)
+      return nil
+    } catch {
+      return "\(error)"
+    }
   }
 
   /// Runs `gh pr merge` and returns its error, or nil when it merged or

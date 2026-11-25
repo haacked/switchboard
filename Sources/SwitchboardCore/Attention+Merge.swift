@@ -71,6 +71,7 @@ extension SessionFacts {
   /// repository has no `.trunk` folder and its base branch no merge queue,
   /// because a merge that goes around a queue can't be undone.
   public var mergeMethod: MergeMethod {
+    if pr.map({ GitLab.isMR($0.id) }) == true { return .merge }
     if usesTrunk { return .trunk }
     if pr?.mergeQueue == true { return .mergeQueue }
     if pr?.trunkConfig == false && pr?.mergeQueue == false { return .merge }

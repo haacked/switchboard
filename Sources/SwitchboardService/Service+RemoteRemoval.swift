@@ -293,12 +293,14 @@ extension Service {
     // `--get-regexp` exits 1 when no key matches.
     let listed = try site.machine.run(site.git(), ["-C", dir, "config", "--get-regexp", GitHubPoller.branchKeyConfig])
     guard listed.status == 0 || listed.status == 1 else { return nil }
-    let key = GitHub.branchKey(branch: branch, config: GitHub.gitConfig(listed.stdout)) { remote in
+    let key = GitHub.branchKey(
+      branch: branch, config: GitHub.gitConfig(listed.stdout), gitlabHosts: config.gitlab.hostSet
+    ) { remote in
       site.machine.text("\(common)/refs/remotes/\(remote)/HEAD").flatMap {
         GitHub.branch(head: $0, under: "refs/remotes/\(remote)/")
       }
     }
-    guard case .branch(let repo, let head, _) = key, repo.lowercased() == pr.repo.lowercased(), head == pr.head
+    guard let identity = key?.branchIdentity, Dependencies.sameRepo(identity.repo, pr.repo), identity.branch == pr.head
     else { return nil }
     return pr
   }

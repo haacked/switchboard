@@ -64,7 +64,7 @@ On a Mac with macOS 14 or later, Xcode 26 or later, `tmux`, `gh` signed in, and 
 curl -fsSL https://raw.githubusercontent.com/haacked/switchboard/main/bin/bootstrap | bash
 ```
 
-This clones the repo to `~/dev/haacked/switchboard`, builds the app into `~/Applications`, links `sb` into `~/.local/bin`, starts the `sbd` service, and opens the app. From a checkout, `bin/install` and `bin/start` do the same, and `bin/update` updates to the latest `main`. See [Install](docs/install.md).
+This clones the repo to `~/dev/haacked/switchboard`, builds the app into `~/Applications`, links `sb` into `~/.local/bin`, starts the `sbd` service, and opens the app. From a checkout, `bin/install` and `bin/start` do the same, and `bin/update` updates to the latest `main`. See [Install](docs/install.md). Sign in with `glab` as well to follow GitLab merge requests.
 
 In the app, press ⌘N, pick a repository, turn on Create a worktree, and give the session its first prompt. Or start one from a terminal:
 

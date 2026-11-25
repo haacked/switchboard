@@ -91,17 +91,25 @@ public struct Wait: Codable, Equatable, Sendable {
     /// `owner/name`, or nil for the session's own repository.
     public var repository: String?
     public var number: Int
+    /// The GitLab host, when this names a merge request. nil for a GitHub pull request.
+    public var host: String?
 
-    public init(repository: String? = nil, number: Int) {
+    public init(repository: String? = nil, number: Int, host: String? = nil) {
       self.repository = repository
       self.number = number
+      self.host = host
     }
 
-    /// Reads `1204`, `#1204`, or what `GitHubRef(parsing:)` reads, except an
-    /// issue URL. A leading `pr:`, as in `pr:1204`, is dropped.
+    /// Reads `1204`, `#1204`, a GitLab merge request URL, or what
+    /// `GitHubRef(parsing:)` reads, except an issue URL. A leading `pr:`, as
+    /// in `pr:1204`, is dropped.
     public init?(parsing text: String) {
       var text = text.trimmingCharacters(in: .whitespaces)
       if text.hasPrefix("pr:") { text.removeFirst(3) }
+      if let mr = GitLab.ref(text) {
+        self.init(repository: mr.project, number: mr.number, host: mr.host)
+        return
+      }
       if let ref = GitHubRef(trimmed: text) {
         // A PR URL counts only with its scheme in lowercase.
         let pullURL = ref.form == .pullURL && (text.hasPrefix("https:") || text.hasPrefix("http:"))
