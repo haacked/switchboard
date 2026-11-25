@@ -67,6 +67,36 @@ import Testing
     #expect(try sbd.launchEvents(s.id, after: mark).isEmpty)
   }
 
+  /// A folder above the session's folder denies search, so sbd can't tell whether the folder is gone. The wait stays
+  /// open and resumes the session once the folder can be read again.
+  @Test func aDueResumeWaitOnASessionWhoseFolderCantBeReadStaysOpenAndResumesItLater() throws {
+    let sbd = try Instance()
+    let locked = "\(sbd.home.path)/locked"
+    let folder = "\(locked)/inner"
+    try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked) }
+    let s = try sbd.client.call(
+      "new", ["path": .string(folder), "name": "inner", "prompt": "hello"], as: SessionSummary.self)
+    try sbd.waitFor(s.id, "the first reply") { $0.lastReply == "Done: hello" }
+    try sbd.sb("wait", s.id, "--kind", "date", "--until", "1h")
+    try stop(sbd, s)
+    let wait = try #require(try sbd.get(s.id).waits.first)
+    try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked)
+    let mark = try sbd.lastEventId(s.id)
+
+    try sbd.advanceClock(2 * WaitFolderGoneTests.hourMs)
+    try sbd.tickThrice()
+
+    #expect(try sbd.get(s.id).waits.map(\.id) == [wait.id])
+    #expect(try sbd.events(s.id, after: mark).filter { $0.kind == "wait-resolved" }.isEmpty)
+
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked)
+    try sbd.advanceClock(1)
+
+    let resumed = try sbd.waitFor(s.id, "the resumed turn") { $0.lastReply?.hasPrefix("Done: Switchboard:") == true }
+    #expect(resumed.waits.isEmpty)
+  }
+
   /// The removal job's hold ends with Undo, so the wait stays open and the tick after the Undo resumes the session.
   @Test func aDueResumeWaitOnASessionTheRemovalJobHoldsStaysOpenAndResumesItAfterUndo() throws {
     let sbd = try longUndoInstance()

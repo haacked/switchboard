@@ -129,11 +129,16 @@ extension Service {
   /// Throws for a follow-up that hasn't started, and for a session whose
   /// folder is gone. tmux starts a pane whose folder is missing in the home
   /// folder. For a session on a host, it throws `HostUnread` unless the host answered the check, so a folder
-  /// is reported gone only when the host said so.
+  /// is reported gone only when the host said so. It throws `FolderGone` only when the site confirms that the
+  /// folder does not exist. A folder that the site can't read throws an error that a later retry can pass.
   func requireFolder(_ session: Session) throws {
     try refuseNotStarted(session)
-    let exists = try site(for: session).confirmed("the folder of \(session.id)") { $0.exists(session.cwd) }
+    let site = site(for: session)
+    let exists = try site.confirmed("the folder of \(session.id)") { $0.exists(session.cwd) }
     guard !exists else { return }
+    guard try site.folderGone(session.cwd) else {
+      throw APIError("\(session.cwd) can't be read, so \(session.mention) can't start there.")
+    }
     if entries[session.id]?.facts.cleanedUp != nil {
       throw FolderGone(description: "\(session.mention) was cleaned up, and its worktree is gone.")
     }
