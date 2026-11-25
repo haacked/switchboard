@@ -53,7 +53,8 @@ jobs:
           # job.
           # The event's payload can call the PR a draft after it was marked ready,
           # when GitHub handles a push after the ready_for_review event. That run
-          # then tests the head, so the PR's state comes from the API.
+          # then tests the head, so the PR's state comes from the API. A failed
+          # lookup counts as ready, so it runs the jobs.
           if [ -n "$PR" ] && [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = true ]; then
             mode=draft files='' count=0
           elif [ -n "$PR" ]; then
