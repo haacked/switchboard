@@ -23,7 +23,7 @@ struct SessionHeader: View {
         // The toolbar has no room for Notes at 1024 pt.
         NotesButton(session: session, always: true).fixedSize()
         // These controls truncate or drop to an icon before they push the row past the header's width.
-        SessionAccountControl(session: session)
+        SessionAccountControl(session: session).lineLimit(1)
         if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
         if session.kind == .manager { ManagerHeaderControls(session: session) }
       }
