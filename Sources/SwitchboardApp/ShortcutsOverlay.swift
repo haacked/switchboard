@@ -140,7 +140,7 @@ struct ShortcutsOverlay: View {
   private func section(_ area: ShortcutArea) -> some View {
     VStack(alignment: .leading, spacing: 6) {
       Text(area.title).font(.headline).accessibilityAddTraits(.isHeader)
-      ForEach(AppShortcut.allCases.filter { $0.area == area }) { entry in
+      ForEach(AppShortcut.available.filter { $0.area == area }) { entry in
         HStack(alignment: .firstTextBaseline) {
           Text(entry.title)
           Spacer(minLength: 12)

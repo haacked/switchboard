@@ -235,7 +235,7 @@ enum ShellSelfTest {
   ]
 
   private static func menuShortcutMismatches() -> [String] {
-    let entries = AppShortcut.allCases.filter { $0.kind == .menu || $0.kind == .menuAlternate }
+    let entries = AppShortcut.available.filter { $0.kind == .menu || $0.kind == .menuAlternate }
     var found: [String] = []
     var carried: Set<AppShortcut> = []
     let menus = (NSApp.mainMenu?.items ?? []).compactMap { $0.submenu.map { refreshedMenu($0.title) ?? $0 } }

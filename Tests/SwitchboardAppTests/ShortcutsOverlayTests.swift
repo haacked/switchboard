@@ -453,3 +453,19 @@ private final class TypingView: NSView, NSTextInputClient {
     #expect(!model.presentingSheet)
   }
 }
+
+// MARK: - Availability
+
+@Suite struct ShortcutAvailabilityTests {
+  /// `operatorTranscriptAlternate` adds the ⌥ item only on macOS 15 and later.
+  @Test func theOperatorTranscriptKeyExistsOnlyFromMacOS15() {
+    #expect(!AppShortcut.openOperatorTranscript.isAvailable(macOSMajor: 14))
+    #expect(AppShortcut.openOperatorTranscript.isAvailable(macOSMajor: 15))
+  }
+
+  @Test func everyOtherEntryExistsOnMacOS14() {
+    let missing = AppShortcut.allCases.filter { $0 != .openOperatorTranscript && !$0.isAvailable(macOSMajor: 14) }
+
+    #expect(missing.isEmpty, "\(missing)")
+  }
+}

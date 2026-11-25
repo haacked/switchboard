@@ -270,6 +270,16 @@ enum AppShortcut: CaseIterable, Identifiable {
     }
   }
 
+  /// Whether the app binds the entry on a Mac whose macOS major version is `macOSMajor`. macOS 14 has no
+  /// alternate menu items, so Open Operator Transcript has no key there.
+  func isAvailable(macOSMajor: Int) -> Bool { self != .openOperatorTranscript || macOSMajor >= 15 }
+
+  /// The entries that the app binds on this Mac, in list order.
+  static var available: [AppShortcut] {
+    let major = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+    return allCases.filter { $0.isAvailable(macOSMajor: major) }
+  }
+
   /// The key that a `.menu` or `.view` entry binds.
   var binding: KeyboardShortcut {
     precondition(kind == .menu || kind == .view, "\(self) is not bound by a menu item or a view")
