@@ -9,6 +9,9 @@ private struct SwiftCall: Equatable, CustomStringConvertible {
   var tickets: Int
 
   var description: String { "swift \(args) with \(tickets) tickets" }
+
+  /// The swift subcommands of `calls`, such as `package` or `test`.
+  static func subcommands(_ calls: [SwiftCall]) -> [String?] { calls.map { $0.args.first } }
 }
 
 /// A SlotQueue with a fake swift and a fake sysctl at the front of PATH. The
@@ -121,16 +124,18 @@ private final class ScriptRig {
     return result
   }
 
-  /// The calls that build or run tests. `bin/test --filter` also reads the package
-  /// with `swift package dump-package`, which compiles nothing.
-  func compilingCalls() -> [SwiftCall] {
-    swiftCalls().filter { $0.args.first != "package" && !$0.args.contains("--show-bin-path") }
-  }
-
   /// Starts a helper that holds the only slot until the test releases "H".
   func holdTheSlot() throws {
     try queue.startHolder("H")
   }
+}
+
+/// Checks that `bin/test --filter X` read the package and then ran swift test once,
+/// and that each call saw one ticket. The fake swift prints no package, so bin/test
+/// runs plain `swift test`.
+private func expectFilteredRunInOneSlot(_ calls: [SwiftCall], sourceLocation: SourceLocation = #_sourceLocation) {
+  #expect(SwiftCall.subcommands(calls) == ["package", "test"], "\(calls)", sourceLocation: sourceLocation)
+  #expect(calls.allSatisfy { $0.tickets == 1 }, "\(calls)", sourceLocation: sourceLocation)
 }
 
 private struct JobsCase: Sendable, CustomTestStringConvertible {
@@ -334,9 +339,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
 
     #expect(r.status == 0, "\(r.stderr)")
     #expect(!r.stderr.contains(SlotQueue.waitingPrefix), "\(r.stderr)")
-    let calls = rig.swiftCalls()
-    #expect(rig.compilingCalls().count == 1, "\(calls)")
-    #expect(!calls.isEmpty && calls.allSatisfy { $0.tickets == 1 }, "\(calls)")
+    expectFilteredRunInOneSlot(rig.swiftCalls())
     #expect(!rig.queue.logLines().contains("end H"))
   }
 
@@ -355,9 +358,7 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     #expect(rig.swiftCalls().isEmpty)
     rig.queue.release("H")
     #expect(try rig.queue.waitForExit(id).terminationStatus == 0, "\(rig.queue.stderr(id))")
-    let calls = rig.swiftCalls()
-    #expect(rig.compilingCalls().count == 1, "\(calls)")
-    #expect(!calls.isEmpty && calls.allSatisfy { $0.tickets == 1 }, "\(calls)")
+    expectFilteredRunInOneSlot(rig.swiftCalls())
   }
 
   /// With the queue off, the helper runs the script without setting
@@ -373,7 +374,8 @@ private struct JobsCase: Sendable, CustomTestStringConvertible {
     let r = try rig.run(script, ["--filter", "X"], env: ["SB_BUILD_SLOTS": "0"], timeout: 30)
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(rig.compilingCalls().count == 1, "\(rig.swiftCalls())")
+    let expected: [String?] = script == "bin/test" ? ["package", "test"] : ["build"]
+    #expect(SwiftCall.subcommands(rig.swiftCalls()) == expected, "\(rig.swiftCalls())")
     #expect(!rig.queue.logLines().contains("end H"))
   }
 }
