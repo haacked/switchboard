@@ -23,7 +23,7 @@ public enum Prompt: String, CaseIterable, Sendable {
   var values: [String: String] {
     switch self {
     case .operatorRole:
-      return ["managerOperatorName": Manager.operatorName, "eventSubscriptionsGuidance": EventSubscriptions.guidance]
+      return ["managerOperatorName": Manager.operatorName]
     case .managerGuide:
       return [
         "childQuestionsGuidance": ChildQuestions.guidance, "sessionLinkGuidance": SessionLink.guidance,
