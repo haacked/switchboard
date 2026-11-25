@@ -28,7 +28,7 @@ struct SessionView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      header
+      SessionHeader(session: session)
       if session.kind == .manager { ManagerStatusStrip(session: session) }
       if session.kind.isConversation { SchedulesStrip(session: session) }
       // The Inbox lists every proposal above the item that nests this view.
@@ -65,14 +65,29 @@ struct SessionView: View {
       WorkSkillOfferBar(session: session)
       SessionMessageField(session: session.id, draft: model.messageDraft(for: session))
     }
+    // Every view that observes the model draws again on each assignment, even of the same value.
+    .onChange(of: session.id, initial: true) {
+      model.shownSessionOwner = ObjectIdentifier(ui)
+      if model.shownSession != session.id { model.shownSession = session.id }
+    }
     // A request that no view took would otherwise take focus the next time this session shows.
-    .onDisappear { [model, id = session.id] in
+    .onDisappear { [model, ui, id = session.id] in
       model.releaseTerminalFocus(id)
       model.forgetMessageField(id)
+      // The next view of this session can appear before this one goes, so only the view that set it clears it.
+      if model.shownSessionOwner == ObjectIdentifier(ui) {
+        model.shownSessionOwner = nil
+        model.shownSession = nil
+      }
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
       if session.hasTerminals { await connection.connect(session.id, live: session.live) }
+    }
+    .toolbar {
+      SessionToolbarItems(
+        model: model, session: session, sidePanelFits: ui.sidePanelFits, showsSidePanel: $showsSidePanel,
+        requestRemoval: requestRemoval)
     }
     .sheet(item: $ui.removal) { removeSheet($0) }
     .referenceRepo(session)
@@ -181,6 +196,18 @@ struct SessionView: View {
     }
   }
 
+  /// Loads the remove options, then opens the remove sheet.
+  private func requestRemoval() {
+    let todos = TodoDeletion(session)
+    Task {
+      let options = await RemoveOptions.load(session)
+      ui.removeOptions = options
+      ui.deleteWorktree = options.worktree
+      ui.deleteBranch = options.branch
+      ui.removal = todos
+    }
+  }
+
   /// A confirmation dialog can't hold toggles, so the options are in a sheet.
   private func removeSheet(_ todos: TodoDeletion) -> some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -236,112 +263,6 @@ struct SessionView: View {
       ui.deleteWorktree = false
       ui.deleteBranch = false
     }
-  }
-
-  private var header: some View {
-    HStack(alignment: .top) {
-      VStack(alignment: .leading, spacing: 4) {
-        HStack(spacing: 8) {
-          Text(session.name).font(.title3.bold())
-            .contextMenu { CopyLinkMenuItem(session: session) }
-          StateBadge(state: session.state)
-          Text(session.live ? "claude running" : "claude stopped")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-          if let mode = session.permissionMode {
-            Text("\(PermissionMode.title(mode)) mode")
-              .font(.caption)
-              .foregroundStyle(.secondary)
-          }
-        }
-        InlineText(plain: session.reason).foregroundStyle(.secondary).lineLimit(2).textSelection(.enabled)
-        if let pr = session.pr, let url = pr.link {
-          HStack(spacing: 4) {
-            Link(pr.line, destination: url).font(.caption).help("\(pr.repo): \(pr.title)")
-            if let owners = pr.codeOwners { CodeOwnerShield(status: owners) }
-            if let count = pr.commitCount {
-              Text("\(count) \(count == 1 ? "commit" : "commits")").font(.caption).foregroundStyle(.secondary)
-            }
-          }
-        }
-        IssueBadge(session: session)
-        CleanupNote(session: session)
-        BranchSwitchNote(session: session)
-        // The title row wraps the session's name at 1024 pt when the account sits in it.
-        HStack(spacing: 8) {
-          SessionAccountControl(session: session)
-          if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
-          if session.kind == .manager { ManagerHeaderControls(session: session) }
-          if let repo = RepoLabels.label(for: session) {
-            Text(repo).font(.caption.weight(.medium)).foregroundStyle(.secondary).lineLimit(1)
-              .help("The repo this session works in")
-          }
-          Text([session.branch, session.cwd].compactMap { $0 }.joined(separator: " · "))
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .textSelection(.enabled)
-        }
-      }
-      Spacer()
-      HStack {
-        if session.pause != nil {
-          Button("Resume") { model.resume(session.id) }
-            .help(PauseBanner.resumeHelp)
-        } else if session.live {
-          Button("Stop") { model.stop(session.id) }
-            .help(BoardModel.stopHelp)
-        } else if session.queued == true {
-          Button("Start Now") { model.startNow(session.id) }
-            .disabled(model.startingNow.contains(session.id))
-            .help(BoardModel.startNowHelp)
-        } else {
-          Button("Resume") { model.resume(session.id) }
-            .help("Restart claude in this session. It continues the conversation.")
-        }
-        if session.canPause {
-          PauseMenuItems(id: session.id)
-            .fixedSize()
-            .help("Stop claude until you resume it, or until a time you pick.")
-        }
-        Button(session.markedDone ? "Not Done" : "Done") { model.setDone(session.id, !session.markedDone) }
-          .help(
-            session.markedDone
-              ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
-              : "Mark the session done. It leaves the Inbox and moves to Done on the board.")
-        NotesButton(session: session, always: true)
-        Button {
-          showsSidePanel.toggle()
-        } label: {
-          Image(systemName: "sidebar.right")
-        }
-        .accessibilityLabel(showsSidePanel ? "Hide Waits and Notes" : "Show Waits and Notes")
-        .disabled(!ui.sidePanelFits)
-        .help(
-          "Show or hide the session's waits, schedules, and notes beside the terminals. The panel hides itself, and this button is off, while the view is too narrow for it."
-        )
-        if CleanupOffer.canCleanUp(session) {
-          Button("Clean Up…") { model.confirmingCleanup = session.id }
-            .disabled(model.cleaningUp.contains(session.id))
-            .help("Delete the worktree and the local branch of the merged PR. The session stays in Done.")
-        }
-        Button(role: .destructive) {
-          let todos = TodoDeletion(session)
-          Task {
-            let options = await RemoveOptions.load(session)
-            ui.removeOptions = options
-            ui.deleteWorktree = options.worktree
-            ui.deleteBranch = options.branch
-            ui.removal = todos
-          }
-        } label: {
-          Image(systemName: "trash")
-        }
-        .help("Remove the session. Asks you to confirm first.")
-      }
-    }
-    .padding(12)
   }
 
   /// The text has a fixed width, so a pane's button is at the same place in every view. The button sits

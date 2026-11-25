@@ -118,7 +118,7 @@ struct ContentView: View {
       } message: { offer in
         Text(model.sessionNames.replacingIDs(in: offer.message))
       }
-      .mainToolbar()
+      .mainToolbar(showsImport: model.shownSession == nil)
     }
     .removingToolbarTitle()
     // The rule reads only whether the window is narrower than `collapseBelow`. Wider widths need no update.

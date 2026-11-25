@@ -13,7 +13,8 @@
 # part, the last part runs no integration suite. The other targets then never
 # share a machine's CPUs with the integration shards. A part before the last
 # gets no line when the suites fill fewer shards than those parts hold. With
-# one part, every process runs in part 1.
+# one part, every process runs in part 1. bin/lib/ci-jobs relies on this
+# layout when it leaves out the parts before the last.
 #
 # Each integration suite, slowest first, goes to the shard with the least time
 # so far, among the shards of every part that runs integration suites. The

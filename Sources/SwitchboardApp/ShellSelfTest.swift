@@ -45,7 +45,10 @@ import SwiftUI
 /// mismatch joined by "; ": `unlisted <title> <keys>` for an item that no entry names, `wrong <title> <keys> want
 /// <keys>`, or `missing <entry>` for a menu entry that no item carries. `question [sheet]` posts a ? press to the main
 /// window, or to its sheet, through the app's event queue, so the press passes through the app's key monitors as a
-/// typed ? does. `overlay` reports `hidden`, or `shown` and the overlay's areas joined by commas.
+/// typed ? does. `overlay` reports `hidden`, or `shown` and the overlay's areas joined by commas. `toolbar` reports the
+/// window toolbar's titled items in order, each followed by `:in` when the toolbar shows it or `:out` when its
+/// overflow menu holds it, joined by commas. `frame <anchor>` reports the width and height of the view with that click
+/// anchor in the main window, as `<width>x<height>`, or `none`.
 @MainActor
 enum ShellSelfTest {
   /// The shortcuts that `nav-keys` sends, in order. Search Sessions is last, because it opens a sheet. New
@@ -225,6 +228,14 @@ enum ShellSelfTest {
     case "board-selection":
       let ids = model.multiSelection.sorted()
       return ids.isEmpty ? "none" : ids.joined(separator: ",")
+    case "toolbar":
+      guard let toolbar = window?.toolbar else { return "no toolbar" }
+      let visible = Set((toolbar.visibleItems ?? []).map(ObjectIdentifier.init))
+      return toolbarReport(
+        toolbar.items.map { (title: title(of: $0), visible: visible.contains(ObjectIdentifier($0))) })
+    case "frame":
+      guard let root = window?.contentView, let anchor = ClickAnchorView.find(rest, in: root) else { return "none" }
+      return size(anchor.bounds)
     default:
       return "unknown command"
     }
@@ -428,6 +439,19 @@ enum ShellSelfTest {
       }
     }
     return found.isEmpty ? "none" : found.sorted().joined(separator: ",")
+  }
+
+  static func toolbarReport(_ items: [(title: String?, visible: Bool)]) -> String {
+    items.compactMap { item in
+      guard let title = item.title, !title.isEmpty else { return nil }
+      return "\(title):\(item.visible ? "in" : "out")"
+    }.joined(separator: ",")
+  }
+
+  /// SwiftUI leaves some items' labels empty, and then only the hosted view's accessibility label names the item. A
+  /// spacer has only a palette label, so it reports no title.
+  private static func title(of item: NSToolbarItem) -> String? {
+    [item.label, item.view?.accessibilityLabel() ?? ""].first { !$0.isEmpty }
   }
 
   private static func size(_ rect: NSRect) -> String { "\(Int(rect.width))x\(Int(rect.height))" }
