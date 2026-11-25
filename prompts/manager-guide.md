@@ -23,6 +23,7 @@ Each turn rereads this whole conversation, so everything you read is paid for ag
 - {{childQuestionsGuidance}}
 - A session is an id, a unique id prefix, or a unique name. Add `--json` to any command for exact output.
 - {{sessionLinkGuidance}}
+- {{eventSubscriptionsGuidance}}
 
 ## Commands
 

@@ -9,6 +9,35 @@ extension Service {
     args["from"] != nil || args["insideClaude"]?.bool == true ? .claude : .you
   }
 
+  /// The group requests whose `by` records who wrote what they store. A user-written description and the user's links
+  /// go into the system prompt of every session in the group.
+  private static let groupAuthorOps: Set<String> = [
+    "group-add", "group-describe", "group-note", "group-link-add", "group-link-rm",
+  ]
+
+  /// The request with `by` set to `claude` when its client on this Mac runs below a session's pane or below sbd's
+  /// tmux server, where every session runs, or when sbd can't read the client's parents. `sb` sends `by: claude` only
+  /// while CLAUDECODE is set, and a session can unset it. A shell pane counts too, because Claude can type into it
+  /// with `tmux send-keys`. It never changes `claude` to `you`. It runs off the state queue, because it takes a
+  /// snapshot.
+  func withCallerAuthor(_ request: Request, origin: RequestOrigin, caller: Caller) -> Request {
+    guard origin == .mac, Self.groupAuthorOps.contains(request.op), case .client(let pid) = caller,
+      var args = request.args.object, args["by"]?.string != Author.claude.rawValue
+    else { return request }
+    // A walk that stops before launchd (pid 1) read only part of the chain.
+    let ancestry = pid.flatMap(Processes.ancestors(of:)).flatMap { $0.contains(1) ? $0 : nil }
+    let fresh = ancestry == nil ? nil : buildSnapshot()
+    let inSession: Bool = queue.sync {
+      guard let ancestry, let fresh else { return true }
+      install(fresh)
+      let place = callerPlace(ancestry)
+      return !place.inside.isEmpty || place.inServer
+    }
+    guard inSession else { return request }
+    args["by"] = .string(Author.claude.rawValue)
+    return Request(op: request.op, args: .object(args))
+  }
+
   /// Throws `refusal` unless the request's `by` names the user. A missing `by` means the user.
   func requireUser(_ args: JSON, _ refusal: String) throws {
     guard try Author(parsing: args["by"]?.string) == .you else { throw APIError(refusal) }
