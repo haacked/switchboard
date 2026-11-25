@@ -438,16 +438,47 @@ public enum SlackPoll {
     }
   }
 
-  /// Whether one message header in the text holds the user and the ts. The connector writes a header as a
-  /// `From: Name <email> (U0123)` line, a `Time:` line, and a `Message TS:` line. So the user must close a `From:`
-  /// line, and the next line that isn't a `Time:` line must be the ts's `Message TS:` line. A mention of the user
-  /// in a message's text doesn't count. A message's text can still hold a made-up header.
-  static func hasHeader(_ text: String, user: String, ts: String) -> Bool {
+  /// One message header of a `slack_read_thread` result.
+  struct Header: Sendable {
+    var user: String
+    /// The text of the `From:` line before the id, without a trailing `<email>`, or nil when nothing is left.
+    var name: String?
+    var ts: String
+  }
+
+  /// The message headers in the text, in its order. The connector writes a header as a `From: Name <email> (U0123)`
+  /// line, a `Time:` line, and a `Message TS:` line. So a valid user id must close a `From:` line, and the next
+  /// line that isn't a `Time:` line must be a `Message TS:` line with a well formed ts. A mention of a user in a
+  /// message's text doesn't count. A message's text can still hold a made-up header.
+  static func headers(in text: String) -> [Header] {
+    // A Swift string treats CRLF as one character, so this split leaves a CRLF line whole.
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    for (i, line) in lines.enumerated() where line.hasPrefix("From: ") && line.hasSuffix(" (\(user))") {
-      let next = lines[(i + 1)...].first { !$0.hasPrefix("Time: ") }
-      if next.map(String.init) == "Message TS: \(ts)" { return true }
+    var out: [Header] = []
+    for (i, line) in lines.enumerated() where line.hasPrefix("From: ") {
+      // A user id holds no parenthesis, so the last one opens the only id that can close the line.
+      guard let paren = line.lastIndex(of: "("), line.hasSuffix(")") else { continue }
+      let user = String(line[line.index(after: paren)..<line.index(before: line.endIndex)])
+      guard isUserId(user), line.hasSuffix(" (\(user))"),
+        let next = lines[(i + 1)...].first(where: { !$0.hasPrefix("Time: ") }), next.hasPrefix("Message TS: ")
+      else { continue }
+      let ts = String(next.dropFirst("Message TS: ".count))
+      guard tsValue(ts) != nil else { continue }
+      // In `From: (U0123)`, the space after `From:` is also the space before the id.
+      let start = line.index(line.startIndex, offsetBy: "From: ".count)
+      let space = line.index(before: paren)
+      var name = start < space ? String(line[start..<space]) : ""
+      name = name.trimmingCharacters(in: .whitespaces)
+      if name.hasSuffix(">"), let email = name.lastIndex(of: "<") {
+        name = String(name[..<email])
+      }
+      let clipped = oneLine(name, max: 80)
+      out.append(Header(user: user, name: clipped.isEmpty ? nil : clipped, ts: ts))
     }
-    return false
+    return out
+  }
+
+  /// Whether one message header in the text holds the user and the ts.
+  static func hasHeader(_ text: String, user: String, ts: String) -> Bool {
+    headers(in: text).contains { $0.user == user && $0.ts == ts }
   }
 }

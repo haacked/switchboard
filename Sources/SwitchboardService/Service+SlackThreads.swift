@@ -30,8 +30,9 @@ typealias SlackPollOutcome = Result<
 extension Service {
   static let slackQueue = DispatchQueue(label: "sbd.slack")
 
-  /// The thread keys that an open `reply` wait names, which stay watched past their window. #504 fills it in.
-  func replyWaitThreads() -> Set<String> { [] }
+  /// The threads that the open `reply` waits name. sbd reads them whether or not a link lists them, and keeps their
+  /// rows. #504 fills it in.
+  func replyWaitThreads() -> [SlackThreadRef] { [] }
 
   /// The links that every session lists, hidden links excluded.
   private func listedLinks() -> [ExternalLink] {
@@ -55,21 +56,22 @@ extension Service {
     return out
   }
 
-  /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that no session links, and reads the watched
-  /// threads that `SlackPoll.batch` picks.
+  /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that neither a session's link nor an open
+  /// reply wait names, and reads the watched threads that `SlackPoll.batch` picks.
   func pollSlackThreadsIfDue(now: Int64) {
     guard config.slack.pollSeconds > 0, !slackPoll.running,
       now - slackPoll.last >= Int64(config.slack.pollSeconds * 1000)
     else { return }
     slackPoll.last = now
     let links = listedLinks()
-    let linked = Set(links.compactMap(\.linkTarget).filter { $0.kind == .slack }.map(\.key))
-    let stale = slackThreads.keys.filter { !linked.contains($0) }
+    let replyWaits = replyWaitThreads()
+    let kept = Set(links.compactMap(\.linkTarget).filter { $0.kind == .slack }.map(\.key) + replyWaits.map(\.key))
+    let stale = slackThreads.keys.filter { !kept.contains($0) }
     if !stale.isEmpty {
       for key in stale { slackThreads[key] = nil }
       saveSlackThreads([:], deleting: stale)
     }
-    let refs = SlackWatch.threads(links, now: now, replyWaits: replyWaitThreads())
+    let refs = SlackWatch.threads(links, now: now, replyWaits: replyWaits)
     guard !refs.isEmpty else { return }
     let env = headlessEnv(session: nil, account: nil)
     let account = ClaudeAccount(folder: env["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder)

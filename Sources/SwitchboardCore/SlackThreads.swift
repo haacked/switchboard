@@ -32,7 +32,7 @@ public struct SlackThread: Codable, Equatable, Sendable {
   public var oldest: String? { replies == nil ? nil : lastReplyTs ?? thread }
 }
 
-/// A Slack thread that a session's links watch.
+/// A Slack thread that sbd reads: one that a session's links watch, or one that an open `reply` wait names.
 public struct SlackThreadRef: Equatable, Sendable {
   public var key: String
   public var channel: String
@@ -50,17 +50,19 @@ public enum SlackWatch {
     target.kind == .slack && (now < link.t + windowMs || replyWaits.contains(target.key))
   }
 
-  /// The threads that the links watch, one per thread key, in the order of their first watched link.
-  public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: Set<String>) -> [SlackThreadRef] {
+  /// The threads that sbd reads, one per thread key: the links' threads in the order of their first watched link,
+  /// then the open reply waits' threads that no link gives, in the order of `replyWaits`.
+  public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: [SlackThreadRef]) -> [SlackThreadRef] {
+    let waitKeys = Set(replyWaits.map(\.key))
     var seen = Set<String>()
     var refs: [SlackThreadRef] = []
     for link in links {
-      guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: replyWaits),
+      guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: waitKeys),
         let channel = target.channel, let thread = target.thread, seen.insert(target.key).inserted
       else { continue }
       refs.append(SlackThreadRef(key: target.key, channel: channel, thread: thread))
     }
-    return refs
+    return refs + replyWaits.filter { seen.insert($0.key).inserted }
   }
 }
 

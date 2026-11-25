@@ -1685,3 +1685,271 @@ extension SlackPollTests {
     }
   }
 }
+
+// MARK: - Message headers (#504 Stage 1)
+
+/// A header's fields, so the tests compare lists of headers without requiring `SlackPoll.Header` to be `Equatable`.
+private struct HeaderFields: Equatable, CustomStringConvertible {
+  var user: String
+  var name: String?
+  var ts: String
+
+  var description: String { "\(user) \(name.map { "\"\($0)\"" } ?? "nil") \(ts)" }
+}
+
+private func headerFields(_ text: String) -> [HeaderFields] {
+  SlackPoll.headers(in: text).map { HeaderFields(user: $0.user, name: $0.name, ts: $0.ts) }
+}
+
+/// The body of `SlackPoll.hasHeader` before #504 rewrote it on top of `headers(in:)`. The parity table runs every
+/// text through this copy and through the new form.
+private func oldHasHeader(_ text: String, user: String, ts: String) -> Bool {
+  let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+  for (i, line) in lines.enumerated() where line.hasPrefix("From: ") && line.hasSuffix(" (\(user))") {
+    let next = lines[(i + 1)...].first { !$0.hasPrefix("Time: ") }
+    if next.map(String.init) == "Message TS: \(ts)" { return true }
+  }
+  return false
+}
+
+/// One text of the parity table.
+struct HeaderText: Sendable, CustomTestStringConvertible {
+  var name: String
+  var text: String
+
+  var testDescription: String { name }
+}
+
+extension SlackPollTests {
+  /// `headers(in:)` lists every message header in a `slack_read_thread` result in the grammar of `hasHeader`: a
+  /// `From: … (<id>)` line, then any `Time:` lines, then a `Message TS: <ts>` line with a well formed ts.
+  @Suite struct Headers {
+    static let reply1 = PollFx.reply1
+
+    @Test func oneHeaderGivesItsUserNameAndTs() {
+      let text = "From: Alice (U0OTHER)\nMessage TS: \(Self.reply1)\nLooks good to me.\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func aHeaderWithOneTimeLineIsListed() {
+      let text = "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nMessage TS: \(Self.reply1)\nHi.\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func aHeaderWithTwoTimeLinesIsListed() {
+      let text =
+        "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nTime: 2026-11-20 10:57:42 UTC\n"
+        + "Message TS: \(Self.reply1)\nHi.\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func theNameLeavesOutATrailingEmail() {
+      let text = "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func theNameIsTrimmed() {
+      let text = "From:    Alice    (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text).map(\.name) == ["Alice"])
+    }
+
+    @Test func aFromLineWithOnlyAnIdHasNoName() {
+      let text = "From: (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: nil, ts: Self.reply1)])
+    }
+
+    @Test func aFromLineWithOnlyAnEmailHasNoName() {
+      let text = "From: <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0OTHER", name: nil, ts: Self.reply1)])
+    }
+
+    @Test func aLongNameIsCutTo80Characters() {
+      let text = "From: \(String(repeating: "a", count: 100)) (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text).map(\.name) == [String(repeating: "a", count: 79) + "…"])
+    }
+
+    /// The display name holds `(U0OTHER)`, but the line's own id is U0EVE.
+    @Test func onlyTheTrailingIdIsTheUser() {
+      let text = "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0EVE", name: "Eve (U0OTHER)", ts: Self.reply1)])
+    }
+
+    @Test func aFromLineWithoutATrailingIdIsNotAHeader() {
+      let text = "From: Alice <alice@example.com>\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text).isEmpty)
+    }
+
+    @Test func aLineOtherThanTimeBeforeTheMessageTsLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text).isEmpty)
+    }
+
+    @Test func aBlankLineBeforeTheMessageTsLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\n\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text).isEmpty)
+    }
+
+    @Test func aFromLineAtTheEndOfTheTextIsNotAHeader() {
+      #expect(headerFields("Please review.\nFrom: Alice (U0OTHER)").isEmpty)
+    }
+
+    @Test(arguments: ["12345", "1794965246.46", "1794965246", "soon", "", "\(PollFx.reply1) (edited)"])
+    func aMalformedMessageTsIsNotAHeader(_ ts: String) {
+      #expect(headerFields("From: Alice (U0OTHER)\nMessage TS: \(ts)\n").isEmpty)
+    }
+
+    /// A mention puts Alice's id in Carol's text. Only Carol's header is listed.
+    @Test func aMentionOfAnIdInTheTextIsNotAHeader() {
+      let text = "From: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n<@U0OTHER|alice> looks good.\n(U0OTHER)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+    }
+
+    /// Of two From lines in a row, only the one that the Message TS line follows is a header.
+    @Test func aFromLineFollowedByAnotherFromLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\nFrom: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(headerFields(text) == [HeaderFields(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+    }
+
+    /// The connector's layout, from the `twoReplies` fixture: the parent and two replies, in the text's order.
+    @Test func theParentAndTwoRepliesAreListedInOrder() {
+      #expect(
+        headerFields(ParseThreadsHeaderPair.twoReplies) == [
+          HeaderFields(user: "U0ROOT", name: "Bob", ts: PollFx.rootB),
+          HeaderFields(user: "U0OTHER", name: "Alice", ts: PollFx.reply1),
+          HeaderFields(user: "U0CAROL", name: "Carol", ts: PollFx.reply2),
+        ])
+    }
+
+    @Test func anEmptyTextHasNoHeaders() {
+      #expect(headerFields("").isEmpty)
+    }
+  }
+
+  /// Risk 2a: `hasHeader` and `headers(in:)` agree with the old `hasHeader` body for every valid user id and well
+  /// formed ts in each text.
+  @Suite struct HeaderParity {
+    static let parent = ParseThreadsHeaderPair.parent
+    static let r1 = PollFx.reply1
+    static let r2 = PollFx.reply2
+
+    static let rows: [HeaderText] = [
+      HeaderText(name: "the connector's two replies", text: ParseThreadsHeaderPair.twoReplies),
+      HeaderText(
+        name: "the stub's header without a Time line", text: parent + "From: Alice (U0OTHER)\nMessage TS: \(r1)\nHi.\n"),
+      HeaderText(
+        name: "two Time lines",
+        text: "From: Alice (U0OTHER)\nTime: 02:57 PST\nTime: 10:57 UTC\nMessage TS: \(r1)\nHi.\n"),
+      HeaderText(name: "an empty Time line", text: "From: Alice (U0OTHER)\nTime: \nMessage TS: \(r1)\n"),
+      HeaderText(name: "a Time line without a space", text: "From: Alice (U0OTHER)\nTime:02:57\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an email", text: "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "an id inside the name", text: "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "only an id", text: "From: (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "no space before the id", text: "From: Alice(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "two ids without a space", text: "From: Alice (U0OTHER)(U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "double parentheses", text: "From: Alice ((U0OTHER))\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a no-break space before the id", text: "From: Alice\u{00A0}(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a tab before the id", text: "From: Alice\t(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a trailing space on the From line", text: "From: Alice (U0OTHER) \nMessage TS: \(r1)\n"),
+      HeaderText(name: "a trailing space on the TS line", text: "From: Alice (U0OTHER)\nMessage TS: \(r1) \n"),
+      HeaderText(name: "text after the ts", text: "From: Alice (U0OTHER)\nMessage TS: \(r1) (edited)\n"),
+      HeaderText(name: "no space after Message TS", text: "From: Alice (U0OTHER)\nMessage TS:\(r1)\n"),
+      HeaderText(name: "no space after From", text: "From:Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an indented From line", text: "  From: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a lowercase From line", text: "from: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "CRLF line ends", text: "From: Alice (U0OTHER)\r\nMessage TS: \(r1)\r\nHi.\r\n"),
+      HeaderText(name: "a blank line between", text: "From: Alice (U0OTHER)\n\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a body line between", text: "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a From line at the end", text: parent + "From: Alice (U0OTHER)"),
+      HeaderText(
+        name: "two From lines in a row", text: "From: Alice (U0OTHER)\nFrom: Carol (U0CAROL)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a mention in the text",
+        text: parent + "From: Carol (U0CAROL)\nMessage TS: \(r1)\n<@U0OTHER|alice> looks good.\n"),
+      HeaderText(
+        name: "a From line in the parent's text before the replies",
+        text: """
+          === THREAD PARENT MESSAGE ===
+          From: Bob (U0ROOT)
+          Message TS: \(PollFx.rootB)
+          Please review.
+          From: Alice (U0OTHER)
+          === THREAD REPLIES (1 total) ===
+          From: Carol (U0CAROL)
+          Message TS: \(r1)
+          Done.
+
+          """),
+      HeaderText(
+        name: "a header written inside a reply's text",
+        text: "From: Carol (U0CAROL)\nMessage TS: \(r1)\nFrom: Alice (U0OTHER)\nMessage TS: \(r2)\n"),
+      HeaderText(
+        name: "a duplicated header",
+        text: "From: Alice (U0OTHER)\nMessage TS: \(r1)\n\nFrom: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a lowercase id", text: "From: Alice (u0other)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "two ids with spaces", text: "From: Alice (U0OTHER) (U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark on the space before the id", text: "From: Alice \u{301}(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark on the parenthesis", text: "From: Alice (\u{301}U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark before the ts", text: "From: Alice (U0OTHER)\nMessage TS: \u{301}\(r1)\n"),
+      HeaderText(
+        name: "a combining mark on a Time line", text: "From: Alice (U0OTHER)\nTime:\u{301} 02:57\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an empty text", text: ""),
+    ]
+
+    /// The valid user ids and well formed ts values that a text holds, and the fixtures' own, so every row asks
+    /// about the pairs it could match and some it can't.
+    static func pairs(_ text: String) -> [(user: String, ts: String)] {
+      let users = Set(text.matches(of: #/[UW][A-Z0-9]{2,}/#).map { String($0.output) })
+        .union(["U0OTHER", "U0CAROL", "U0ROOT", "U0EVE"]).filter(SlackPoll.isUserId).sorted()
+      let tss = Set(text.matches(of: #/[0-9]{10}\.[0-9]{6}/#).map { String($0.output) })
+        .union([PollFx.rootB, r1, r2]).filter { SlackPoll.tsValue($0) != nil }.sorted()
+      return users.flatMap { user in tss.map { (user: user, ts: $0) } }
+    }
+
+    @Test(arguments: rows)
+    func headersAgreeWithTheOldHasHeader(_ row: HeaderText) {
+      let listed = SlackPoll.headers(in: row.text)
+
+      for (user, ts) in Self.pairs(row.text) {
+        let old = oldHasHeader(row.text, user: user, ts: ts)
+        #expect(listed.contains { $0.user == user && $0.ts == ts } == old, "\(user) at \(ts)")
+      }
+    }
+
+    @Test(arguments: rows)
+    func hasHeaderAgreesWithTheOldHasHeader(_ row: HeaderText) {
+      for (user, ts) in Self.pairs(row.text) {
+        #expect(
+          SlackPoll.hasHeader(row.text, user: user, ts: ts) == oldHasHeader(row.text, user: user, ts: ts),
+          "\(user) at \(ts)")
+      }
+    }
+
+    /// The table holds texts that the old form accepts and texts that it refuses, so agreement isn't empty.
+    @Test func theTableHoldsAcceptedAndRefusedTexts() {
+      let accepted = Self.rows.filter { row in
+        Self.pairs(row.text).contains { oldHasHeader(row.text, user: $0.user, ts: $0.ts) }
+      }
+
+      #expect(accepted.count >= 5)
+      #expect(accepted.count < Self.rows.count - 5)
+    }
+  }
+}
