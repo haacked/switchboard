@@ -49,7 +49,9 @@ let service: Service
 let server: Server
 do {
   service = try Service(home: home, sbPath: siblingExecutable("sb"))
+  let loadStart = Date()
   try service.load()
+  logLine(String(format: "loaded the sessions in %.1f s", Date().timeIntervalSince(loadStart)))
   // The hosts' sockets listen before sbd's own, so a client that reaches sbd finds them.
   HostServer.start(service: service)
   server = try Server(service: service)

@@ -47,10 +47,11 @@ extension GitHubPoller {
   }
 
   /// For each PR that an open wait is about, when the newest such wait was
-  /// set, and the PRs that one of those waits needs read at the pending rate.
+  /// set, and the changes that those waits need the poller to see at the
+  /// pending rate.
   struct Waited {
     var created: [String: Int64] = [:]
-    var pending: Set<String> = []
+    var needs: [String: ChangeSignals] = [:]
   }
 
   func waitedOn(_ interest: Interest) -> Waited {
@@ -58,7 +59,7 @@ extension GitHubPoller {
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session) else { continue }
       waited.created[id] = max(waited.created[id] ?? 0, wait.created)
-      if wait.readsPRWhilePending(prs[id]?.pr) { waited.pending.insert(id) }
+      waited.needs[id, default: []].formUnion(wait.needs(for: prs[id]?.pr))
     }
     return waited
   }
@@ -145,7 +146,7 @@ extension GitHubPoller {
     var reads: [String: ActionsRead] = [:]
     for chunk in GitHub.chunks(ids.sorted()) {
       do {
-        let response = try request(GitHub.actionsQuery, idsVariable(chunk), stats: &stats)
+        let response = try client.request(GitHub.actionsQuery, idsVariable(chunk), stats: &stats)
         for (id, read) in (response["data"]?["nodes"]?.array ?? []).compactMap(GitHub.parseActions) {
           reads[id] = read
         }
@@ -177,7 +178,7 @@ extension GitHubPoller {
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, s.polled)
-      if let after = confirmReadAfter { requestRead([s.prId], after: after) }
+      if let after = confirmReadAfter { requestRead([s.prId], after: after, trigger: .confirm) }
       return false
     }
     return s.polled > first.polled

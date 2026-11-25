@@ -44,7 +44,7 @@ extension GitHubPoller {
       let (query, variables) = GitHub.issuesQuery(requests)
       let data: JSON
       do {
-        data = try request(query, variables, stats: &stats)["data"] ?? .null
+        data = try client.request(query, variables, stats: &stats)["data"] ?? .null
       } catch {
         poll.error = "\(error)"
         break
@@ -81,7 +81,8 @@ extension GitHubPoller {
         "has more than \(limit) open issues, so the list shows only some of them. Add a label or a person to the source."
     }
     poll.ended = nowMs()
-    poll.pausedUntil = graphQLPausedUntil > poll.ended ? graphQLPausedUntil : nil
+    let paused = client.graphQLPausedUntil
+    poll.pausedUntil = paused > poll.ended ? paused : nil
     service.queue.sync { service.applyIssuePoll(poll) }
     let problems = poll.sourceErrors.sorted { $0.key < $1.key }.map { "\($0.key): \($0.value)" }
     return ([poll.error].compactMap { $0 } + problems).nonEmptyJoined

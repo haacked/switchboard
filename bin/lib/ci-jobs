@@ -1,0 +1,165 @@
+#!/usr/bin/env bash
+# Decides which macOS jobs of .github/workflows/test.yml a change runs.
+#
+#   bin/lib/ci-jobs <pr|draft|push> <count> <package-json> < changed-paths
+#
+# Reads the changed paths on stdin, one per line, and prints two lines for
+# $GITHUB_OUTPUT. parts= is a JSON array of the swift-test parts to run, of
+# the SB_CI_PARTS parts. gui= is true when gui-test runs. It says on stderr
+# why. Run it from the repository root, because it reads the repository's
+# files.
+#
+# A job runs unless these rules show that no changed path can affect it:
+# - A Markdown file at the repository root affects no job, because no build
+#   or test reads it.
+# - A draft PR runs no job. GitHub does not merge a draft, and marking the PR
+#   ready starts a run in pr mode.
+# - A push runs every job.
+# - In pr mode, the last part builds every target, fails on a warning, and
+#   runs every test target but IntegrationTests, so it runs for every change.
+#   The parts before it run the IntegrationTests suites (bin/lib/shard-plan).
+#   gui-test builds the products and runs bin/test-gui.
+# - A path runs every job when no target's folder holds it, when it sits in a
+#   folder that its target excludes, or when it is not a Swift file.
+# - The IntegrationTests parts run for a path of IntegrationTests or of a
+#   target that IntegrationTests depends on, directly or through other
+#   targets. They run for a path of any other non-test target when an
+#   IntegrationTests file reads Sources at run time, or names a product built
+#   from that target as the last part of a path, as \(Instance.bin)/sbd does.
+#   They also run for a path that a file in the IntegrationTests folder names.
+# - gui-test runs for a path of a non-test target, and for a path that
+#   bin/test-gui or a file in bin/lib names. It runs for every path when
+#   bin/test-gui builds the tests.
+#
+# <count> is the number of changed files that GitHub reports. When the list
+# has a different number of lines, or <count> is 0, every job runs. A rename
+# lists its old path too, so it runs every job. <package-json> is what swift
+# package dump-package prints. When jq cannot read targets from it, every job
+# runs. Exits 2 on a bad argument.
+set -euo pipefail
+usage() { echo "usage: bin/lib/ci-jobs <pr|draft|push> <count> <package-json> < changed-paths" >&2; exit 2; }
+[ $# -eq 3 ] || usage
+mode=$1 count=$2 package=$3
+case $mode in pr | draft | push) ;; *) usage ;; esac
+[[ $count =~ ^[0-9]+$ ]] || usage
+parts=${SB_CI_PARTS:-}
+[[ $parts =~ ^[1-9][0-9]*$ ]] || { echo "ci-jobs: SB_CI_PARTS must be a positive whole number, not '$parts'" >&2; exit 2; }
+# shellcheck source=bin/lib/test-selection.sh
+source "$(dirname "${BASH_SOURCE[0]}")/test-selection.sh"
+integration=IntegrationTests
+
+# run <integration-parts> <last-part> <gui-test>
+# Prints the outputs for the jobs whose argument is 1. Then it exits.
+run() {
+  local list='' i
+  if [ "$1" = 1 ]; then for ((i = 1; i < parts; i++)); do list+="$i,"; done; fi
+  if [ "$2" = 1 ]; then list+="$parts,"; fi
+  echo "parts=[${list%,}]"
+  if [ "$3" = 1 ]; then echo gui=true; else echo gui=false; fi
+  exit 0
+}
+
+everything() {
+  echo "ci-jobs: $1, so every job runs" >&2
+  run 1 1 1
+}
+
+if [ "$mode" = draft ]; then
+  echo "ci-jobs: a draft PR runs no job. Marking it ready starts the jobs it needs." >&2
+  run 0 0 0
+fi
+paths=$(grep . || true)
+listed=$(grep -c . <<<"$paths" || true)
+if [ "$count" -eq 0 ] || [ "$listed" -ne "$count" ]; then
+  everything "GitHub reports $count changed files and the list has $listed"
+fi
+while IFS= read -r path; do
+  echo "ci-jobs: $path: no job reads a Markdown file at the repository root" >&2
+done < <(grep -E "$root_markdown" <<<"$paths" || true)
+paths=$(grep -v -E "$root_markdown" <<<"$paths" || true)
+if [ -z "$paths" ]; then
+  echo "ci-jobs: only Markdown files at the repository root changed, so no job runs" >&2
+  run 0 0 0
+fi
+[ "$mode" = pr ] || everything "this is a push"
+
+json=$(cat "$package" 2>/dev/null || true)
+if ! graph=$(target_graph "$json" 2>/dev/null) || [ -z "$graph" ]; then
+  everything "jq cannot read the package's targets from $package"
+fi
+integration_dir=$(awk -F'\t' -v t="$integration" '$1 == t { print $3 }' <<<"$graph")
+[ -n "$integration_dir" ] || everything "the package has no $integration target"
+[ -f bin/test-gui ] || everything "bin/test-gui is missing"
+if grep -qE -- '--build-tests|build_tests|(swift|swiftpm) test' bin/test-gui; then
+  everything "bin/test-gui builds the tests"
+fi
+integration_deps=$(awk -F'\t' '$2 != "test" { print $1 }' <<<"$graph" | while read -r name; do
+  if dependent_tests "$graph" "$name" | grep -qxF "$integration"; then echo "$name"; fi
+done)
+sources_reader=$(folder_readers Sources "$integration_dir" | head -1)
+# One "<target> <file>" line for each non-test target that IntegrationTests
+# does not depend on, when an IntegrationTests file names a product built from
+# the target as the last part of a path. The test can run that product without
+# depending on its target.
+product_users=$(jq -r '.products[]? | .name as $p | .targets[] | [., $p] | @tsv' <<<"$json" |
+  while IFS=$'\t' read -r name product; do
+    grep -qxF "$name" <<<"$integration_deps" && continue
+    file=$(grep -rlsE -- "/$(ere_escape "$product")([^A-Za-z0-9_.-]|\$)" "$integration_dir" | head -1)
+    [ -z "$file" ] || echo "$name $file"
+  done)
+
+# integration_reason <path> <target> <type>
+# Prints why the IntegrationTests parts run for the path. It fails when they
+# need not run.
+integration_reason() {
+  local user
+  user=$(awk -v t="$2" '$1 == t { print $2; exit }' <<<"$product_users")
+  if [ "$2" = "$integration" ]; then
+    echo "it is in $integration"
+  elif grep -qxF "$2" <<<"$integration_deps"; then
+    echo "$integration depends on $2"
+  elif [ "$3" != test ] && [ -n "$sources_reader" ]; then
+    echo "$sources_reader reads Sources at run time"
+  elif [ "$3" != test ] && [ -n "$user" ]; then
+    echo "$user runs a product built from $2"
+  elif grep -rqsF -- "$1" "$integration_dir"; then
+    echo "a file in $integration_dir names it"
+  else
+    return 1
+  fi
+}
+
+# gui_reason <path> <target> <type>
+# Prints why gui-test runs for the path. It fails when it need not run.
+gui_reason() {
+  if [ "$3" != test ]; then
+    echo "gui-test builds $2"
+  elif grep -qsF -- "$1" bin/test-gui bin/lib/*; then
+    echo "bin/test-gui or bin/lib names it"
+  else
+    return 1
+  fi
+}
+
+integration_runs=0 gui_runs=0
+while IFS= read -r path; do
+  line=$(path_target "$graph" "$path")
+  [ -n "$line" ] || everything "$path is outside every target"
+  IFS=$'\t' read -r name type dir excludes _ <<<"$line"
+  if excluded_path "$path" "$dir" "$excludes"; then
+    everything "$path is in a folder that $name excludes, which tests can read at run time"
+  fi
+  [[ $path == *.swift ]] || everything "$path is not a Swift file, which tests can read at run time"
+  echo "ci-jobs: $path: the last part runs, because it builds every target" >&2
+  if why=$(integration_reason "$path" "$name" "$type"); then
+    integration_runs=1
+    echo "ci-jobs: $path: the $integration parts run, because $why" >&2
+  fi
+  if why=$(gui_reason "$path" "$name" "$type"); then
+    gui_runs=1
+    echo "ci-jobs: $path: gui-test runs, because $why" >&2
+  fi
+done <<<"$paths"
+[ "$integration_runs" = 1 ] || echo "ci-jobs: no changed path can affect the $integration suites" >&2
+[ "$gui_runs" = 1 ] || echo "ci-jobs: no changed path can affect gui-test" >&2
+run "$integration_runs" 1 "$gui_runs"

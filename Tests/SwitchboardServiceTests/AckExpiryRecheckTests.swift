@@ -74,7 +74,7 @@ private final class AckHarness {
   private static func poller(_ service: Service, _ github: StatusReads) -> GitHubPoller {
     let p = GitHubPoller(
       service: service, settings: service.config.github, depot: service.config.depot, trunk: service.config.trunk)
-    p.transport = github.answer
+    p.client.transport = github.answer
     service.github = p
     return p
   }

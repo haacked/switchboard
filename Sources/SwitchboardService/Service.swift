@@ -338,6 +338,8 @@ public final class Service {
   var liveCap: Int
   /// Whether new sessions start in auto mode. `sb auto-mode` changes it.
   var defaultAutoMode: Bool
+  /// Whether new work sessions open their shell pane. `sb open-shell` changes it.
+  var openShellByDefault: Bool
   /// The `operator` settings that the tick last read, with config.json's modification time then.
   var cachedOperatorSettings: (modified: Date?, settings: OperatorSettings)?
   /// The model of a Manager conversation or a group chat without its own. `sb manager model` changes it.
@@ -401,6 +403,7 @@ public final class Service {
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.defaultAutoMode = config.autoMode
+    self.openShellByDefault = config.openShell
     self.managerModel = config.manager.model
     self.issueSettings = config.issues
     let links = Service.makeHostLinks(config: config, home: home)
@@ -882,6 +885,8 @@ public final class Service {
       return try operatorModelRequest(args)
     case "auto-mode":
       return try autoModeRequest(args)
+    case "open-shell":
+      return try openShellRequest(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -1474,6 +1479,7 @@ public final class Service {
     configure(&session)
     // A conversation shows Claude's terminal alone. The user opens its shell on demand.
     if session.kind.isConversation { session.shellClosed = true }
+    applyOpenShellSetting(to: &session)
     session.model = SessionModel.stored(kind: session.kind, requested: session.model, workModel: config.model)
     if session.kind != .operator { try refuseOperatorName(session.name) }
     if let host = session.host {

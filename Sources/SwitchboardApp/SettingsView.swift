@@ -68,6 +68,15 @@ struct GeneralSettings: View {
         .font(.caption).foregroundStyle(.secondary)
       }
       Section {
+        Toggle(
+          "Open a shell in new sessions",
+          isOn: Binding(get: { model.openShellByDefault ?? true }, set: { model.setOpenShell($0) })
+        )
+        .disabled(offline || model.openShellByDefault == nil)
+        Text("Sessions that already exist keep their shell. Session ▸ Open Shell opens one later.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      Section {
         let rows = AccountMenu.rows(accounts: model.sessionAccounts, usage: model.usage)
         if rows.isEmpty {
           LabeledContent("Account for new sessions") { Text("Not listed yet").foregroundStyle(.secondary) }

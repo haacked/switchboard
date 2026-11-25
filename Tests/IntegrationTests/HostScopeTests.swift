@@ -392,7 +392,8 @@ private let otherDestination = "haacked@other.local"
     "account-move",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "host-connect", "host-disconnect", "live", "auto-mode", "open-shell", "autocontinue", "snapshots", "poll", "repos",
+    "repo-add",
     "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
     "decision-ask",
@@ -492,6 +493,8 @@ private let otherDestination = "haacked@other.local"
     add("snapshots")
     add("autocontinue", ["on": true])
     add("auto-mode", ["autoMode": true])
+    add("open-shell")
+    add("open-shell", ["openShell": false])
     add("poll")
     add("importable")
     add("import", ["refs": [text]])

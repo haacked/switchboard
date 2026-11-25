@@ -384,6 +384,7 @@ extension Service {
     session.started = true
     session.claudeConfigDir = c.account
     session.autoMode = defaultAutoMode
+    applyOpenShellSetting(to: &session)
     entries[id] = Entry(session: session)
     try store.save(session)
     forget(c.id)

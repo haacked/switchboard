@@ -10,11 +10,12 @@
 # reaches, they select whole test targets outside ci_only_targets and the smoke
 # suites, never nothing. They never select a whole ci_only_targets target.
 
-# CI runs every test on each push. Locally these targets run only a changed
-# file's own suites, the suites of the test files that use its names or quote
-# its path, and the smoke suites. The search does not follow the files that use
-# those test files. The tests of these targets start sbd and tmux, so they take
-# most of the suite's run time.
+# CI runs every test that a change can affect once its PR is ready for
+# review. Locally these targets run only a changed file's own suites, the
+# suites of the test files that use its names or quote its path, and the smoke
+# suites. The search does not follow the files that use those test files. The
+# tests of these targets start sbd and tmux, so they take most of the suite's
+# run time.
 ci_only_targets=" IntegrationTests "
 
 # A changed file that more test files of a ci-only target use than this runs
@@ -30,10 +31,24 @@ is_ci_only() {
   return 1
 }
 
+# Matches a Markdown file at the repository root, which no build or test reads.
+root_markdown='^[^/]+\.md$'
+
 # Prints the paths on stdin, one per line, of the files whose text matches the
 # grep arguments.
 files_matching() {
   tr '\n' '\0' | xargs -0 grep -l "$@" 2>/dev/null | sort || true
+}
+
+# folder_readers <folder> <dir>…
+# Prints the Swift files under the dirs that read the repo's <folder> at run
+# time. Such a file finds the repo root through #filePath or Instance.root and
+# names <folder> as a path in a string.
+folder_readers() {
+  local folder=$1
+  shift
+  find "$@" -name '*.swift' | files_matching -E '#filePath|Instance\.root' |
+    files_matching -E "[\"/]$folder([/\"]|\$)"
 }
 
 ere_escape() {
@@ -51,6 +66,62 @@ smoke_selection() {
     "$smoke_file"
 }
 
+# target_graph <package-json>
+# Prints one line per target of the package that swift package dump-package
+# printed: name, type, folder, excluded folders, and the targets it depends
+# on, separated by tabs, with lists joined by commas.
+target_graph() {
+  jq -r '.targets[] | [
+    .name, .type,
+    ((.path // ((if .type == "test" then "Tests/" else "Sources/" end) + .name)) | rtrimstr("/")),
+    ((.exclude // []) | join(",")),
+    ([.dependencies[] | (.byName // .target // empty)[0]] | join(","))
+  ] | @tsv' <<<"$1"
+}
+
+# path_target <graph> <path>
+# Prints the target_graph line of the target whose folder holds <path>, the
+# innermost one when folders nest, and nothing when no folder holds it.
+path_target() {
+  awk -F'\t' -v p="$2" 'index(p, $3 "/") == 1 { print length($3) "\t" $0 }' <<<"$1" |
+    sort -rn | sed -n $'1s/^[0-9]*\t//p'
+}
+
+# excluded_path <path> <target-dir> <excludes>
+# Succeeds when <path> sits in one of the target's excluded folders, which
+# <excludes> lists relative to <target-dir>, joined by commas.
+excluded_path() {
+  local e ex
+  IFS=, read -r -a ex <<<"$3"
+  for e in ${ex[@]+"${ex[@]}"}; do
+    case $1 in "$2/$e" | "$2/$e/"*) return 0 ;; esac
+  done
+  return 1
+}
+
+# dependent_tests <graph> <target>…
+# Prints the test targets that are one of the targets or depend on one,
+# directly or through other targets.
+dependent_tests() {
+  local graph=$1
+  shift
+  awk -F'\t' -v changed="$*" '
+    { type[$1] = $2; deps[$1] = $5 }
+    END {
+      n = split(changed, c, " ")
+      for (i = 1; i <= n; i++) hit[c[i]] = 1
+      do {
+        more = 0
+        for (t in deps) {
+          if (t in hit) continue
+          m = split(deps[t], d, ",")
+          for (j = 1; j <= m; j++) if (d[j] in hit) { hit[t] = 1; more = 1; break }
+        }
+      } while (more)
+      for (t in hit) if (type[t] == "test") print t
+    }' <<<"$graph"
+}
+
 # select_tests <package-json> [unknown]
 # Reads changed paths, one per line, on stdin. <package-json> is the text that
 # swift package dump-package prints. With "unknown", it also selects what a
@@ -61,16 +132,9 @@ smoke_selection() {
 # Prints nothing when no test can read a changed path. Says on stderr what
 # each path selects.
 select_tests() {
-  local graph changed found name type dir excludes deps e ex excluded
+  local graph changed found name type dir excludes deps
   local unknown=${2:-} smoke= sources= whole_targets=" " seen=" " suites=() file line reached
-  # One line per target: name, type, folder, excluded folders, and the targets
-  # it depends on, with lists joined by commas.
-  graph=$(jq -r '.targets[] | [
-      .name, .type,
-      ((.path // ((if .type == "test" then "Tests/" else "Sources/" end) + .name)) | rtrimstr("/")),
-      ((.exclude // []) | join(",")),
-      ([.dependencies[] | (.byName // .target // empty)[0]] | join(","))
-    ] | @tsv' <<<"$1") || return 1
+  graph=$(target_graph "$1") || return 1
 
   add_test_file() {
     case $whole_targets in *" $1 "*) return ;; esac
@@ -175,12 +239,11 @@ select_tests() {
 
   while IFS= read -r changed; do
     [ -n "$changed" ] || continue
-    if [[ $changed =~ ^[^/]+\.md$ ]]; then
+    if [[ $changed =~ $root_markdown ]]; then
       echo "bin/test: $changed: no test reads it" >&2
       continue
     fi
-    found=$(awk -F'\t' -v p="$changed" 'index(p, $3 "/") == 1 { print length($3) "\t" $0 }' <<<"$graph" |
-      sort -rn | sed -n $'1s/^[0-9]*\t//p')
+    found=$(path_target "$graph" "$changed")
     if [ -z "$found" ]; then
       echo "bin/test: $changed: outside every target, so the unit test targets and the smoke suites run" >&2
       unknown=1
@@ -188,12 +251,7 @@ select_tests() {
       continue
     fi
     IFS=$'\t' read -r name type dir excludes deps <<<"$found"
-    excluded=
-    IFS=, read -r -a ex <<<"$excludes"
-    for e in ${ex[@]+"${ex[@]}"}; do
-      case $changed in "$dir/$e" | "$dir/$e/"*) excluded=1 ;; esac
-    done
-    if [[ $changed != *.swift ]] || [ -n "$excluded" ]; then
+    if [[ $changed != *.swift ]] || excluded_path "$changed" "$dir" "$excludes"; then
       echo "bin/test: $changed: tests can read it at run time, so the unit test targets and the smoke suites run" >&2
       unknown=1
       add_naming_files "$changed" "$([ "$type" = test ] && echo 1)"
@@ -206,21 +264,7 @@ select_tests() {
   done
 
   if [ -n "$sources" ]; then
-    reached=$(awk -F'\t' -v changed="$sources" '
-      { type[$1] = $2; deps[$1] = $5 }
-      END {
-        n = split(changed, c, " ")
-        for (i = 1; i <= n; i++) hit[c[i]] = 1
-        do {
-          more = 0
-          for (t in deps) {
-            if (t in hit) continue
-            m = split(deps[t], d, ",")
-            for (j = 1; j <= m; j++) if (d[j] in hit) { hit[t] = 1; more = 1; break }
-          }
-        } while (more)
-        for (t in hit) if (type[t] == "test") print t
-      }' <<<"$graph")
+    reached=$(dependent_tests "$graph" $sources)
     for name in $reached; do
       if is_ci_only "$name"; then
         echo "bin/test: leaves $name to CI for source changes" >&2
@@ -238,8 +282,7 @@ select_tests() {
         [ -n "$file" ] || continue
         echo "bin/test: $file reads Sources/ at run time" >&2
         add_test_file "$name" "$dir" "$file"
-      done < <(find "$dir" -name '*.swift' | files_matching -E '#filePath|Instance\.root' |
-        files_matching -E '["/]Sources([/"]|$)')
+      done < <(folder_readers Sources "$dir")
     done <<<"$graph"
   fi
 
