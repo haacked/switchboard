@@ -14,6 +14,18 @@ extension Service {
     return .object(["autoMode": .bool(defaultAutoMode)])
   }
 
+  /// The `open-shell` request. With `openShell`, it saves the setting in config.json and applies it to the work
+  /// sessions created after it. A session that exists keeps its shell open or closed. The answer is the setting.
+  func openShellRequest(_ args: JSON) throws -> JSON {
+    if let value = args["openShell"] {
+      guard let on = value.bool else { throw APIError("open shell is on or off") }
+      try saveSetting("openShell", .bool(on))
+      openShellByDefault = on
+      logLine(on ? "new sessions open a shell" : "new sessions open without a shell")
+    }
+    return .object(["openShell": .bool(openShellByDefault)])
+  }
+
   /// Writes one top-level setting into config.json and keeps every other setting there. It refuses to rewrite a
   /// file that it can't read as a JSON object.
   func saveSetting(_ key: String, _ value: JSON) throws {

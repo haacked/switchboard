@@ -52,6 +52,12 @@ extension Service {
     markStarting(name)
   }
 
+  /// Records a closed shell on a session that starts for the first time while the open-shell setting is off. A
+  /// follow-up calls it when it starts, not when it is added, so it takes the setting of that moment.
+  func applyOpenShellSetting(to session: inout Session) {
+    if !openShellByDefault { session.shellClosed = true }
+  }
+
   /// Closes each shell pane whose shell exited.
   func closeExitedShells() {
     for id in entries.keys where paneRow(id, .shell)?.dead == true {

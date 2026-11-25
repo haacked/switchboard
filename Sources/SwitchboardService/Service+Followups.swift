@@ -175,6 +175,7 @@ extension Service {
         s.claudeConfigDir = account
         s.done = false
         s.followup?.started = nowMs()
+        applyOpenShellSetting(to: &s)
       }
       record(session.id, "followup-started", ["cwd": .string(folder.cwd), "branch": .string(branch)])
       try launch(session.id, prompt: session.followup?.prompt, trigger: .followup)

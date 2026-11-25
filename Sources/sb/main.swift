@@ -562,6 +562,8 @@ let usage = """
                                   worktree adds its main checkout
     auto-mode [on|off]            show or set whether new sessions start in
                                   auto mode. Sessions that exist keep theirs
+    open-shell [on|off]           show or set whether new sessions open a shell
+                                  beside Claude. Sessions that exist keep theirs
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -1260,6 +1262,8 @@ case "autocontinue":
   autoContinue(a)
 case "auto-mode":
   autoMode(a)
+case "open-shell":
+  openShell(a)
 case "activity":
   activity(a)
 case "live":
