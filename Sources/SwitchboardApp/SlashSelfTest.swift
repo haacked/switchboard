@@ -27,7 +27,6 @@ enum SlashSelfTest {
     func reveal() async -> Bool {
       // After a send or an Esc hides the field, the terminal takes focus first. SwiftUI removes the old field from
       // the window a moment later. Until then, `waitForField` returns it. A field that leaves the window loses focus.
-      let previous = field
       if let old = field, model.revealedMessageField != session {
         for _ in 0..<120 where old.window != nil { await pause() }
       }
@@ -37,7 +36,7 @@ enum SlashSelfTest {
       await pause()
       guard let shownEditor = shown.currentEditor() as? NSTextView else {
         let responder = window?.firstResponder.map { "\(Swift.type(of: $0))" } ?? "none"
-        log("no focus: old field \(shown === previous) in window \(shown.window != nil) first responder \(responder)")
+        log("no focus: old field \(shown === field) in window \(shown.window != nil) first responder \(responder)")
         return false
       }
       (field, editor) = (shown, shownEditor)
