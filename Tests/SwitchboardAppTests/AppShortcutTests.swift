@@ -94,14 +94,16 @@ private let labeledEntries = AppShortcut.allCases.filter { $0.label != nil }
     Literal("Undo Acknowledge", "a", [.command, .shift]),
   ]
 
-  @Test(arguments: literals)
-  func eachMenuTitleNamesExactlyOneEntry(_ literal: Literal) {
-    #expect(AppShortcut.entry(menuTitle: literal.title) != nil)
+  /// `entry(menuTitle:)` returns the first entry that claims a title, so two claims would hide one entry.
+  @Test func noTwoEntriesClaimTheSameMenuTitle() {
+    let titles = AppShortcut.allCases.flatMap(\.menuTitles)
+
+    #expect(Set(titles).count == titles.count, "\(titles)")
   }
 
   /// The stored character, not the key press, so a "}" that became "]" with ⇧ fails here.
   @Test(arguments: literals)
-  func menuBindingsMatchThePreRefactorLiterals(_ literal: Literal) throws {
+  func menuBindingsMatchTheLiterals(_ literal: Literal) throws {
     let entry = try #require(AppShortcut.entry(menuTitle: literal.title))
     let binding = try #require(entry.keys.first)
 

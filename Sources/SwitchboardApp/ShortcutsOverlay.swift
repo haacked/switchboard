@@ -59,13 +59,14 @@ enum ShortcutsKey {
   /// What a key does to the overlay, or nil to leave the key alone.
   ///
   /// The check takes only a `?` that no text can receive: the focused view must not take typed text and no input
-  /// method may compose. ⇧ may be held, because most layouts type `?` with it. ⌘, ⌥, and ⌃ leave the key to the
+  /// method may compose. A key repeat does nothing, so holding `?` does not flip the overlay. ⇧ may be held, because most layouts type `?` with it. ⌘, ⌥, and ⌃ leave the key to the
   /// menus. `?` opens the overlay over a main window that shows no sheet. It closes the overlay only from the
   /// overlay's own sheet.
   static func action(
-    characters: String?, modifiers: NSEvent.ModifierFlags, responder: NSResponder?, composing: Bool, place: Place
+    characters: String?, modifiers: NSEvent.ModifierFlags, isRepeat: Bool, responder: NSResponder?, composing: Bool,
+    place: Place
   ) -> Action? {
-    guard characters == "?", modifiers.isDisjoint(with: [.command, .option, .control]), !composing,
+    guard characters == "?", !isRepeat, modifiers.isDisjoint(with: [.command, .option, .control]), !composing,
       !(responder is NSTextInputClient)
     else { return nil }
     if place.overlayOpen { return place.isMainWindowSheet ? .close : nil }
@@ -83,7 +84,7 @@ enum ShortcutsKey {
   /// so the responder comes from the event's own window.
   private static func handle(_ event: NSEvent, _ model: BoardModel) -> Bool {
     // Most keys are not ?, so the cheap check runs before the window and model lookups.
-    guard event.characters == "?", !event.isARepeat else { return false }
+    guard event.characters == "?" else { return false }
     let main = NSApp.switchboardWindow
     let window = event.window
     let place = Place(
@@ -92,7 +93,8 @@ enum ShortcutsKey {
       mainWindowHasSheet: main?.attachedSheet != nil, presentingSheet: model.presentingSheet,
       overlayOpen: model.shortcutsOverlay != nil)
     switch action(
-      characters: event.characters, modifiers: event.modifierFlags, responder: window?.firstResponder,
+      characters: event.characters, modifiers: event.modifierFlags, isRepeat: event.isARepeat,
+      responder: window?.firstResponder,
       composing: TextInput.isComposing, place: place)
     {
     case .open: model.openShortcuts()

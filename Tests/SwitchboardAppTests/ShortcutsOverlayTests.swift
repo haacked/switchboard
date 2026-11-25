@@ -53,10 +53,17 @@ private final class TypingView: NSView, NSTextInputClient {
 
   func action(
     _ characters: String = "?", _ modifiers: NSEvent.ModifierFlags = .shift, responder: NSResponder? = nil,
-    composing: Bool = false, in scene: Scene = Scene()
+    isRepeat: Bool = false, composing: Bool = false, in scene: Scene = Scene()
   ) -> ShortcutsKey.Action? {
     ShortcutsKey.action(
-      characters: characters, modifiers: modifiers, responder: responder, composing: composing, place: scene.place)
+      characters: characters, modifiers: modifiers, isRepeat: isRepeat, responder: responder, composing: composing,
+      place: scene.place)
+  }
+
+  /// Holding ? sends repeats, which would open and close the overlay over and over.
+  @Test func aRepeatedQuestionMarkIsLeftAlone() {
+    #expect(action(isRepeat: true) == nil)
+    #expect(action(isRepeat: true, in: .overlay) == nil)
   }
 
   // MARK: Opening
