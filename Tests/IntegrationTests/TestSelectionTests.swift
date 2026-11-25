@@ -974,6 +974,9 @@ private let filterCases: [FilterCase] = [
     name: "a Core suite with its target prefix", args: ["--filter", "^SwitchboardCoreTests\\.FxCoreTests/"],
     bundles: ["SwitchboardCoreTests"]),
   FilterCase(
+    name: "a whole target, as bin/test prints it", args: ["--filter", "^SwitchboardCoreTests\\."],
+    bundles: ["SwitchboardCoreTests"]),
+  FilterCase(
     name: "suites in parentheses, as bin/test prints them",
     args: ["--filter", "^SwitchboardCoreTests\\.(FxCoreTests|FxOtherTests)/"], bundles: ["SwitchboardCoreTests"]),
   FilterCase(name: "a Core suite name", args: ["--filter", "FxCoreTests"], bundles: ["SwitchboardCoreTests"]),
