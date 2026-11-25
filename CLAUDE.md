@@ -33,10 +33,10 @@ A waiting script prints `waiting for a build slot (N ahead)`. That line means th
 
 ## Tests
 
-CI runs the full suite on every push to a PR, in the `swift-test` and `gui-test` jobs. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
+CI runs in the `swift-test` and `gui-test` jobs. A draft PR runs no macOS job. Marking a PR ready, and each push to a ready PR, runs the `swift-test` parts and `gui-test` that its changed files can affect (`bin/lib/ci-jobs`), and each push to main runs all of them. About 15 sessions share this Mac, so a local full run repeats CI's work and slows the other sessions.
 
 - Before you push, run `bin/test`. With no arguments it runs only the tests that your changes against `origin/main` can affect, and it prints what it picked and why. It never runs all of IntegrationTests, which takes about an hour here. A change to `Sources/` leaves IntegrationTests to CI. A changed IntegrationTests helper, stub, or fixture runs the suites that name it, or the smoke suites in `Tests/smoke-suites` when more than 10 files do. A change it can't map, such as `Package.swift` or a `bin/` script, runs the unit tests, the smoke suites, and the integration suites that name the changed path.
-- After you push, wait for `swift-test` and `gui-test`, then fix what they report in a follow-up commit. The `ci-monitor` step of `/go` does the waiting. A change that breaks CI and gets fixed after the push costs less than an hour-long local run in every session.
+- After you mark the PR ready or push to a ready PR, wait for `swift-test` and `gui-test`, then fix what they report in a follow-up commit. The `ci-monitor` step of `/go` does the waiting. A change that breaks CI and gets fixed after the push costs less than an hour-long local run in every session.
 - Run `bin/test --all` only to reproduce a CI failure. A local run never needs the full integration suite.
 
 ## Design before adding code
