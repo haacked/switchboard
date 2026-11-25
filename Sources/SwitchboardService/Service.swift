@@ -535,6 +535,7 @@ public final class Service {
   func route(_ request: Request, origin: RequestOrigin, caller: Caller, hookGone: @escaping @Sendable () -> Bool) throws
     -> Response
   {
+    let request = withCallerAuthor(request, origin: origin, caller: caller)
     switch request.op {
     case "hook":
       return try handleHook(request.args, hookGone: hookGone)
@@ -944,6 +945,8 @@ public final class Service {
       // A session that started after the user asked, such as on a second click, is already where it should be.
       try openSession(try lookup(args))
       return try liveRequest(.object([:]))
+    case "group-show":
+      return try JSON(encoding: groupShow(args, origin: origin))
     case "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe", "group-link-add",
       "group-link-rm", "group-account",
       "group-suggest",
@@ -1055,10 +1058,12 @@ public final class Service {
         break
       }
       try nameConversation(id, prompt: payload["prompt"]?.string)
-      // A host's hook answer never reaches claude, so a host session keeps its digest and its replies unheard.
+      // A host's hook answer never reaches claude, so a host session keeps its digest, its replies, and its group's
+      // changes unheard.
       let digestText = stamp == nil ? digest(id, now: event.t) : nil
       if let digestText { record(id, "digest", ["text": .string(digestText)]) }
-      let context = [digestText, stamp == nil ? repliesNotice(id) : nil].compactMap { $0 }
+      let notices = stamp == nil ? [repliesNotice(id), groupContextNotice(id)] : []
+      let context = ([digestText] + notices).compactMap { $0 }
       if !context.isEmpty { answer = ParentDigest.hookOutput(context.joined(separator: "\n\n"), event: kind) }
     case "PreToolUse":
       answer = managerSkillToolGate(id, payload, stamp: stamp) ?? answer
@@ -1559,7 +1564,8 @@ public final class Service {
   }
 
   /// The text of a launch's `--append-system-prompt`, or nil to pass none. The triage prompt is written for work
-  /// sessions, so a Manager conversation and the operator get their own prompt instead.
+  /// sessions, so a Manager conversation and the operator get their own prompt instead. A work session in a group
+  /// also gets the group's block.
   func appendedSystemPrompt(for session: Session) -> String? {
     let text =
       switch session.kind {
@@ -1567,7 +1573,8 @@ public final class Service {
       case .operator: Manager.operatorPrompt
       case .work, .chat: config.triage.systemPrompt
       }
-    return text.isEmpty ? nil : text
+    let parts = [text.isEmpty ? nil : text, groupPromptBlock(for: session)].compactMap { $0 }
+    return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
   }
 
   /// Starts claude in the session's Claude pane. A launch resumes the
@@ -1656,6 +1663,9 @@ public final class Service {
         "permission_mode": mode.map(JSON.string) ?? .null,
         "trigger": .string(trigger.rawValue),
       ])
+    // The block carries only the number of notes. A resumed conversation therefore hears a change it missed as a
+    // notice at its next prompt.
+    if !resume { hearGroupContext(id) }
   }
 
   /// Whether the session's conversation has a transcript. `--resume` fails

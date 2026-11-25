@@ -714,7 +714,8 @@ final class BoardModel: ObservableObject {
 
   var selected: SessionSummary? { board.first { $0.id == selection } }
 
-  /// True while the sidebar has no rows and sbd answers. It is false when the filters or the search field hide
+  /// True while the sidebar has no work sessions and no conversations and sbd answers. The Conversations header
+  /// still shows then. It is false when the filters or the search field hide
   /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
     workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
@@ -1079,11 +1080,12 @@ final class BoardModel: ObservableObject {
   static let startNowHelp =
     "Start claude now. When the live cap is full, sbd stops the lowest-priority idle session to make room."
   func setDone(_ id: String, _ done: Bool) { perform("done", ["session": .string(id), "done": .bool(done)]) }
-  /// Sets the group's description, or clears it when `text` is blank. The
-  /// Board shows the new text before sbd answers. It returns false when it
+  /// Saves the description field's draft as the group's description, or clears it when the draft is blank. `opened`
+  /// is the text that the field opened with. A draft that still matches it sends nothing, even when sbd's text
+  /// changed while the field was open. The Board shows the new text before sbd answers. It returns false when it
   /// refuses the text, such as text over the length limit.
   @discardableResult
-  func describeGroup(_ id: String, _ text: String) -> Bool {
+  func describeGroup(_ id: String, _ text: String, opened: String?) -> Bool {
     guard let index = groups.firstIndex(where: { $0.id == id }) else { return true }
     let clean: String?
     do {
@@ -1092,16 +1094,17 @@ final class BoardModel: ObservableObject {
       actionError = "\(error)"
       return false
     }
-    guard clean != groups[index].description else { return true }
+    guard clean != opened else { return true }
     groups[index].description = clean
     groups[index].descriptionBy = nil
     if let clean {
-      perform("group-describe", ["group": .string(id), "text": .string(clean)])
+      perform("group-describe", ["group": .string(id), "text": .string(clean), "by": .string(Author.you.rawValue)])
     } else {
       perform("group-describe", ["group": .string(id), "clear": true])
     }
     return true
   }
+
   /// The ids, in the given order, that `moveToGroup` would move to `group`: each names a work session on the
   /// Board that is not already in that lane. None qualify when sbd didn't list `group`.
   func movableIDs(_ ids: [String], to group: String?) -> [String] {
@@ -1866,11 +1869,14 @@ final class BoardModel: ObservableObject {
   /// Sends `link-rm` for a session's link and `group-link-rm` for a group's. sbd deletes a link that someone added
   /// and hides a link that it found. When it deletes a session's added link, it also hides a found link to the same
   /// page.
-  func removeLink(_ row: LinkRows.Row) {
+  func removeLink(_ row: LinkRows.Row) { removeLink(row.link.id, of: row.owner) }
+
+  /// Removes the link with the id `link` from its session or group, as `removeLink(_:)` does for a row.
+  func removeLink(_ link: String, of owner: LinkRows.Owner) {
     let by = JSON.string(Author.you.rawValue)
-    switch row.owner {
-    case .session(let id): perform("link-rm", ["session": .string(id), "link": .string(row.link.id), "by": by])
-    case .group(let id): perform("group-link-rm", ["group": .string(id), "link": .string(row.link.id), "by": by])
+    switch owner {
+    case .session(let id): perform("link-rm", ["session": .string(id), "link": .string(link), "by": by])
+    case .group(let id): perform("group-link-rm", ["group": .string(id), "link": .string(link), "by": by])
     }
   }
 

@@ -144,7 +144,7 @@ import Testing
     #expect(try listed(sbd, g.id).descriptionBy == .claude)
   }
 
-  /// The app sends `group-describe` without `by`.
+  /// An app older than Accept sends `group-describe` without `by`.
   @Test func aRawDescribeWithoutByReadsAsYou() throws {
     let sbd = try Instance()
     let g = try add(sbd, "Flags", description: "Claude's text.", env: try claude(sbd))
@@ -154,6 +154,18 @@ import Testing
     let after = try listed(sbd, g.id)
     #expect(after.description == "The app's text.")
     #expect((after.descriptionBy ?? .you) == .you)
+  }
+
+  /// The app's Accept sends the text it shows with `by: you`.
+  @Test func acceptingAClaudeDescriptionKeepsTheTextAndMakesItYours() throws {
+    let sbd = try Instance()
+    let g = try add(sbd, "Flags", description: "Claude's text.", env: try claude(sbd))
+
+    _ = try sbd.client.call("group-describe", ["group": .string(g.id), "text": "Claude's text.", "by": "you"])
+
+    let after = try listed(sbd, g.id)
+    #expect(after.description == "Claude's text.")
+    #expect(after.descriptionBy == .you)
   }
 
   @Test func aRawDescribeByAnUnknownAuthorIsRefusedAndKeepsTheDescription() throws {

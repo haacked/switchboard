@@ -54,6 +54,9 @@ enum PlannedScope {
     "answer": Row(
       keys: ["session", "card", "behavior", "autoMode", "always", "message", "answers"], refs: ["session"]),
     "summary-set": Row(keys: ["session", "card"], refs: ["session"]),
+    // `session` is the caller. The op itself refuses a `group` that is not the caller's own, because the table
+    // can't resolve a group.
+    "group-show": Row(keys: ["session", "group"], refs: ["session"]),
     "new": Row(
       keys: [
         "path", "branch", "base", "name", "worktree", "prompt", "model", "parent", "autoMode", "planMode", "manualMode",
