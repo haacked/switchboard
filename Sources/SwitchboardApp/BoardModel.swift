@@ -1736,6 +1736,15 @@ final class BoardModel: ObservableObject {
       finally: { self.clearingWaits.remove(key) })
   }
 
+  /// Asks sbd to read a reply wait's thread first at its next Slack poll. A refusal shows in the wait panel, not in
+  /// the error banner.
+  func checkWait(session: String, wait: String) {
+    perform(
+      "wait-check", ["session": .string(session), "wait": .string(wait), "by": .string(Author.you.rawValue)],
+      then: { _ in self.waitErrors[session] = nil },
+      failed: { self.waitErrors[session] = "\($0)" })
+  }
+
   /// Whether sbd has not yet answered the Clear wait of this wait.
   func isClearingWait(_ session: String, _ wait: String) -> Bool {
     clearingWaits.contains(Self.clearingWaitKey(session, wait))

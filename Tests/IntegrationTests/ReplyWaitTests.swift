@@ -384,7 +384,9 @@ import Testing
     #expect(resolved.data["outcome"]?.string == "Alice replied: \(link)")
   }
 
-  /// A session with no links at all still has its wait's thread read.
+  /// A session with no links at all still has its wait's thread read. On a fresh sbd the first scan is due at once,
+  /// so it can start just after the wait is set and read the reply. The wait then resolves, and the next due scan drops the thread's row because no link or open wait
+  /// names the thread. So the test waits for the resolution, not for a stored read.
   @Test func aTargetOfASessionWithNoLinksIsRead() throws {
     let sbd = try Instance(config: Self.config)
     let s = try sbd.idleSession(name: "flags-cache")
@@ -392,10 +394,11 @@ import Testing
     let alice = SlackFixtures.ts(try created(wait) + 60_000)
     try sbd.writeSlackThread([SlackReply(ts: alice, user: Self.other, name: "Alice")])
 
-    try pollThenTick(sbd)
+    _ = try sbd.advanceToPoll()
 
     let resolved = try waitForResolve(sbd, s.id)
     #expect(resolved.data["outcome"]?.string == "Alice replied: \(Self.replyLink(alice))")
+    #expect(sbd.slackAsks().contains { $0.contains { $0["message_ts"]?.string == SlackExample.rootTs } })
   }
 
   @Test func theThreadStaysWatchedPastItsLinksWindowWhileTheWaitIsOpen() throws {

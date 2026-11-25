@@ -3,7 +3,7 @@ import SwitchboardCore
 
 /// The overdue waits that raised an Inbox item, between the Summary and the
 /// Drafts: what each wait is on, who set it and when, and its target's
-/// current state, with Clear wait, Check now, and Open PR.
+/// current state, with Clear wait, Check now, and Open PR or Open thread.
 struct WaitPanel: View {
   @EnvironmentObject var model: BoardModel
   @ObservedObject var store: ReferenceStore
@@ -20,6 +20,8 @@ struct WaitPanel: View {
     /// The other session of a `session` wait is gone.
     case removed
     case time(Int64)
+    /// A `reply` wait's Slack link and its thread's status, which is nil until sbd's poll reads or watches the thread.
+    case thread(url: String, status: SlackThreadStatus?)
   }
 
   struct Row: Equatable, Identifiable {
@@ -54,6 +56,9 @@ struct WaitPanel: View {
 
   static let deployFootnote = "sbd checks the deploy on its own"
 
+  static let threadCheckHelp =
+    "Read this thread first at sbd's next Slack poll. The wait resolves when the poll finds a reply from someone else."
+
   /// One row for each id that names a wait of `session`, in the order of `ids`. `reference` gives the loaded
   /// details of a PR by its ref. `sessions` holds every session, so a `session` wait's target can be found.
   static func rows(
@@ -84,7 +89,7 @@ struct WaitPanel: View {
     case .date, .manual:
       row.target = wait.until.map(Target.time)
     case .reply:
-      break
+      row.target = wait.url.map { .thread(url: $0, status: wait.threadStatus) }
     case .ci, .review, .botReview, .approval, .queue, .merge, .deploy:
       guard let pr = pullRequest(of: wait, in: session) else {
         row.target = .unresolved
@@ -165,6 +170,16 @@ private struct WaitPanelRow: View {
           Button("Open PR") { openURL(pr.url) }
             .help("Open \(pr.repo) #\(pr.number) on GitHub")
         }
+        if case .thread(let url, _)? = row.target {
+          Button("Check now") { model.checkWait(session: session.id, wait: row.id) }
+            .help(WaitPanel.threadCheckHelp)
+            .accessibilityLabel("Check now: Slack thread")
+          if let link = URL(string: url) {
+            Button("Open thread") { openURL(link) }
+              .help("Open the thread in Slack")
+              .accessibilityLabel("Open thread: \(LinkTarget.parse(url)?.title ?? "Slack thread")")
+          }
+        }
       }
     }
     .padding(10)
@@ -209,6 +224,8 @@ extension WaitPanel {
     case .session(let state)?: return ["Now in \(state.title)"]
     case .removed?: return ["The session was removed."]
     case .time(let t)?: return ["Due \(Wait.formatTime(t))"]
+    case .thread(_, let status?)?: return [status.line(now: now)]
+    case .thread(_, nil)?: return ["sbd hasn't read the thread yet"]
     case nil: return []
     }
   }

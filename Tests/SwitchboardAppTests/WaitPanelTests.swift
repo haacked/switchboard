@@ -64,6 +64,43 @@ private func onlyRow(
 
 private let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue, .merge, .deploy]
 
+private let slackChannel = "C0EXAMPLE01"
+private let slackRootTs = "1794965000.000100"
+private let slackRoot = "https://example.slack.com/archives/\(slackChannel)/p1794965000000100"
+private let slackReply =
+  "https://example.slack.com/archives/\(slackChannel)/p1794965246462679?thread_ts=\(slackRootTs)&cid=\(slackChannel)"
+
+/// A reply wait on `url` with the thread status that a session summary gives it.
+private func replyWait(url: String = slackRoot, status: SlackThreadStatus? = nil) -> Wait {
+  var w = wait(.reply, recheck: now - hour)
+  w.url = url
+  w.threadStatus = status
+  return w
+}
+
+/// The time of the reply tests' thread reads. `SlackPoll.tsValue` reads only a ts with 10 digits of seconds, so the
+/// tests' `now` is too early for a reply's ts.
+private let slackNow: Int64 = 1_794_968_600_000
+
+/// A Slack ts for a time in ms.
+private func slackTs(_ ms: Int64) -> String { String(format: "%lld.%06lld", ms / 1000, (ms % 1000) * 1000) }
+
+/// The status of the `slackRoot` thread as a session summary gives it at `slackNow`. A read thread has `replies`
+/// replies, the last from Alice 2h ago, and was read 1h ago. The user last looked 3h ago, so Alice's reply is new.
+private func threadStatus(replies: Int? = 2, error: String? = nil) throws -> SlackThreadStatus {
+  let target = try #require(LinkTarget.parse(slackRoot))
+  var row = SlackThread(channel: slackChannel, thread: slackRootTs)
+  row.replies = replies
+  if replies != nil { row.read = slackNow - hour }
+  if let replies, replies > 0 {
+    row.lastReplyTs = slackTs(slackNow - 2 * hour)
+    row.lastReplyUser = "U0OTHER"
+    row.lastReplyName = "Alice"
+  }
+  row.error = error
+  return try #require(SlackThreadStatus(target: target, row: row, watched: true, lookedAt: slackNow - 3 * hour))
+}
+
 // MARK: The rows and their facts
 
 @Suite struct WaitPanelRows {
@@ -261,7 +298,7 @@ private let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue,
     #expect(try onlyRow(holder(waits: [w]), sessions: [needsItem("s3")]).target == .removed)
   }
 
-  @Test(arguments: [Wait.Kind.session, .date, .manual])
+  @Test(arguments: [Wait.Kind.session, .date, .manual, .reply])
   func aWaitThatIsNotOnAPRHasNoPR(_ kind: Wait.Kind) throws {
     let w = wait(kind, until: now - hour, target: Wait.SessionTarget(id: "s2", name: "flag-cache"))
     let session = holder(pr: ("acme/widgets", 1), waits: [w])
@@ -276,6 +313,75 @@ private let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue,
     #expect(try onlyRow(holder(waits: [w])).target == .time(now - 2 * hour))
   }
 
+  @Test func aReplyWaitReadsItsThreadAndItsStatus() throws {
+    let status = try threadStatus()
+
+    #expect(try onlyRow(holder(waits: [replyWait(status: status)])).target == .thread(url: slackRoot, status: status))
+  }
+
+  /// D3: the wait keeps the link the user gave, so Open thread opens the reply that the user linked.
+  @Test func aReplyLinkIsTheThreadsURL() throws {
+    let status = try threadStatus()
+
+    let row = try onlyRow(holder(waits: [replyWait(url: slackReply, status: status)]))
+
+    #expect(row.target == .thread(url: slackReply, status: status))
+  }
+
+  /// A summary gives no status before sbd's poll reads the thread or watches it.
+  @Test func aReplyWaitWithoutAThreadStatusHasNoStatus() throws {
+    #expect(try onlyRow(holder(waits: [replyWait(status: nil)])).target == .thread(url: slackRoot, status: nil))
+  }
+
+  @Test func aReplyWaitHasNoPREvenOnASessionWithAPR() throws {
+    let session = holder(pr: ("acme/widgets", 1), repository: "acme/widgets", waits: [replyWait()])
+
+    #expect(try onlyRow(session).pr == nil)
+  }
+
+  @Test func aReadThreadShowsItsStatusLine() throws {
+    let status = try threadStatus()
+    let row = try onlyRow(holder(waits: [replyWait(status: status)]))
+
+    #expect(WaitPanel.targetLines(row, now: slackNow) == [status.line(now: slackNow)])
+  }
+
+  @Test func theStatusLineSaysHowManyRepliesWhoSentTheLastAndWhenSbdReadTheThread() throws {
+    let row = try onlyRow(holder(waits: [replyWait(status: try threadStatus())]))
+
+    #expect(WaitPanel.targetLines(row, now: slackNow) == ["2 replies, last from Alice 2h ago, read 1h ago, new reply"])
+  }
+
+  @Test func aThreadWithoutRepliesSaysSo() throws {
+    let row = try onlyRow(holder(waits: [replyWait(status: try threadStatus(replies: 0))]))
+
+    #expect(WaitPanel.targetLines(row, now: slackNow) == ["no replies, read 1h ago"])
+  }
+
+  @Test func aThreadThatSbdHasNotReadYetSaysSo() throws {
+    let row = try onlyRow(holder(waits: [replyWait(status: nil)]))
+
+    #expect(WaitPanel.targetLines(row, now: slackNow) == ["sbd hasn't read the thread yet"])
+  }
+
+  @Test(arguments: [nil, 2])
+  func aThreadWhoseReadFailedShowsTheError(_ replies: Int?) throws {
+    let status = try threadStatus(replies: replies, error: "the Slack connector timed out")
+    let row = try onlyRow(holder(waits: [replyWait(status: status)]))
+
+    let lines = WaitPanel.targetLines(row, now: slackNow)
+
+    #expect(lines == [status.line(now: slackNow)])
+    #expect(lines.first?.contains("the Slack connector timed out") == true)
+  }
+
+  @Test func checkNowOnAThreadSaysWhenSbdReadsIt() {
+    #expect(
+      WaitPanel.threadCheckHelp
+        == "Read this thread first at sbd's next Slack poll. The wait resolves when the poll finds a reply from someone else."
+    )
+  }
+
   /// sbd exposes no deploy state, so the panel says who checks it.
   @Test func aDeployWaitSaysThatSbdChecksTheDeploy() throws {
     let session = holder(pr: ("acme/widgets", 1), waits: [wait(.deploy)])
@@ -283,7 +389,7 @@ private let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue,
     #expect(try onlyRow(session).footnote == "sbd checks the deploy on its own")
   }
 
-  @Test(arguments: [Wait.Kind.ci, .review, .botReview, .approval, .queue, .merge, .session, .date, .manual])
+  @Test(arguments: [Wait.Kind.ci, .review, .botReview, .approval, .queue, .merge, .session, .date, .manual, .reply])
   func onlyADeployWaitHasTheDeployLine(_ kind: Wait.Kind) throws {
     let w = wait(kind, until: now - hour, target: Wait.SessionTarget(id: "s2", name: "flag-cache"))
     let session = holder(pr: ("acme/widgets", 1), waits: [w])
@@ -570,6 +676,47 @@ private let prKinds: [Wait.Kind] = [.ci, .review, .botReview, .approval, .queue,
 
     model.clearWait("s1", wait: "w1")
     await sent.wait(for: "clear-wait")
+    await settle { model.waitErrors["s1"] == nil }
+
+    #expect(model.waitErrors["s1"] == nil)
+  }
+
+  @Test func checkWaitSendsWaitCheckWithTheSessionTheWaitAndYou() async throws {
+    let (model, sent) = recordingModel()
+
+    model.checkWait(session: "s1", wait: "w1")
+    await sent.wait(for: "wait-check")
+
+    let request = try #require(sent.value.first { $0.op == "wait-check" })
+    #expect(request.args == ["session": "s1", "wait": "w1", "by": "you"])
+  }
+
+  @Test func aRefusedCheckWaitShowsInTheSessionsWaitRefusal() async {
+    let refusal = "sbd doesn't read Slack threads while slack.pollSeconds is 0"
+    let (model, _) = recordingModel(refuse: { op, _ in op == "wait-check" ? refusal : nil })
+
+    model.checkWait(session: "s1", wait: "w1")
+    await settle { model.waitErrors["s1"] != nil }
+
+    #expect(model.waitErrors["s1"]?.contains(refusal) == true)
+  }
+
+  /// The refusal shows beside the panel's buttons, not in the window's error banner.
+  @Test func aRefusedCheckWaitLeavesTheErrorBannerAlone() async {
+    let (model, _) = recordingModel(refuse: { op, _ in op == "wait-check" ? "s1 has no reply wait w1" : nil })
+
+    model.checkWait(session: "s1", wait: "w1")
+    await settle { model.waitErrors["s1"] != nil }
+
+    #expect(model.actionError == nil)
+  }
+
+  @Test func aCheckWaitThatSucceedsRemovesTheEarlierRefusal() async {
+    let (model, sent) = recordingModel()
+    model.waitErrors["s1"] = "s1 has no reply wait w1"
+
+    model.checkWait(session: "s1", wait: "w1")
+    await sent.wait(for: "wait-check")
     await settle { model.waitErrors["s1"] == nil }
 
     #expect(model.waitErrors["s1"] == nil)
