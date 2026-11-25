@@ -240,20 +240,21 @@ private func list(_ numbers: [Int], answered: [Int] = []) -> DecisionList {
     #expect(model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text.isEmpty)
   }
 
-  /// A session in a group keeps its message draft under `group:<id>`, so a draft under its bare id is stale.
-  @Test func aRefreshDropsTheBareIdDraftOfASessionInAGroup() {
+  /// Decision 12: a session in a group keeps its message draft under its own id, beside its decision drafts.
+  @Test func aRefreshKeepsTheDraftsOfASessionInAGroupAndDropsTheDraftOfASessionThatLeft() {
     var chat = listed("a")
     chat.chat = "g1"
-    let model = appliedModel([chat])
+    let model = appliedModel([chat, listed("b")])
     model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text = "Call it task"
     model.messageDraft(for: chat).text = "to the group"
-    model.messageDraft(for: needsItem("a")).text = "stale"
+    model.messageDraft(for: needsItem("b")).text = "stale"
 
     model.apply(.success([chat]), followups: nil)
 
-    #expect(model.messageDraft(for: needsItem("a")).text.isEmpty)
     #expect(model.messageDraft(for: chat).text == "to the group")
+    #expect(model.messageDraft(for: needsItem("a")) === model.messageDraft(for: chat))
     #expect(model.otherAnswerDraft(session: "a", ref: "summary:1", decision: 2).text == "Call it task")
+    #expect(model.messageDraft(for: needsItem("b")).text.isEmpty)
   }
 
   @Test func anUnsentOtherAnswerSurvivesARelaunch() async throws {

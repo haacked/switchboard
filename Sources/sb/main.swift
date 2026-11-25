@@ -81,8 +81,9 @@ let usage = """
     manager ls                    list the conversations, newest activity first
     manager <conv> --log          the conversation's last messages
     manager <conv> --read         mark the conversation's replies read
-    manager pin|unpin <conv>      pin the conversation to the top of the
-                                  app's Conversations list, or unpin it
+    manager pin|unpin <conv>      pin the conversation, or a group chat's
+                                  conversation, to the top of its list in the
+                                  app, or unpin it
     manager end <conv> [--drop <id>]… [--new [--name N]]
                                   end the conversation: stop its claude and remove
                                   it. Its transcript stays on disk. Its own waits

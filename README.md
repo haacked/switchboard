@@ -26,7 +26,7 @@ See [Sessions](docs/sessions.md#the-board).
 
 ### Group chats and the Manager
 
-Put related sessions in a group, and the group gets a chat: a Claude session that starts, follows, and messages only that group's sessions. The Manager is a conversation that does the same across every session. Both work through `sb`, so they can start sessions, set waits, and report back.
+Put related sessions in a group, and the group gets a chat: a Claude session that starts, follows, and messages only that group's sessions. The Manager is a conversation that does the same across every session. Both work through `sb`, so they can start sessions, set waits, and report back. A group chat and the Manager can each hold several conversations. The sidebar lists the Manager's, and a column beside a group chat lists the group's, where you start, switch between, rename, and delete them. `sb chat <group> --new`, `--ls`, `--session`, and `--end` do the same for a group chat from a terminal, and `sb rename` renames a conversation.
 
 ![A group chat for the Payments group: Claude reports the state of each session in the group and links to them](docs/images/group-chat.png)
 
