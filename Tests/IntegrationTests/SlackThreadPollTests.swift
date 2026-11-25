@@ -425,16 +425,10 @@ import Testing
   /// The stub's default profile id.
   static let selfId = "U0EXAMPLESELF"
 
-  /// The thread's `slack_threads` row as sbd stored it, read with sqlite3 while sbd runs.
   func storedRow(
     _ sbd: Instance, channel: String = SlackExample.channel, thread: String = SlackExample.rootTs
   ) throws -> JSON? {
-    let r = try runCommand(
-      "/usr/bin/sqlite3", ["-cmd", ".timeout 5000", sbd.home.database, "SELECT json FROM slack_threads"])
-    try #require(r.status == 0, "\(r.stderr)")
-    return r.stdout.split(separator: "\n").compactMap { JSON.parse(String($0)) }.first {
-      $0["channel"]?.string == channel && $0["thread"]?.string == thread
-    }
+    try sbd.slackThreadRow(channel: channel, thread: thread)
   }
 
   /// Stage 2's stated case: Alice replies, then you reply before the poll. The row keeps your reply as the last one

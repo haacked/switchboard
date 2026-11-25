@@ -100,7 +100,7 @@ enum PlannedScope {
     "followup-rm", "followup-import", "docket-start", "merge", "review", "ack", "resolved-todos",
     "dependency-resolved", "activity", "activity-report", "activity-clear", "live-next", "draft-post", "draft-check",
     "issues", "issues-refresh", "issues-start", "issues-clone", "issues-source-add", "issues-source-rm",
-    "issues-settings", "issues-dismiss", "link-open",
+    "issues-settings", "issues-dismiss", "link-open", "wait-check",
   ]
 
   /// The ops that `handleHostRequest` sends on their own path before the table: `hook` to `handleHostHook`, and
@@ -249,6 +249,12 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
   @Test func managerEndIsRefusedForTheReasonThatRmIs() {
     #expect(HostScope.refused["manager-end"] != nil)
     #expect(HostScope.refused["manager-end"] == HostScope.refused["rm"])
+  }
+
+  /// #504 D15: Check now reads a thread with this Mac's Slack connector and spends this Mac's tokens.
+  @Test func waitCheckIsRefusedForTheReasonThatWaitApproveIs() {
+    #expect(HostScope.refused["wait-check"] != nil)
+    #expect(HostScope.refused["wait-check"] == HostScope.refused["wait-approve"])
   }
 
   /// `manager-hint` reads and dismisses a conversation's hint on this Mac, as `manager-ls` reads its conversations.
@@ -418,6 +424,23 @@ private func refuses(_ text: String?, _ body: () throws -> Request) -> (Bool, St
     let authorized = try authorize("wait", ["session": "m1", "kind": .string(kind), "target": "local"])
 
     #expect(authorized.args["target"] == "local")
+  }
+
+  /// #504 D18: a reply wait from a host is allowed, and its Slack target is not a session or a PR.
+  @Test(arguments: [
+    "https://example.slack.com/archives/C0EXAMPLE01/p1794965000000100",
+    "https://example.slack.com/archives/C0EXAMPLE01/p1794965246462679?thread_ts=1794965000.000100&cid=C0EXAMPLE01",
+  ])
+  func aReplyWaitFromTheHostKeepsItsSlackTarget(target: String) throws {
+    let authorized = try authorize("wait", ["session": "m1", "kind": "reply", "target": .string(target)])
+
+    #expect(authorized.args["target"] == .string(target))
+  }
+
+  /// #504 D18: `requireGitHubWait` refuses only the kinds that the GitHub poller resolves, so a reply wait from a host
+  /// must not be one of them.
+  @Test func aReplyWaitIsNotAKindThatTheGitHubPollerResolves() {
+    #expect(!GitHubPoller.waitKinds.map(\.rawValue).contains("reply"))
   }
 
   @Test(arguments: ["review", "ci", "merge", "deploy"], ["7", "#7", "pr:7"])

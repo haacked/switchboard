@@ -125,15 +125,15 @@ public enum BoardColumn: String, Codable, CaseIterable, Sendable {
   /// What a Waiting card waits on and who holds it, from the first of these
   /// that applies: the oldest open wait, a dependency that holds the PR, a
   /// running background job, and the open PR's failed checks, conflict,
-  /// change request, or running checks. A `review` or `approval` wait names a
-  /// person, so it gives no holder.
+  /// change request, or running checks. A `review`, `approval`, or `reply`
+  /// wait waits on a person, so it gives no holder.
   static func waitingOn(_ oldest: Wait?, _ facts: SessionFacts) -> (holder: BoardHolder?, line: String)? {
     if let wait = oldest {
       let holder: BoardHolder? =
         switch wait.kind {
         case .session: .session
         case .manual: .you
-        case .review, .approval: nil
+        case .review, .approval, .reply: nil
         case .ci, .queue, .merge, .deploy, .date, .botReview: .machine
         }
       return (holder, wait.line)

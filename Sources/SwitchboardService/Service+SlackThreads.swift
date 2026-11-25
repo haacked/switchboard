@@ -9,6 +9,8 @@ struct SlackPollState {
   var lastError: String?
   /// Why the last due scan made no call, while the account has no budget.
   var skip: String?
+  /// The thread keys that Check now asked for. The next scan that starts reads them first and drops them from here.
+  var soon = Set<String>()
 }
 
 /// What sbd learned about one account's Slack connector in this run. Only `Service.slackQueue` touches it.
@@ -30,9 +32,64 @@ typealias SlackPollOutcome = Result<
 extension Service {
   static let slackQueue = DispatchQueue(label: "sbd.slack")
 
-  /// The threads that the open `reply` waits name. sbd reads them whether or not a link lists them, and keeps their
-  /// rows. #504 fills it in.
-  func replyWaitThreads() -> [SlackThreadRef] { [] }
+  /// The threads that the open `reply` waits of `waitHolders` name. sbd reads them whether or not a link lists them,
+  /// and keeps their rows.
+  func replyWaitThreads() -> [SlackThreadRef] {
+    waitHolders().flatMap { $0.waits ?? [] }.compactMap { wait in
+      wait.kind == .reply ? wait.replyThread.flatMap(SlackThreadRef.init(target:)) : nil
+    }
+  }
+
+  /// The refusal of a reply wait or a Check now while the poll is off.
+  var slackPollOff: APIError {
+    APIError(
+      "sbd doesn't read Slack threads while slack.pollSeconds is 0 in \(home.config), so a reply wait would never "
+        + "resolve")
+  }
+
+  /// The URL of the one Slack thread among the session's listed links, for a reply wait set without a target. A
+  /// reply's link and its thread's link name one thread. It refuses a session with no thread or with several.
+  func replyTarget(of id: String) throws -> String {
+    let e = entries[id]!
+    var seen = Set<String>()
+    let threads = e.session.links(found: e.facts.links).filter { link in
+      guard let ref = link.linkTarget.flatMap(SlackThreadRef.init(target:)) else { return false }
+      return seen.insert(ref.key).inserted
+    }
+    let name = e.session.name
+    guard threads.count == 1 else {
+      throw APIError(
+        threads.isEmpty
+          ? "\(name) has no Slack thread among its links, so give the thread's link as --target"
+          : "\(name) has \(threads.count) Slack threads among its links, so give one as --target: "
+            + threads.map(\.url).joined(separator: ", "))
+    }
+    return threads[0].url
+  }
+
+  /// The wait with its thread's status, for a `reply` wait whose URL parses. `watched` is the result of
+  /// `watchedSlackKeys`. Only a summary calls it, so no stored wait has the status.
+  func withThreadStatus(_ wait: Wait, watched: Set<String>) -> Wait {
+    guard wait.kind == .reply, let target = wait.replyThread else { return wait }
+    var out = wait
+    out.threadStatus = SlackThreadStatus(
+      target: target, row: slackThreads[target.key], watched: watched.contains(target.key), lookedAt: wait.created)
+    return out
+  }
+
+  /// `wait-check`, the Check now of a reply wait, puts the wait's thread first in the next scheduled scan. It starts
+  /// no scan. Only the user sends it, because each scan spends this Mac's tokens.
+  func waitCheckRequest(_ args: JSON, origin: RequestOrigin) throws -> JSON {
+    let id = try lookup(args)
+    try requireUser(args, "Only you can check a reply wait's thread now.")
+    guard config.slack.pollSeconds > 0 else { throw slackPollOff }
+    let wait = try openWait(id, args["wait"]?.string).wait
+    guard wait.kind == .reply, let target = wait.replyThread else {
+      throw APIError("wait \(wait.id) isn't a reply wait on a Slack thread")
+    }
+    slackPoll.soon.insert(target.key)
+    return try JSON(encoding: summary(id, for: origin))
+  }
 
   /// The links that every session lists, hidden links excluded.
   private func listedLinks() -> [ExternalLink] {
@@ -57,7 +114,8 @@ extension Service {
   }
 
   /// Runs on each tick. Once per `slack.pollSeconds`, it drops the rows that neither a session's link nor an open
-  /// reply wait names, and reads the watched threads that `SlackPoll.batch` picks.
+  /// reply wait names, and reads the watched threads that `SlackPoll.batch` picks, with the ones that Check now
+  /// asked for first.
   func pollSlackThreadsIfDue(now: Int64) {
     guard config.slack.pollSeconds > 0, !slackPoll.running,
       now - slackPoll.last >= Int64(config.slack.pollSeconds * 1000)
@@ -82,12 +140,13 @@ extension Service {
       return
     }
     slackPoll.skip = nil
-    let asks = SlackPoll.batch(refs, rows: slackThreads).map { ref in
+    let asks = SlackPoll.batch(refs, rows: slackThreads, first: slackPoll.soon).map { ref in
       (
         key: ref.key,
         ask: SlackPoll.Ask(channel: ref.channel, thread: ref.thread, oldest: slackThreads[ref.key]?.oldest)
       )
     }
+    slackPoll.soon.subtract(asks.map(\.key))
     slackPoll.running = true
     let model = config.slack.model
     Service.slackQueue.async { [self] in

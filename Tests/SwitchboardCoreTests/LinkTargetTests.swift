@@ -522,6 +522,66 @@ private let refusedOther: [RefusedLink] = [
       #expect(target.key.hasPrefix("\(target.kind.rawValue):"), "\(row.name)")
     }
   }
+
+  // MARK: Workspace
+
+  /// A Slack target keeps its workspace, so a reply wait can build a reply's link from parsed parts.
+  @Test(arguments: [
+    (LinkFixtures.slackRoot, "example"), (LinkFixtures.slackReply, "example"),
+    ("https://my-team-2.slack.com/archives/\(ch)/\(rootP)", "my-team-2"),
+    ("https://Example.Slack.com/archives/\(ch)/\(rootP)", "example"),
+    ("https://grafana.slack.com/archives/\(ch)/\(rootP)", "grafana"),
+  ])
+  func aSlackTargetHasItsWorkspace(_ url: String, _ workspace: String) throws {
+    let target = try #require(LinkTarget.parse(url))
+
+    #expect(target.workspace == workspace)
+  }
+
+  @Test(arguments: [
+    LinkFixtures.linear, LinkFixtures.notion, LinkFixtures.google, LinkFixtures.grafana,
+  ])
+  func aTargetThatIsNotSlackHasNoWorkspace(_ url: String) throws {
+    let target = try #require(LinkTarget.parse(url))
+
+    #expect(target.workspace == nil)
+  }
+
+  // MARK: A reply's link
+
+  @Test func aReplysLinkHasTheFormThatSlacksCopyLinkGives() {
+    let url = LinkTarget.slackReplyURL(workspace: "example", channel: ch, thread: rootTs, ts: replyTs)
+
+    #expect(url == LinkFixtures.slackReply)
+  }
+
+  @Test func aReplysLinkParsesToItsThreadsKey() throws {
+    let url = LinkTarget.slackReplyURL(workspace: "example", channel: ch, thread: rootTs, ts: replyTs)
+
+    let target = try #require(LinkTarget.parse(url))
+
+    #expect(target.key == LinkFixtures.slackRootKey)
+  }
+
+  @Test func aReplysLinkParsesToItsMessageTs() throws {
+    let url = LinkTarget.slackReplyURL(workspace: "example", channel: ch, thread: rootTs, ts: replyTs)
+
+    let target = try #require(LinkTarget.parse(url))
+
+    #expect(target.messageTs == replyTs)
+    #expect(target.thread == rootTs)
+    #expect(target.channel == ch)
+  }
+
+  @Test(arguments: ["example", "my-team-2", "a"], ["C0EXAMPLE01", "D0EXAMPLE01", "0123456789"])
+  func aReplysLinkParsesBackToItsWorkspaceAndChannel(_ workspace: String, _ channel: String) throws {
+    let url = LinkTarget.slackReplyURL(workspace: workspace, channel: channel, thread: rootTs, ts: replyTs)
+
+    let target = try #require(LinkTarget.parse(url), "\(url)")
+
+    #expect(target.workspace == workspace)
+    #expect(target.key == "slack:\(workspace)/\(channel)/\(rootTs)")
+  }
 }
 
 /// The kinds and authors that a link carries.

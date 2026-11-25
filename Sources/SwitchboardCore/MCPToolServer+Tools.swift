@@ -112,12 +112,13 @@ extension MCPToolServer {
       ], required: ["repository", "branch", "prompt"]),
     Tool(
       "set_wait",
-      "Sets a wait on a session, by default the calling session. In a Manager conversation, a wait that resumes goes to the operator, and the operator gets the message instead of you. A PR wait stays on the conversation when it has no `target`, which means the session's own PR, or a PR given without its repository. A wait that notifies also stays, and a manual wait notifies by default. Pass `here` to keep any other wait on the conversation. The kinds ci, review, bot-review, approval, queue, merge, and deploy wait on a PR. Pass it as `target`, or leave `target` out to use the session's own PR. review needs `who`. deploy needs `environment`. session waits on another session, given as `target`, until it reaches `state` (default done). date waits until `until`. manual, the default, waits on something outside Switchboard, which `note` describes.",
+      "Sets a wait on a session, by default the calling session. In a Manager conversation, a wait that resumes goes to the operator, and the operator gets the message instead of you. A PR wait stays on the conversation when it has no `target`, which means the session's own PR, or a PR given without its repository. A wait that notifies also stays, and a manual wait notifies by default. Pass `here` to keep any other wait on the conversation. The kinds ci, review, bot-review, approval, queue, merge, and deploy wait on a PR. Pass it as `target`, or leave `target` out to use the session's own PR. review needs `who`. deploy needs `environment`. session waits on another session, given as `target`, until it reaches `state` (default done). date waits until `until`. reply waits on a Slack thread until someone other than the user replies in it after the wait is set. Pass a Slack message link as `target`, or leave `target` out to use the session's one Slack thread. manual, the default, waits on something outside Switchboard, which `note` describes.",
       [
         "session": session,
         "kind": string(
-          "manual, ci, review, bot-review, approval, queue, merge, deploy, session, or date. Default manual."),
-        "target": string("A PR (owner/name#N or a URL), or for kind session another session."),
+          "manual, ci, review, bot-review, approval, queue, merge, deploy, session, date, or reply. Default manual."),
+        "target": string(
+          "A PR (owner/name#N or a URL), for kind session another session, or for kind reply a Slack message link."),
         "who": string("The reviewer, for kind review."),
         "environment": string("dev, prod-us, prod-eu, or prod, for kind deploy."),
         "service": string("The service, for kind deploy."),

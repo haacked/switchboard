@@ -38,10 +38,16 @@ public enum SlackPoll {
   /// The most threads that one poll reads.
   public static let maxThreads = 20
 
-  /// The threads that one poll reads: up to `maxThreads`, the ones never asked for first and then the ones asked
-  /// for longest ago. A failed read counts as asked, so threads whose reads always fail can't take every slot.
-  public static func batch(_ refs: [SlackThreadRef], rows: [String: SlackThread]) -> [SlackThreadRef] {
-    Array(refs.sorted { (rows[$0.key]?.tried ?? -1) < (rows[$1.key]?.tried ?? -1) }.prefix(maxThreads))
+  /// The threads that one poll reads: up to `maxThreads`, the ones whose keys `first` holds first, then the ones
+  /// never asked for, and then the ones asked for longest ago. Threads in the same place keep the order of `refs`.
+  /// A failed read counts as asked, so threads whose reads always fail can't take every slot.
+  public static func batch(_ refs: [SlackThreadRef], rows: [String: SlackThread], first: Set<String> = [])
+    -> [SlackThreadRef]
+  {
+    let order = refs.enumerated().map { i, ref in
+      (ref: ref, place: (first.contains(ref.key) ? 0 : 1, rows[ref.key]?.tried ?? -1, i))
+    }
+    return Array(order.sorted { $0.place < $1.place }.map(\.ref).prefix(maxThreads))
   }
 
   /// The settings that override what `--setting-sources user` loads: no hooks, no memory, no CLAUDE.md, and no

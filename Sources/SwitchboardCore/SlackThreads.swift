@@ -54,6 +54,14 @@ public struct SlackThreadRef: Equatable, Sendable {
   public var thread: String
 }
 
+extension SlackThreadRef {
+  /// The thread of a Slack target, or nil for a target without a channel and a thread.
+  public init?(target: LinkTarget) {
+    guard target.kind == .slack, let channel = target.channel, let thread = target.thread else { return nil }
+    self.init(key: target.key, channel: channel, thread: thread)
+  }
+}
+
 /// Which Slack links sbd reads.
 public enum SlackWatch {
   /// How long sbd reads a thread after its link entered a session's list.
@@ -73,9 +81,9 @@ public enum SlackWatch {
     var refs: [SlackThreadRef] = []
     for link in links {
       guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: waitKeys),
-        let channel = target.channel, let thread = target.thread, seen.insert(target.key).inserted
+        let ref = SlackThreadRef(target: target), seen.insert(ref.key).inserted
       else { continue }
-      refs.append(SlackThreadRef(key: target.key, channel: channel, thread: thread))
+      refs.append(ref)
     }
     return refs + replyWaits.filter { seen.insert($0.key).inserted }
   }
@@ -125,7 +133,7 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
 
   /// The text on one line with control characters escaped, then cut to `max`. Escaping first keeps the cut a bound
   /// on what the row shows, because an escape is several characters long.
-  private static func clipped(_ text: String, max: Int) -> String {
+  static func clipped(_ text: String, max: Int) -> String {
     truncated(oneLine(text, max: .max).printable, max: max)
   }
 

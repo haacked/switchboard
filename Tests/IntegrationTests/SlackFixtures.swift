@@ -73,6 +73,16 @@ extension Instance {
     return try #require(summary["links"]?.array?.first { $0["url"]?.string == url }, "no link to \(url)")
   }
 
+  /// The thread's `slack_threads` row as sbd stored it, read with sqlite3 while sbd runs.
+  func slackThreadRow(channel: String = SlackExample.channel, thread: String = SlackExample.rootTs) throws -> JSON? {
+    let r = try runCommand(
+      "/usr/bin/sqlite3", ["-cmd", ".timeout 5000", home.database, "SELECT json FROM slack_threads"])
+    try #require(r.status == 0, "\(r.stderr)")
+    return r.stdout.split(separator: "\n").compactMap { JSON.parse(String($0)) }.first {
+      $0["channel"]?.string == channel && $0["thread"]?.string == thread
+    }
+  }
+
   /// Moves the clock so a scan is due, and returns the earliest time that a poll after the move records as `read`.
   func advanceToPoll(by ms: Int64 = SlackFixtures.step) throws -> Int64 {
     let due = try now() + ms

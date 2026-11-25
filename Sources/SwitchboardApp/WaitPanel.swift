@@ -83,6 +83,8 @@ struct WaitPanel: View {
       }
     case .date, .manual:
       row.target = wait.until.map(Target.time)
+    case .reply:
+      break
     case .ci, .review, .botReview, .approval, .queue, .merge, .deploy:
       guard let pr = pullRequest(of: wait, in: session) else {
         row.target = .unresolved

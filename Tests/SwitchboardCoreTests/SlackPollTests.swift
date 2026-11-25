@@ -525,6 +525,73 @@ extension SlackPollTests {
 
       #expect(Set(SlackPoll.batch(refs, rows: rows).map(\.key)) == Set(refs.dropFirst().map(\.key)))
     }
+
+    // MARK: Check now (#504 D15)
+
+    /// Rows that every thread was asked for at the same time, so only `first` can change the order.
+    static func askedAtOnce(_ refs: [SlackThreadRef]) -> [String: SlackThread] {
+      Dictionary(uniqueKeysWithValues: refs.map { ($0.key, Self.row($0, read: Self.now, tried: Self.now)) })
+    }
+
+    @Test func aFirstKeyGoesFirst() {
+      let refs = Self.refs(3)
+
+      let batch = SlackPoll.batch(refs, rows: Self.askedAtOnce(refs), first: [refs[2].key])
+
+      #expect(batch.first == refs[2])
+    }
+
+    @Test func aFirstKeyGoesBeforeAThreadNeverAskedFor() {
+      let refs = Self.refs(2)
+      let rows = [refs[1].key: Self.row(refs[1], read: Self.now, tried: Self.now)]
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[1].key])
+
+      #expect(batch.map(\.key) == [refs[1].key, refs[0].key])
+    }
+
+    /// The thread asked for most recently would be the one left out of 21.
+    @Test func aFirstKeyIsInTheBatchAheadOfTwentyThreadsAskedForLongerAgo() {
+      let refs = Self.refs(21)
+      var rows = Dictionary(
+        uniqueKeysWithValues: refs.enumerated().map { i, ref in
+          (ref.key, Self.row(ref, read: Self.now, tried: Self.now - Int64(i + 1) * 1000))
+        })
+      rows[refs[0].key] = Self.row(refs[0], read: Self.now, tried: Self.now)
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[0].key])
+
+      #expect(batch.count == SlackPoll.maxThreads)
+      #expect(batch.first == refs[0])
+    }
+
+    @Test func theOtherThreadsKeepTheirOrderAfterTheFirstKeys() {
+      let refs = Self.refs(4)
+      let rows = Dictionary(
+        uniqueKeysWithValues: refs.enumerated().map { i, ref in
+          (ref.key, Self.row(ref, read: Self.now, tried: Self.now - Int64(10 - i) * 1000))
+        })
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[3].key])
+
+      #expect(batch.map(\.key) == [refs[3], refs[0], refs[1], refs[2]].map(\.key))
+    }
+
+    @Test func aFirstKeyThatNoRefHasChangesNothing() {
+      let refs = Self.refs(3)
+      let rows = Self.askedAtOnce(refs)
+
+      #expect(
+        SlackPoll.batch(refs, rows: rows, first: ["slack:example/C0NOPE/1794965000.000100"])
+          == SlackPoll.batch(refs, rows: rows))
+    }
+
+    @Test func noFirstKeysGiveTheBatchWithout() {
+      let refs = Self.refs(3)
+      let rows = Self.askedAtOnce(refs)
+
+      #expect(SlackPoll.batch(refs, rows: rows, first: []) == SlackPoll.batch(refs, rows: rows))
+    }
   }
 }
 

@@ -4,7 +4,7 @@ import Foundation
 /// so that a bad value gets an error that names it.
 public struct WaitRequest: Codable, Equatable, Sendable {
   public var kind: String?
-  /// A PR for the PR kinds, or a session for `session`.
+  /// A PR for the PR kinds, a session for `session`, or a Slack message link for `reply`.
   public var target: String?
   public var who: String?
   public var environment: String?
@@ -79,6 +79,10 @@ public struct WaitRequest: Codable, Equatable, Sendable {
       guard other.id != waiter else { throw APIError("a session can't wait on itself") }
       wait.session = other
       wait.state = try oneOf("state", state ?? AttentionState.done.rawValue, AttentionState.allCases, \.rawValue)
+    case .reply:
+      guard let target else { throw APIError("a reply wait needs a Slack message link as its target") }
+      wait.url = try? ExternalLink.cleanURL(target)
+      guard wait.replyThread != nil else { throw APIError("\(target) isn't a Slack message link") }
     case .date, .manual:
       if let until {
         guard let time = Wait.parseTime(until, now: now) else { throw APIError("can't read the time \(until)") }
