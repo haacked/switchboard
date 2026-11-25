@@ -1,6 +1,5 @@
 import Foundation
 import SwitchboardCore
-import os
 
 /// Finds each session's PR and polls GitHub for its state. One poll runs at
 /// a time, on `queue`. A poll reads the sessions from the service, asks
@@ -15,23 +14,8 @@ final class GitHubPoller {
   let queue = DispatchQueue(label: "sbd.github")
   private var timer: DispatchSourceTimer?
 
-  /// The state that `send` reads and writes. A request can run off `queue`,
-  /// so the state sits behind a lock. No request or `gh` call runs while the
-  /// lock is held.
-  private struct HTTPState {
-    var token: String?
-    /// After GitHub's rate limit, no request to that quota goes out before
-    /// this time. GitHub counts GraphQL and REST (`core`) requests separately.
-    /// Other `gh` calls with the same token spend `core`.
-    var graphQLPausedUntil: Int64 = 0
-    var restPausedUntil: Int64 = 0
-  }
-  private let http = OSAllocatedUnfairLock(initialState: HTTPState())
-  /// The requests and points since sbd started. `send` and `request` can run off `queue`, so the counts sit
-  /// behind a lock.
-  private let usage = OSAllocatedUnfairLock(initialState: GitHubUsage(since: nowMs()))
-
-  var graphQLPausedUntil: Int64 { http.withLock { $0.graphQLPausedUntil } }
+  /// Sends the poller's requests to GitHub. A later source of PR changes shares it.
+  let client: GitHubClient
   var tracked: [String: Tracked] = [:]
   /// The PRs that this sbd has read, by node id. `store` writes each entry.
   var prs: [String: CachedPR] = [:]
@@ -201,7 +185,7 @@ final class GitHubPoller {
     var facts: SessionFacts
   }
 
-  struct Stats: Encodable {
+  struct Stats: Encodable, GitHubCost {
     var lookups = 0
     var polled = 0
     var requests = 0
@@ -221,6 +205,7 @@ final class GitHubPoller {
   init(service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings) {
     self.service = service
     self.settings = settings
+    self.client = GitHubClient(settings: settings)
     self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
     self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
   }
@@ -235,10 +220,11 @@ final class GitHubPoller {
   }
 
   /// Reads the PRs, whether or not they are due, at a poll `after` ms from now or later. The requests that come
-  /// before that poll share it. A PR that no session, wait, or merge trigger names is not read. It runs on `queue`.
-  func requestRead(_ ids: some Sequence<String>, after: Int64) {
+  /// before that poll share it. A PR that no session, wait, or merge trigger names is not read. `sb poll --stats`
+  /// counts each read under `trigger`. It runs on `queue`.
+  func requestRead(_ ids: some Sequence<String>, after: Int64, trigger: ReadTrigger) {
     dispatchPrecondition(condition: .onQueue(queue))
-    if let at = readRequests.request(ids, at: nowMs() + after) { scheduleWake(at) }
+    if let at = readRequests.request(ids, at: nowMs() + after, trigger: trigger) { scheduleWake(at) }
   }
 
   /// Runs the poll that a request scheduled, unless an earlier poll read every due request. Then it schedules a
@@ -262,9 +248,6 @@ final class GitHubPoller {
     t.schedule(deadline: .now() + .milliseconds(Int(max(0, at - nowMs()))))
   }
 
-  /// Sends one HTTP request and returns the status, the headers, and the body. Tests replace it.
-  var transport: (URLRequest) throws -> (Int, [String: String], Data) = httpRequest
-
   /// Whether this Mac's GitHub login may read `repo` for a session on `host`. A session on this Mac reads any repo.
   /// A box chooses the repo of its session through its git remotes, its transcript, its PR's body, and its waits. A
   /// session on a host therefore reads only a repo that `Service.hostMayRead` allows.
@@ -285,7 +268,7 @@ final class GitHubPoller {
 
   /// The GitHub requests and points since sbd started, without polling.
   func usageReport() -> JSON {
-    (try? JSON(encoding: usage.withLock { $0 }.report(now: nowMs()))) ?? [:]
+    (try? JSON(encoding: client.usageReport())) ?? [:]
   }
 
   private func cycle(all: Bool) -> JSON {
@@ -312,9 +295,7 @@ final class GitHubPoller {
     targets = targets.filter { interest.keys.contains($0.key) }
     do {
       try lookUp(all: all, now: now, interest: interest, stats: &stats)
-      // A requested PR, such as an edge that `recordDependencies` kept, is read at once, as a new wait's PR is.
       var waited = waitedOn(interest)
-      for id in requested { waited.created[id] = max(waited.created[id] ?? 0, now) }
       // A request's hold ends `readMs` after a turn ends. The PR reads once after each such turn, so the hold sees
       // a push that the turn made even when the PR polls at the idle rate.
       // The PR also reads once after an acknowledgment expires, so the item that returns to the Inbox shows what
@@ -327,7 +308,7 @@ final class GitHubPoller {
           waited.created[id] = max(waited.created[id] ?? 0, at + acknowledgedMs)
         }
       }
-      try readPRs(all: all, now: now, waited: waited, queued: queuedPRs(), stats: &stats)
+      try readPRs(all: all, now: now, waited: waited, requested: requested, queued: queuedPRs(), stats: &stats)
       try checkDeploys(
         deployTargets(interest) + edgeDeployTargets(sessions, now: now), all: all, now: now, stats: &stats)
     } catch {
@@ -362,7 +343,7 @@ final class GitHubPoller {
     if let codeOwnersError { result["codeOwnersError"] = .string(codeOwnersError) }
     if let mergeDetailsError { result["mergeDetailsError"] = .string(mergeDetailsError) }
     if let problem = trunk.problem { result["trunkError"] = .string(problem) }
-    let paused = http.withLock { max($0.graphQLPausedUntil, $0.restPausedUntil) }
+    let paused = client.pausedUntil
     if paused > nowMs() { result["pausedUntil"] = .number(Double(paused)) }
     return .object(result)
   }
@@ -569,7 +550,7 @@ final class GitHubPoller {
     var found: [PRKey: String?] = [:]
     for chunk in GitHub.chunks(Array(keys), size: GitHub.lightChunkSize) {
       let (query, variables) = GitHub.lookupQuery(chunk)
-      found.merge(GitHub.parseLookup(try request(query, variables, stats: &stats), chunk)) { $1 }
+      found.merge(GitHub.parseLookup(try client.request(query, variables, stats: &stats), chunk)) { $1 }
     }
     stats.lookups = keys.count
     for key in interest.keys { if let result = found[key] { targets[key] = Target(prId: result, lookedUp: now) } }
@@ -593,15 +574,17 @@ final class GitHubPoller {
   /// that GitHub reports NOT_FOUND, as after a deletion, leaves its sessions,
   /// which look their PR up again after the idle interval. A PR that failed
   /// in another way keeps what the poller last read.
-  private func readPRs(all: Bool, now: Int64, waited: Waited, queued: Set<String>, stats: inout Stats) throws {
-    // A PR in `waited.pending` or in Trunk's queue polls at the pending rate. A
-    // PR with any open wait also polls at once when the wait is newer than the
-    // last read. That read can't show what happened after the wait was set.
+  private func readPRs(
+    all: Bool, now: Int64, waited: Waited, requested: [String: ReadTrigger], queued: Set<String>, stats: inout Stats
+  ) throws {
+    // A PR that `waited.needs` names or that Trunk queued polls at the pending rate. A PR with any open wait also
+    // polls at once when the wait is newer than the last read. That read can't show what happened after the wait
+    // was set. A requested PR, such as an edge that `recordDependencies` kept, is read at once.
     var candidates: [String: ReadCandidate] = [:]
     for id in Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId)) {
       candidates[id] = ReadCandidate(
-        pr: prs[id]?.pr, lastPolled: prs[id]?.polled, waitedAt: waited.created[id],
-        pendingRate: waited.pending.contains(id) || queued.contains(id))
+        pr: prs[id]?.pr, lastPolled: prs[id]?.polled, waitedAt: waited.created[id], requested: requested[id],
+        needs: waited.needs[id, default: []].union(queued.contains(id) ? .trunkQueue : []))
     }
     let triggers = GitHub.dueReads(candidates, all: all, now: now, policy: settings.pollPolicy)
     let ids = triggers.keys.sorted()
@@ -614,7 +597,7 @@ final class GitHubPoller {
       }
       let requests = after.requests - before.requests
       let points = after.points - before.points
-      usage.withLock { $0.share(requests: requests, points: points, among: served, countsReads: countsReads) }
+      client.share(requests: requests, points: points, among: served, countsReads: countsReads)
     }
     var stacked: [String] = []
     var gone: Set<String> = []
@@ -624,7 +607,7 @@ final class GitHubPoller {
       // A request that throws still cost what `send` counted, so the split keeps it.
       defer { count(chunk, from: before, to: stats, countsReads: parsed) }
       let (read, notFound) = GitHub.parseStatus(
-        try request(GitHub.statusQuery, idsVariable(chunk), stats: &stats), chunk)
+        try client.request(GitHub.statusQuery, idsVariable(chunk), stats: &stats), chunk)
       gone.formUnion(notFound)
       for (pr, comments) in read {
         // A PR whose base query fails keeps the merged base that `store` carried over.
@@ -671,7 +654,7 @@ final class GitHubPoller {
     for chunk in GitHub.chunks(stacked) {
       let before = stats
       defer { count(chunk, from: before, to: stats, countsReads: false) }
-      let response = try request(GitHub.baseQuery, idsVariable(chunk), stats: &stats)
+      let response = try client.request(GitHub.baseQuery, idsVariable(chunk), stats: &stats)
       for (id, base) in (response["data"]?["nodes"]?.array ?? []).compactMap(GitHub.parseMergedBase) {
         prs[id]?.pr.mergedBase = base
       }
@@ -689,7 +672,7 @@ final class GitHubPoller {
       let before = stats
       defer { count(Array(Set(chunk.map(\.prId))), from: before, to: stats, countsReads: false) }
       let ids = chunk.map(\.comment.id)
-      let (read, gone) = GitHub.parseBodies(try request(GitHub.bodyQuery, idsVariable(ids), stats: &stats), ids)
+      let (read, gone) = GitHub.parseBodies(try client.request(GitHub.bodyQuery, idsVariable(ids), stats: &stats), ids)
       for comment in read { bodies[comment.id] = comment }
       for s in chunk where gone.contains(s.comment.id) { bodies[s.comment.id] = s.comment }
     }
@@ -709,85 +692,6 @@ final class GitHubPoller {
 
   func idsVariable(_ ids: [String], with more: [String: JSON] = [:]) -> JSON {
     .object(more.merging(["ids": .array(ids.map(JSON.string))]) { $1 })
-  }
-
-  /// Sends one GraphQL request and returns the response, whose `data` isn't
-  /// null.
-  func request(_ query: String, _ variables: JSON, stats: inout Stats) throws -> JSON {
-    var req = try apiRequest("graphql")
-    req.httpMethod = "POST"
-    req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    req.httpBody = Data(JSON.object(["query": .string(query), "variables": variables]).text.utf8)
-    let (status, _, _, json) = try send(req, stats: &stats)
-    guard status == 200, let json, let data = json["data"], data != .null else {
-      throw APIError("GitHub answered \(status) \(GitHub.message(json))")
-    }
-    if json["errors"] != nil { logLine("github: \(GitHub.message(json))") }
-    let cost = data["rateLimit"]?["cost"]?.int ?? 0
-    stats.points += cost
-    usage.withLock { $0.points += cost }
-    return json
-  }
-
-  /// A request to `path` under the API base.
-  func apiRequest(_ path: String) throws -> URLRequest {
-    guard let url = URL(string: "\(settings.url)/\(path)") else { throw APIError("bad github url \(settings.url)") }
-    // URLSession's cache would answer a conditional request itself and hide the 304.
-    var req = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
-    req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-    return req
-  }
-
-  /// Sends the request with the token, and returns the status, the headers
-  /// with lowercase names, the body, and the body as JSON. A 401 gets a new
-  /// token from gh and one retry. A rate limit pauses the requests to the
-  /// same quota, GraphQL or REST, for as long as `GitHub.rateLimit` says.
-  func send(_ request: URLRequest, stats: inout Stats) throws -> (
-    status: Int, headers: [String: String], body: Data, json: JSON?
-  ) {
-    let graphQL = request.url?.lastPathComponent == "graphql"
-    if http.withLock({ graphQL ? $0.graphQLPausedUntil : $0.restPausedUntil }) > nowMs() {
-      throw APIError("paused after a GitHub \(graphQL ? "GraphQL" : "core") rate limit")
-    }
-    func attempt() throws -> (Int, [String: String], Data) {
-      var req = request
-      req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
-      stats.requests += 1
-      usage.withLock { $0.requests += 1 }
-      return try transport(req)
-    }
-    var (status, headers, body) = try attempt()
-    if status == 401 {
-      http.withLock { $0.token = nil }
-      (status, headers, body) = try attempt()
-    }
-    let json = JSON.parse(String(decoding: body, as: UTF8.self))
-    let limit = GitHub.rateLimit(status: status, headers: headers, response: json, now: Date().timeIntervalSince1970)
-    if let pause = limit.pause {
-      let until = nowMs() + Int64(pause * 1000)
-      // Requests run at once, so a later answer must not shorten the pause that an earlier one set.
-      http.withLock {
-        if graphQL {
-          $0.graphQLPausedUntil = max($0.graphQLPausedUntil, until)
-        } else {
-          $0.restPausedUntil = max($0.restPausedUntil, until)
-        }
-      }
-    }
-    if limit.limited { throw APIError("GitHub rate limit: \(GitHub.message(json))") }
-    return (status, headers, body, json)
-  }
-
-  private func currentToken() throws -> String {
-    if let token = http.withLock({ $0.token }) { return token }
-    guard let gh = findExecutable(settings.gh) else { throw APIError("can't find \(settings.gh)") }
-    let r = try runCommand(gh, ["auth", "token"])
-    let t = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard r.status == 0, !t.isEmpty else {
-      throw APIError("gh auth token failed: \(oneLine(r.stderr, max: 120))")
-    }
-    http.withLock { $0.token = t }
-    return t
   }
 
   // MARK: Events

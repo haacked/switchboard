@@ -30,7 +30,7 @@ private final class RequestedReads {
     }
     // A requested read counts only when it is newer than the last read, as a wait does.
     h.poller.store(pr, comments: [], polled: nowMs() - 1_000)
-    h.poller.transport = { [requests] req in
+    h.poller.client.transport = { [requests] req in
       if JSON.parse(String(decoding: req.httpBody ?? Data(), as: UTF8.self))?["query"]?.string == GitHub.statusQuery {
         requests.withLock { $0 += 1 }
       }
@@ -43,7 +43,9 @@ private final class RequestedReads {
   var count: Int { requests.withLock { $0 } }
   var scheduled: [Int64] { wakes.withLock { $0 } }
 
-  func request(_ ids: [String], after: Int64) { poller.queue.sync { poller.requestRead(ids, after: after) } }
+  func request(_ ids: [String], after: Int64) {
+    poller.queue.sync { poller.requestRead(ids, after: after, trigger: .event) }
+  }
   func wake() { poller.queue.sync { poller.readWake() } }
 }
 

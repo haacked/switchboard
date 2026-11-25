@@ -22,7 +22,8 @@ import Testing
     _ pr: PullRequest?, polledAgo: Int64?, waitedAgo: Int64? = nil, pendingRate: Bool = false
   ) -> ReadCandidate {
     ReadCandidate(
-      pr: pr, lastPolled: polledAgo.map { now - $0 }, waitedAt: waitedAgo.map { now - $0 }, pendingRate: pendingRate)
+      pr: pr, lastPolled: polledAgo.map { now - $0 }, waitedAt: waitedAgo.map { now - $0 },
+      needs: pendingRate ? Wait.Kind.ci.needs : [])
   }
 
   /// The policy of `GitHubSettings` gives every PR the settings' rates.
@@ -32,7 +33,7 @@ import Testing
     settings.idlePollSeconds = 200
     let expected = PollRates(pendingMs: settings.pendingMs, idleMs: settings.idleMs)
     for pr in [nil, Self.pending, Self.inRepo(Self.settled, "haacked/switchboard")] as [PullRequest?] {
-      #expect(settings.pollPolicy.rates(pr) == expected)
+      #expect(settings.pollPolicy.rates(pr, []) == expected)
     }
   }
 
@@ -59,7 +60,7 @@ import Testing
 
   /// A policy that slows one repo's PRs leaves the other repo's PRs at their own rates.
   @Test func eachPRPollsAtTheRatesThatThePolicyGivesIt() {
-    let policy = PollPolicy { $0?.repo == "haacked/switchboard" ? Self.slow : Self.rates }
+    let policy = PollPolicy { pr, _ in pr?.repo == "haacked/switchboard" ? Self.slow : Self.rates }
     let candidates = [
       "fast-pending": Self.candidate(Self.inRepo(Self.pending, "acme/widgets"), polledAgo: Self.rates.pendingMs),
       "slow-pending": Self.candidate(Self.inRepo(Self.pending, "haacked/switchboard"), polledAgo: Self.rates.pendingMs),

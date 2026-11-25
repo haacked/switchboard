@@ -128,7 +128,7 @@ extension GitHubPoller {
     let (owner, name) = GitHub.ownerAndName(ref.repo)
     var stats = Stats()
     do {
-      let response = try request(
+      let response = try client.request(
         GitHub.referenceQuery, ["o": .string(owner), "n": .string(name), "num": .number(Double(ref.number))],
         stats: &stats)
       guard var details = GitHub.parseReference(response["data"] ?? .null) else { return .notFound }
