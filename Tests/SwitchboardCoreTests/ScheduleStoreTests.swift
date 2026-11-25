@@ -83,3 +83,65 @@ import Testing
     #expect(try store.sessions() == [other])
   }
 }
+
+extension ScheduleStoreTests {
+  static func job(_ id: String, _ command: String, runner: String) throws -> Schedule {
+    let request = try JSONCoding.decode(
+      ScheduleRequest.self,
+      from: JSON.object(["every": .string("1h"), "prompt": .string(command), "runner": .string(runner)]).text)
+    return try request.makeSchedule(id: id, now: created)
+  }
+
+  /// A session with prompt schedules and one job of each detached runner, one of them mid-run with a recorded run.
+  static func sessionWithJobs() throws -> Session {
+    var s = try session()
+    var script = try job("rj7k2m", "git fetch --prune", runner: "script")
+    script.running = created + 5
+    var run = Schedule.Run(t: created + 1, outcome: .ran, skipped: 0)
+    run.exit = 0
+    run.ms = 1200
+    run.tail = "Already up to date."
+    script.record(run)
+    s.addSchedule(script)
+    s.addSchedule(try job("rj9w4t", "summarize the open PRs", runner: "headless"))
+    return s
+  }
+
+  @Test func savedJobsComeBackFromANewConnection() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let s = try Self.sessionWithJobs()
+    try Store(path: "\(dir)/sb.db").save(s)
+
+    let sessions = try Store(path: "\(dir)/sb.db").sessions()
+
+    #expect(sessions == [s])
+    #expect(sessions.first?.jobs == s.jobs)
+    #expect(sessions.first?.schedules == s.schedules)
+  }
+
+  @Test func aSessionWithOnlyPromptSchedulesStoresNoJobsKey() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    try Store(path: "\(dir)/sb.db").save(try Self.session())
+
+    #expect(!(try Self.dump("\(dir)/sb.db").contains("\"jobs\"")))
+  }
+
+  @Test func deletingTheSessionLeavesNoRowThatHoldsItsJobs() throws {
+    let dir = try tempFolder()
+    defer { try? FileManager.default.removeItem(atPath: dir) }
+    let store = try Store(path: "\(dir)/sb.db")
+    let s = try Self.sessionWithJobs()
+    try store.save(s)
+    try #require(try Self.dump("\(dir)/sb.db").contains("rj7k2m"))
+
+    try store.delete(session: SessionRemoval(id: s.id, name: s.name))
+
+    let dump = try Self.dump("\(dir)/sb.db")
+    for job in s.jobs ?? [] {
+      #expect(!dump.contains(job.id))
+      #expect(!dump.contains(job.prompt))
+    }
+  }
+}

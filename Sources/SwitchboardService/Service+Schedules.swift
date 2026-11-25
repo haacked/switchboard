@@ -41,6 +41,7 @@ extension Service {
       )
     }
     let request = try JSONCoding.convert(args, to: ScheduleRequest.self)
+    try refuseDetached(request)
     let group = try request.gate.flatMap { try topupGroup($0, args, origin: origin, caller: caller) }
     let taken = entries.values.flatMap(\.session.allSchedules).map(\.id)
     let schedule = try request.makeSchedule(id: shortId("r", taken: taken), now: nowMs(), group: group)
@@ -118,11 +119,20 @@ extension Service {
     let (id, found) = try ownedSchedule(args)
     if found.gate != nil { try checkTopupCaller(args, origin: origin, caller: caller) }
     let request = try JSONCoding.convert(args, to: ScheduleRequest.self)
+    try refuseDetached(request)
     let schedule = try found.edited(every: request.every, prompt: request.prompt, now: nowMs())
     guard schedule != found else { return try JSON(encoding: scheduleRow(id, found)) }
     try changeSchedule(id, schedule.id) { $0 = schedule }
     record(id, "schedule-edited", ["schedule": try eventJSON(schedule), "before": try eventJSON(found)])
     return try JSON(encoding: scheduleRow(id, schedule))
+  }
+
+  /// Refuses a headless or script schedule, and an account, a model, or a timeout. `fireDue` would send a headless
+  /// prompt or a script's command into the session, and no caller check covers a script yet.
+  private func refuseDetached(_ request: ScheduleRequest) throws {
+    guard try Schedule.Runner(parsing: request.runner) == .session, request.account == nil, request.model == nil,
+      request.timeout == nil
+    else { throw APIError("sbd doesn't run headless or script schedules yet") }
   }
 
   /// Run now: makes the schedule due and sends nothing. The next tick fires it

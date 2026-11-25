@@ -1,8 +1,35 @@
 import Foundation
 
-/// A prompt that sbd sends to a session on an interval. It lives in the
-/// session's row, so it survives restarts of sbd and of claude.
+/// A prompt that sbd sends to a session on an interval, or that sbd runs on its own in the session's folder: a
+/// headless `claude -p` turn or a shell command. It lives in the session's row, so it survives restarts of sbd and of
+/// claude.
+///
+/// An sbd built from an older commit decodes `Session.schedules` with that commit's types, and it refuses to load
+/// any session when one row fails to decode. So a new raw value of an enum that `Session.schedules` stores breaks a
+/// rollback. Put such a value under a new optional key, or in `Session.jobs`, which an older sbd ignores.
 public struct Schedule: Codable, Equatable, Sendable {
+  /// How a run reaches the session. A schedule stores nil for `session`, so its row reads the same to an older sbd.
+  public enum Runner: String, Codable, Sendable {
+    /// Sends the prompt into the session's claude.
+    case session
+    /// Runs the prompt as a one-shot `claude -p` turn in the session's folder.
+    case headless
+    /// Runs the prompt as a shell command in the session's folder.
+    case script
+
+    /// The runner that `text` names. Nil text means `session`.
+    public init(parsing text: String?) throws {
+      guard let text else {
+        self = .session
+        return
+      }
+      guard let runner = Runner(rawValue: text) else {
+        throw APIError("a schedule runs as session, headless, or script, not \(text)")
+      }
+      self = runner
+    }
+  }
+
   /// The result of one run.
   public struct Run: Codable, Equatable, Sendable {
     /// `pasted`, `resumed`, and `queued` are the raw values of `Delivery`.
@@ -11,6 +38,8 @@ public struct Schedule: Codable, Equatable, Sendable {
       case resumed
       case queued
       case failed
+      /// A headless or script run that exited with status 0. Only `Session.jobs` stores it.
+      case ran
 
       public init(_ delivery: Delivery) {
         switch delivery {
@@ -32,6 +61,12 @@ public struct Schedule: Codable, Equatable, Sendable {
     public var gated: Int?
     /// The id of the run's `sent` event. A failed run, and a run that sbd recorded before it stored this, has none.
     public var sent: Int64?
+    /// The exit status of a headless or script run. Nil when the process ended on a signal or never started.
+    public var exit: Int32?
+    /// How long a headless or script run took, in ms.
+    public var ms: Int64?
+    /// The last line of a headless or script run's output that isn't blank.
+    public var tail: String?
 
     public init(t: Int64, outcome: Outcome, skipped: Int, error: String? = nil, sent: Int64? = nil) {
       self.t = t
@@ -41,11 +76,13 @@ public struct Schedule: Codable, Equatable, Sendable {
       self.sent = sent
     }
 
-    /// Such as `pasted 5m ago · 2 skipped · 3 gated` or `failed 2m ago: <error>`.
+    /// Such as `pasted 5m ago · 2 skipped · 3 gated`, `failed 2m ago: <error>`, or `ran 5m ago · exit 0 · <tail>`.
     public func text(now: Int64 = nowMs()) -> String {
       var text = outcomeText(now: now)
       if skipped > 0 { text += " · \(skipped) skipped" }
       if let gated, gated > 0 { text += " · \(gated) gated" }
+      if let exit { text += " · exit \(exit)" }
+      if let tail, !tail.isEmpty { text += " · \(tail)" }
       return text
     }
 
@@ -66,6 +103,8 @@ public struct Schedule: Codable, Equatable, Sendable {
   public static let maxRuns = 10
   /// One minute, in ms.
   public static let minInterval: Int64 = 60_000
+  /// The shortest and the longest timeout of a headless or script run, in ms.
+  public static let timeouts: ClosedRange<Int64> = 10_000...7_200_000
 
   /// Unique across every session.
   public var id: String
@@ -88,6 +127,16 @@ public struct Schedule: Codable, Equatable, Sendable {
   public var runs: [Run]?
   /// Nil for a schedule that sends its prompt on every due time.
   public var gate: Gate?
+  /// Nil means `session`.
+  public var runner: Runner?
+  /// The Claude account of a headless run. Nil means the session's account.
+  public var account: String?
+  /// The model of a headless run. Nil means the model of the session's next launch.
+  public var model: String?
+  /// How long a headless or script run may take, in ms. Nil means the runner's default.
+  public var timeout: Int64?
+  /// The start of the headless or script run in flight, in ms since the epoch. Nil when no run is in flight.
+  public var running: Int64?
 
   public init(
     id: String, prompt: String, every: Int64, next: Int64, paused: Bool? = nil, by: Author, created: Int64,
@@ -131,22 +180,83 @@ public struct Schedule: Codable, Equatable, Sendable {
     return prompt
   }
 
-  /// The schedule with a new interval, a new prompt, or both. A new interval
+  /// The schedule with a new interval, prompt, account, model, or timeout. A new interval
   /// moves the next run to one interval from now when that is sooner, and a
-  /// paused schedule keeps its next run, because resume sets it.
-  public func edited(every: String?, prompt: String?, now: Int64) throws -> Schedule {
-    guard every != nil || prompt != nil else {
+  /// paused schedule keeps its next run, because resume sets it. An empty
+  /// account or model resets it to the session's. The runner never changes.
+  public func edited(
+    every: String?, prompt: String?, account: String? = nil, model: String? = nil, timeout: String? = nil,
+    now: Int64
+  ) throws -> Schedule {
+    guard every != nil || prompt != nil || account != nil || model != nil || timeout != nil else {
       throw APIError("an edit needs every, an interval such as 30m, or a prompt")
     }
+    let runner = self.runner ?? .session
+    if account != nil || model != nil, runner != .headless {
+      throw APIError(Schedule.accountRefusal(runner))
+    }
+    if timeout != nil, runner == .session { throw APIError(Schedule.timeoutRefusal) }
     var edited = self
     if let every {
       let (ms, soonest) = try Schedule.interval(every, after: now)
       edited.every = ms
       if paused != true { edited.next = min(next, soonest) }
     }
-    if let prompt { edited.prompt = try Schedule.cleanPrompt(prompt) }
+    if let prompt { edited.prompt = try Schedule.cleanPrompt(prompt, runner: runner) }
+    if let account { edited.account = account.isEmpty ? nil : try Schedule.cleanAccount(account) }
+    if let model { edited.model = model.isEmpty ? nil : try Schedule.cleanModel(model) }
+    if let timeout { edited.timeout = try Schedule.parseTimeout(timeout) }
+    if let stored = edited.timeout, stored > edited.every {
+      throw APIError(
+        "the timeout \(Schedule.intervalText(stored)) is longer than the interval \(Schedule.intervalText(edited.every)). A run must end before the next one is due, so shorten the timeout or lengthen the interval"
+      )
+    }
     return edited
   }
+
+  /// The prompt or command without the spaces and newlines at its ends. A script needs a command, and no run can
+  /// carry a NUL character.
+  static func cleanPrompt(_ text: String?, runner: Runner) throws -> String {
+    let prompt =
+      runner == .script
+      ? try cleanPrompt(text, refusal: "a script schedule needs a command") : try cleanPrompt(text)
+    if runner != .session, prompt.hasNul { throw APIError("a schedule's prompt or command can't hold a NUL character") }
+    return prompt
+  }
+
+  static func cleanAccount(_ account: String) throws -> String {
+    let account = account.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !account.isEmpty, !account.hasNul else { throw APIError("the account needs a name, such as work") }
+    return account
+  }
+
+  /// The model lands in claude's argv, so `Manager.modelProblem` checks it.
+  static func cleanModel(_ model: String) throws -> String {
+    if let problem = Manager.modelProblem(model) { throw APIError("model \(model): \(problem)") }
+    if model.hasNul { throw APIError("the model name can't hold a NUL character") }
+    return model
+  }
+
+  /// Reads one whole number and one unit, such as `10m`, and returns the timeout in ms. It refuses a timeout outside
+  /// `timeouts`.
+  public static func parseTimeout(_ text: String) throws -> Int64 {
+    guard let ms = Wait.durationMs(text) else {
+      throw APIError("can't read the timeout \(text). Write one number and one unit (s, m, or h), as 10m")
+    }
+    guard timeouts.contains(ms) else {
+      throw APIError("a timeout is 10s to 2h, so \(text) is out of range")
+    }
+    return ms
+  }
+
+  static func accountRefusal(_ runner: Runner) -> String {
+    runner == .script
+      ? "a script runs no claude, so it takes no account or model"
+      : "a schedule that sends its prompt into the session runs under the session's account and model. Add --headless to run it as its own claude -p turn"
+  }
+
+  static let timeoutRefusal =
+    "a schedule that sends its prompt into the session has no timeout. Only a headless or script schedule takes one"
 
   /// The interval that `every` names, in ms, and the run one interval after `now`. Each error names `every`.
   static func interval(_ every: String, after now: Int64) throws -> (every: Int64, next: Int64) {
@@ -265,14 +375,22 @@ public struct Schedule: Codable, Equatable, Sendable {
   }
 
   /// Why the session can't take `schedule`, or nil when it can: an existing
-  /// schedule sends the same prompt, or tops up the same repository for the
-  /// same group. The text names the existing schedule.
+  /// schedule of the same runner sends the same prompt or runs the same command, or tops up the same repository for
+  /// the same group. A headless schedule is a duplicate only on the same account and model too. The text names the
+  /// existing schedule.
   public static func duplicate(of schedule: Schedule, in existing: [Schedule]) -> String? {
     let prompt = schedule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     for other in existing where other.id != schedule.id {
-      if other.prompt.trimmingCharacters(in: .whitespacesAndNewlines) == prompt {
-        return
-          "schedule \(other.id) already sends this prompt to the session. Edit it or remove it with: sb schedule rm \(other.id)"
+      if other.runner == schedule.runner, other.account == schedule.account, other.model == schedule.model,
+        other.prompt.trimmingCharacters(in: .whitespacesAndNewlines) == prompt
+      {
+        let does =
+          switch schedule.runner ?? .session {
+          case .session: "sends this prompt to the session"
+          case .headless: "runs this prompt headless on the same account and model"
+          case .script: "runs this command"
+          }
+        return "schedule \(other.id) already \(does). Edit it or remove it with: sb schedule rm \(other.id)"
       }
       if let gate = schedule.gate, let otherGate = other.gate, gate.group == otherGate.group,
         Dependencies.sameRepo(gate.repo, otherGate.repo)
@@ -291,31 +409,50 @@ extension Session {
     Schedule.hold(done: done, paused: Pause.blocker(self) != nil, removing: removal?.holdsSession == true)
   }
 
-  /// Every schedule of the session, in the order it stores them. Code reads and changes the session's schedules
-  /// only through these accessors.
-  public var allSchedules: [Schedule] { schedules ?? [] }
+  /// Every schedule of the session: the ones that send their prompt into the session, then the headless and script
+  /// ones. Code reads and changes the session's schedules only through these accessors, so only they know that
+  /// `jobs` holds the headless and script schedules.
+  public var allSchedules: [Schedule] { (schedules ?? []) + (jobs ?? []) }
 
   public func schedule(_ id: String) -> Schedule? {
     allSchedules.first { $0.id == id }
   }
 
+  /// A schedule with a runner goes to `jobs`, because an older sbd would decode it in `schedules` as a prompt to send.
   public mutating func addSchedule(_ schedule: Schedule) {
-    schedules = allSchedules + [schedule]
-  }
-
-  /// It changes nothing when the session has no schedule with the id.
-  public mutating func changeSchedule(_ id: String, _ change: (inout Schedule) -> Void) {
-    schedules = schedules?.map { schedule in
-      var schedule = schedule
-      if schedule.id == id { change(&schedule) }
-      return schedule
+    if schedule.runner == nil {
+      schedules = (schedules ?? []) + [schedule]
+    } else {
+      jobs = (jobs ?? []) + [schedule]
     }
   }
 
-  /// A session with no schedule left stores nil, so its row matches one that never had a schedule.
+  /// It changes nothing when the session has no schedule with the id. The change keeps the schedule's runner, so
+  /// a schedule never moves between `schedules` and `jobs`.
+  public mutating func changeSchedule(_ id: String, _ change: (inout Schedule) -> Void) {
+    func changed(_ list: [Schedule]?) -> [Schedule]? {
+      list?.map { schedule in
+        var schedule = schedule
+        if schedule.id == id {
+          let runner = schedule.runner
+          change(&schedule)
+          schedule.runner = runner
+        }
+        return schedule
+      }
+    }
+    schedules = changed(schedules)
+    jobs = changed(jobs)
+  }
+
+  /// A session with no schedule left in an array stores nil there, so its row matches one that never had one.
   public mutating func removeSchedule(_ id: String) {
-    let rest = allSchedules.filter { $0.id != id }
-    schedules = rest.isEmpty ? nil : rest
+    func rest(_ list: [Schedule]?) -> [Schedule]? {
+      let rest = (list ?? []).filter { $0.id != id }
+      return rest.isEmpty ? nil : rest
+    }
+    schedules = rest(schedules)
+    jobs = rest(jobs)
   }
 }
 
@@ -337,6 +474,14 @@ public struct ScheduleRequest: Codable, Equatable, Sendable {
   public var by: String?
   /// Named `gate`, not `group`, so it can't collide with the scope field `group` that a scoped MCP server sends.
   public var gate: Gate?
+  /// `session`, `headless`, or `script`. Nil means `session`. A script's command travels in `prompt`.
+  public var runner: String?
+  /// A headless schedule's Claude account. On an edit, an empty value resets it to the session's.
+  public var account: String?
+  /// A headless schedule's model. On an edit, an empty value resets it to the session's.
+  public var model: String?
+  /// A headless or script run's timeout, such as `10m`.
+  public var timeout: String?
 
   /// The top-up gate as sb sends it. `group` is the group's id or name, which sbd resolves.
   public struct Gate: Codable, Equatable, Sendable {
@@ -369,18 +514,33 @@ public struct ScheduleRequest: Codable, Equatable, Sendable {
     }
   }
 
-  public init(every: String?, prompt: String?, by: String?, gate: Gate? = nil) {
+  public init(
+    every: String?, prompt: String?, by: String?, gate: Gate? = nil, runner: String? = nil, account: String? = nil,
+    model: String? = nil, timeout: String? = nil
+  ) {
     self.every = every
     self.prompt = prompt
     self.by = by
     self.gate = gate
+    self.runner = runner
+    self.account = account
+    self.model = model
+    self.timeout = timeout
   }
 
   /// Checks the arguments and builds a schedule whose first run is one
   /// interval after `now`. A request with a gate needs `group`, the group
   /// that sbd resolved from the gate's `group`, and gets the default prompt
-  /// when it has none.
+  /// when it has none. Only a headless schedule takes an account and a model,
+  /// only a headless or script schedule takes a timeout, and only a schedule
+  /// that sends its prompt into the session takes a gate.
   public func makeSchedule(id: String, now: Int64, group: (id: String, name: String)? = nil) throws -> Schedule {
+    let runner = try Schedule.Runner(parsing: runner)
+    if runner != .session {
+      return try makeDetached(id: id, runner: runner, now: now)
+    }
+    if account != nil || model != nil { throw APIError(Schedule.accountRefusal(runner)) }
+    if timeout != nil { throw APIError(Schedule.timeoutRefusal) }
     if gate != nil && group == nil { throw APIError("a top-up needs a group") }
     guard let every else { throw APIError("a schedule needs every, an interval such as 30m") }
     let (ms, next) = try Schedule.interval(every, after: now)
@@ -395,6 +555,26 @@ public struct ScheduleRequest: Codable, Equatable, Sendable {
       ?? Schedule.Gate.defaultPrompt(groupName: group.name, repo: gate.repo, target: gate.target)
     return Schedule(
       id: id, prompt: prompt, every: ms, next: next, by: try Author(parsing: by), created: now, gate: gate)
+  }
+
+  /// A headless or script schedule. `edited` checks the timeout, so an add and an edit refuse the same timeouts.
+  private func makeDetached(id: String, runner: Schedule.Runner, now: Int64) throws -> Schedule {
+    if gate != nil {
+      throw APIError("a top-up sends its prompt into the session, so it can't run headless or as a script")
+    }
+    if runner == .script, account != nil || model != nil { throw APIError(Schedule.accountRefusal(runner)) }
+    guard let every else { throw APIError("a schedule needs every, an interval such as 30m") }
+    let (ms, next) = try Schedule.interval(every, after: now)
+    var schedule = Schedule(
+      id: id, prompt: try Schedule.cleanPrompt(prompt, runner: runner), every: ms, next: next,
+      by: try Author(parsing: by), created: now)
+    schedule.runner = runner
+    if let account { schedule.account = try Schedule.cleanAccount(account) }
+    if let model { schedule.model = try Schedule.cleanModel(model) }
+    if let timeout {
+      schedule = try schedule.edited(every: nil, prompt: nil, timeout: timeout, now: now)
+    }
+    return schedule
   }
 }
 

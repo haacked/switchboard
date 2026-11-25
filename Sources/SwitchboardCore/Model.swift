@@ -69,8 +69,11 @@ public struct Session: Codable, Equatable, Sendable {
   public var waits: [Wait]?
   /// Nil in a session that an older sbd stored.
   public var notes: [Note]?
-  /// Nil when the session has none, and in a session that an older sbd stored.
+  /// The schedules that send their prompt into the session. Nil when the session has none, and in a session that an
+  /// older sbd stored. Read and change them through `allSchedules` and the other `Session` schedule accessors.
   public var schedules: [Schedule]?
+  /// The headless and script schedules, which an older sbd ignores. Nil when the session has none.
+  public var jobs: [Schedule]?
   /// The session that added this one, such as the session that captured a follow-up.
   public var parent: String?
   /// True for a Manager conversation, of which several can exist, and for the operator.

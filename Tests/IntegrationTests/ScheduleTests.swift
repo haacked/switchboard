@@ -237,6 +237,27 @@ import Testing
     #expect(try sbd.get(s.id).schedules == nil)
   }
 
+  /// sbd runs no headless or script schedule yet, and its tick would send one's prompt or command into the session.
+  @Test func theScheduleRequestRefusesAHeadlessOrScriptSchedule() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let session = JSON.string(s.id)
+    let base: [String: JSON] = ["session": session, "every": "30m", "prompt": "git fetch"]
+
+    for extra: [String: JSON] in [
+      ["runner": "script"], ["runner": "headless"], ["runner": "headless", "model": "haiku"],
+      ["account": "work"], ["model": "haiku"], ["timeout": "5m"],
+    ] {
+      let error = failure(sbd, "schedule", base.merging(extra) { $1 })
+      #expect(error.contains("headless or script"), "\(extra) failed with \(error)")
+    }
+    #expect(try sbd.get(s.id).schedules == nil)
+
+    let id = try schedule(sbd, s.id).schedule.id
+    let error = failure(sbd, "edit-schedule", ["schedule": .string(id), "timeout": "5m"])
+    #expect(error.contains("headless or script"), "\(error)")
+  }
+
   @Test func refusesAnEleventhScheduleOnASession() throws {
     let sbd = try Instance()
     let a = try sbd.new(name: "a")
