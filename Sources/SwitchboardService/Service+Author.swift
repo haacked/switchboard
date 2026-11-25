@@ -24,7 +24,8 @@ extension Service {
     guard origin == .mac, Self.groupAuthorOps.contains(request.op), case .client(let pid) = caller,
       var args = request.args.object, args["by"]?.string != Author.claude.rawValue
     else { return request }
-    let ancestry = pid.flatMap(Processes.ancestors(of:))
+    // A walk that stops before launchd (pid 1) read only part of the chain.
+    let ancestry = pid.flatMap(Processes.ancestors(of:)).flatMap { $0.contains(1) ? $0 : nil }
     let fresh = ancestry == nil ? nil : buildSnapshot()
     let inSession: Bool = queue.sync {
       guard let ancestry, let fresh else { return true }

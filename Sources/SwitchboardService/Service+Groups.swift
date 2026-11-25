@@ -286,11 +286,17 @@ extension Service {
   func groupShow(_ args: JSON, origin: RequestOrigin) throws -> GroupSummary {
     if origin == .mac, args["group"] != nil { return groupSummary(try lookupGroup(args)) }
     guard args["session"] != nil else {
-      throw APIError("name a group. In a Switchboard session, the group defaults to the session's group")
+      throw APIError(
+        origin == .mac
+          ? "name a group. In a Switchboard session, the group defaults to the session's group"
+          : "a request from a host reads the group of the session that SB_SESSION_ID names")
     }
     let session = try lookup(args)
     guard let own = groupOf(session).flatMap({ groups[$0] }) else {
-      throw APIError("\(session) is in no group. Name a group: sb group show <group>")
+      throw APIError(
+        origin == .mac
+          ? "\(session) is in no group. Name a group: sb group show <group>"
+          : "\(session) is in no group")
     }
     if case .remote(let host) = origin, let key = args["group"]?.string,
       (try? resolveRef(key, "group", [(own.id, own.name)])) == nil
