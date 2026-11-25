@@ -19,11 +19,10 @@ env:
   SB_CI_PARTS: 4
 
 concurrency:
-  group: test-${{ github.ref }}
-  # A ready_for_review run waits for the draft run on the same commit, which
-  # finishes in seconds. A cancelled draft run leaves a cancelled swift-test
-  # check that no later run replaces, and the merge gate refuses it.
-  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
+  # Draft runs have their own group, so a draft run never cancels the run that
+  # marking the PR ready starts, whichever reaches GitHub first.
+  group: test-${{ github.ref }}${{ github.event.pull_request.draft && '-draft' || '' }}
+  cancel-in-progress: true
 
 jobs:
   # Decides which macOS jobs the change runs (bin/lib/ci-jobs). A draft PR
@@ -81,6 +80,9 @@ jobs:
   # integration suites. The matrix holds only the parts that the changes job
   # picked.
   swift-test:
+    # A draft run's skipped checks have their own names, so they never hide the
+    # results of the ready run on the same commit.
+    name: ${{ github.event.pull_request.draft && 'swift-test (draft)' || format('swift-test ({0})', matrix.part) }}
     needs: changes
     if: needs.changes.outputs.parts != '[]'
     runs-on: macos-26
@@ -121,6 +123,7 @@ jobs:
   # drops check. On the runner, that check's click on Send does not send the
   # message. The same check passes on a developer's Mac.
   gui-test:
+    name: ${{ github.event.pull_request.draft && 'gui-test (draft)' || 'gui-test' }}
     needs: changes
     if: needs.changes.outputs.gui == 'true'
     runs-on: macos-26
