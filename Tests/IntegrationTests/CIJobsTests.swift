@@ -133,8 +133,6 @@ private struct CIJobs {
     default: nil
     }
   }
-
-  var runsEveryJob: Bool { result.status == 0 && parts == allParts && gui == true }
 }
 
 /// A scratch repo with the baseline files, and a package JSON file outside it.
@@ -265,7 +263,7 @@ private let rootMarkdown = [readme, "FxNotes.md", "-fxnotes.md"]
   }
 
   @Test(arguments: [
-    ([appFile, unitTestFile], allParts.suffix(1).map { $0 }, true),
+    ([appFile, unitTestFile], [4], true),
     ([unitTestFile, integrationFile], allParts, false),
     ([appFile, integrationFile], allParts, true),
     ([appFile, readme], [4], true),
@@ -463,6 +461,7 @@ private let rootMarkdown = [readme, "FxNotes.md", "-fxnotes.md"]
     ])
 
     expectEveryJob(try repo.run([appFile]))
+    expectJobs(try repo.run([unitTestFile]), parts: [4], gui: false)
   }
 
   /// A test can run a product without depending on the target that builds it.
@@ -516,6 +515,7 @@ private let rootMarkdown = [readme, "FxNotes.md", "-fxnotes.md"]
 
   @Test(arguments: [
     "#!/bin/bash\nsource bin/lib/swift-testing.sh\nbuild_tests\n", "#!/bin/bash\nswift build --build-tests\n",
+    "#!/bin/bash\nswift test --filter GUITests\n", "#!/bin/bash\nbin/lib/swiftpm test --filter GUITests\n",
   ])
   func aUnitTestFileRunsGuiTestWhenBinTestGuiBuildsTheTests(_ text: String) throws {
     let repo = try CIJobsRepo(files: ["bin/test-gui": text])
@@ -587,6 +587,6 @@ private let rootMarkdown = [readme, "FxNotes.md", "-fxnotes.md"]
 
     let run = try repo.run(mode, [readme])
 
-    #expect(run.result.status != 0 || run.runsEveryJob, "\(run.result.stdout)\n\(run.result.stderr)")
+    #expect(run.result.status == 2, "\(run.result.stdout)\n\(run.result.stderr)")
   }
 }

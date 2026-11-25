@@ -20,7 +20,10 @@ env:
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  # A ready_for_review run waits for the draft run on the same commit, which
+  # finishes in seconds. A cancelled draft run leaves a cancelled swift-test
+  # check that no later run replaces, and the merge gate refuses it.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 jobs:
   # Decides which macOS jobs the change runs (bin/lib/ci-jobs). A draft PR
