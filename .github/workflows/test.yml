@@ -9,6 +9,7 @@ on:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
 
@@ -20,7 +21,11 @@ env:
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  # A ready_for_review run never cancels a run. GitHub can handle a push after
+  # the ready_for_review event that followed it, and the ready run then has
+  # the previous commit. Cancelling the push's run would leave the PR's head
+  # without a Test check.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 jobs:
   # Decides which macOS jobs the change runs (bin/lib/ci-jobs). A draft PR
@@ -42,20 +47,39 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           PR_FILES: ${{ github.event.pull_request.changed_files }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           names='.filename, (.previous_filename // empty)'
           package=$RUNNER_TEMP/package.json
+          # A pull_request event's payload describes the PR when the event
+          # happened, so the PR's draft state and head come from the API. A
+          # failed lookup runs the jobs.
+          live='' newer=0
+          if [ -n "$PR" ]; then
+            live=$(gh api "repos/$REPO/pulls/$PR" --jq '"\(.draft) \(.head.sha)"') || live=''
+            # A run that starts later at the same commit waits for this one,
+            # and it decides which jobs the commit runs.
+            newer=$(gh api "repos/$REPO/actions/workflows/test.yml/runs?head_sha=$HEAD_SHA" \
+              --jq "[.workflow_runs[] | select(.id > $RUN_ID)] | length") || newer=0
+          fi
+          skip=''
+          if [ -n "$live" ] && [ "${live#* }" != "$HEAD_SHA" ]; then
+            skip="the PR's head moved to ${live#* }, and its own run tests it"
+          elif [ "$newer" -gt 0 ]; then
+            skip="a later run tests this commit"
+          fi
           # The PR API lists at most 3000 files. A compare lists at most 300
           # and does not say how many it left out, so a full page runs every
           # job.
-          # The event's payload can call the PR a draft after it was marked ready,
-          # when GitHub handles a push after the ready_for_review event. That run
-          # then tests the head, so the PR's state comes from the API. A failed
-          # lookup counts as ready, so it runs the jobs.
-          if [ -n "$PR" ] && [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = true ]; then
+          if [ -n "$skip" ]; then
+            echo "$skip, so no job runs"
+            printf 'parts=[]\ngui=false\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "${live%% *}" = true ]; then
             mode=draft files='' count=0
           elif [ -n "$PR" ]; then
             mode='pr'
