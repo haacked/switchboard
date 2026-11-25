@@ -37,10 +37,12 @@ final class MessageDrafts {
     }
   }
 
-  /// A group chat's draft follows the group, so a new chat session for the group keeps it.
-  static func key(for session: SessionSummary) -> String {
-    session.chat.map { "group:\($0)" } ?? session.id
-  }
+  /// Each session keeps its own draft, so each conversation of a group chat has its own.
+  static func key(for session: SessionSummary) -> String { session.id }
+
+  /// The prefix of the key under which an app from before several conversations per group kept a group chat's
+  /// draft, with the group's id after it.
+  private static let groupKeyPrefix = "group:"
 
   /// The key of the unsent Other answer to one decision of a session's list. The list's ref is part of the key,
   /// so a later list's decision with the same number starts empty.
@@ -106,6 +108,26 @@ final class MessageDrafts {
     let draft = MessageField.Draft()
     add(draft, for: key)
     return draft
+  }
+
+  /// Moves each draft kept under a group's key to the session that `chat` returns for the group, which is the
+  /// group's most recent conversation. A session that already holds a draft gets the group's text after its own,
+  /// and the group's images after its own. The group's key then goes away.
+  func moveGroupDrafts(to chat: (String) -> String?) {
+    var moved = false
+    for (key, legacy) in drafts where key.hasPrefix(Self.groupKeyPrefix) {
+      guard let id = chat(String(key.dropFirst(Self.groupKeyPrefix.count))) else { continue }
+      drafts[key] = nil
+      changes[key] = nil
+      if let target = drafts[id], !target.isEmpty {
+        target.text = [target.text, legacy.text].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        target.images += legacy.images
+      } else {
+        add(legacy, for: id)
+      }
+      moved = true
+    }
+    if moved { scheduleSave() }
   }
 
   /// Drops the drafts of targets that no longer exist.

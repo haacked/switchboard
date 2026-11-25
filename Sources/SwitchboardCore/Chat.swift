@@ -5,6 +5,14 @@ import Foundation
 public enum Chat {
   public static func name(group: String) -> String { "\(group) chat" }
 
+  /// The chat's own name, or nil when it has the default name of its group.
+  public static func ownName(_ name: String, group: String) -> String? { name == Chat.name(group: group) ? nil : name }
+
+  /// "<group> chat", then ": <own name>" for a chat that has one.
+  public static func title(group: String, ownName: String?) -> String {
+    Chat.name(group: group) + (ownName.map { ": \($0)" } ?? "")
+  }
+
   /// The CLAUDE.md that sbd keeps in each chat's folder, with the group's
   /// description quoted as data at the end when it has one.
   public static func guide(description: String?) -> String {

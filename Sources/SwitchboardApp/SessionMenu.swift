@@ -7,6 +7,7 @@ enum SessionMenuAction: Hashable {
   case snooze
   case copyLink
   case notes
+  case rename
   case pause
   case resume
   case startNow
@@ -25,7 +26,8 @@ enum SessionMenu {
   /// nil otherwise. A row in a multi-selection offers to delete the selection instead of the row alone. A session
   /// whose delete failed offers no Delete, because its Inbox item has Retry and Keep. A docket row offers Delete
   /// only in Done, because the confirmation describes a session that runs claude in a worktree. A Manager
-  /// conversation offers Delete through `manager-end`. A group chat and the Operator offer none.
+  /// conversation and a group chat's conversation offer Rename, and Delete through `manager-end`. The Operator
+  /// offers neither.
   /// `movesAccount` is true when the session can move to another account. `parentName` names the parent that the
   /// session can be unlinked from, and is nil when it has none.
   static func actions(
@@ -36,6 +38,7 @@ enum SessionMenu {
     if s.canSnooze { safe.append(.snooze) }
     safe.append(.copyLink)
     safe.append(.notes)
+    if s.kind.isUserConversation { safe.append(.rename) }
     if s.pause != nil {
       safe.append(.resume)
     } else if s.canPause {
@@ -51,7 +54,7 @@ enum SessionMenu {
       destructive.append(.deleteSelection(count: selectionCount))
     } else if s.removal == nil && (s.isRemovableDone || (s.isRemovableWork && s.docket == nil)) {
       destructive.append(.delete("Delete \(BoardModel.deletePlan(s).summary)…"))
-    } else if s.removal == nil && s.kind == .manager {
+    } else if s.removal == nil && s.kind.isUserConversation {
       destructive.append(.delete(ConversationRemovalText.deleteTitle))
     }
     return destructive.isEmpty ? safe : safe + [.divider] + destructive
@@ -101,6 +104,8 @@ struct SessionMenuItems<Extra: View>: View {
       CopyLinkMenuItem(session: session)
     case .notes:
       Button("Notes…") { model.editingNotes = id }
+    case .rename:
+      Button("Rename…") { model.renaming = id }
     case .pause:
       PauseMenuItems(id: id)
     case .resume:

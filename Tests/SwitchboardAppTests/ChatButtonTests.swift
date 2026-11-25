@@ -81,3 +81,77 @@ import Testing
       text(.needsMe("approve `touch x`")).value != text(.unread(1, working: false)).value)
   }
 }
+
+/// The mark of a group's Chat button on the Board, which sums up every conversation of the group (Decision 11):
+/// needs-you wins, then the summed unread count, which says working when any conversation is working, then working,
+/// then idle.
+@MainActor
+@Suite struct ChatButtonTests {
+  func conversation(_ id: String, unread: Int = 0, state: AttentionState = .needsYou, lastActivity: Int64 = 10)
+    -> SessionSummary
+  {
+    groupConversation(id, lastActivity: lastActivity, unread: unread, state: state)
+  }
+
+  @Test func aGroupWithNoConversationIsNone() {
+    #expect(ChatMark(chats: []) == .none)
+  }
+
+  /// With one conversation, the button shows what that conversation's row shows.
+  @Test func oneConversationsMarkIsItsOwnMark() throws {
+    let shapes = [
+      conversation("c"), conversation("c", unread: 2), conversation("c", state: .working),
+      conversation("c", unread: 2, state: .working), try carded(conversation("c"), kind: .send),
+      try carded(conversation("c", unread: 2), kind: .permission),
+    ]
+    for s in shapes {
+      #expect(ChatMark(chats: [s]) == ChatMark(s), "\(ChatMark(s))")
+    }
+  }
+
+  @Test func needsMeWinsOverUnreadAndWorking() throws {
+    let waiting = try carded(conversation("c3", lastActivity: 5), kind: .permission)
+
+    let mark = ChatMark(chats: [
+      conversation("c1", unread: 3, lastActivity: 30), conversation("c2", state: .working, lastActivity: 20), waiting,
+    ])
+
+    #expect(mark == ChatMark(waiting))
+  }
+
+  @Test func unreadCountsAddUpAcrossConversations() {
+    let mark = ChatMark(chats: [conversation("c1", unread: 2), conversation("c2", unread: 3)])
+
+    #expect(mark == .unread(5, working: false))
+  }
+
+  @Test func unreadSaysWorkingWhenAnyConversationIsWorking() {
+    let mark = ChatMark(chats: [conversation("c1", unread: 2), conversation("c2", state: .working)])
+
+    #expect(mark == .unread(2, working: true))
+  }
+
+  @Test func workingWithNothingUnreadIsWorking() {
+    let mark = ChatMark(chats: [conversation("c1"), conversation("c2", state: .working)])
+
+    #expect(mark == .working)
+  }
+
+  @Test func conversationsWithNothingToShowAreIdle() {
+    let mark = ChatMark(chats: [conversation("c1"), conversation("c2")])
+
+    guard case .idle = mark else {
+      Issue.record("\(mark)")
+      return
+    }
+  }
+
+  @Test func theBoardButtonReadsOnlyItsGroupsConversations() {
+    let model = appliedModel([
+      conversation("c1", unread: 1), conversation("c2", unread: 1),
+      groupConversation("other", group: "g2", lastActivity: 10, unread: 4),
+    ])
+
+    #expect(ChatMark(chats: model.chats(of: "g1")) == .unread(2, working: false))
+  }
+}

@@ -13,7 +13,7 @@ struct ConversationsSection: View {
     ConversationListSection(
       title: "Conversations", sessions: model.managers, activeAccount: activeAccount,
       newHelp: AppShortcut.newConversation.help("Start a Manager conversation"), newLabel: "New Manager conversation",
-      removableSelection: removableSelection
+      removableSelection: removableSelection, archive: $model.showingArchive
     ) {
       model.openManager(new: true)
     }
@@ -31,8 +31,11 @@ struct ConversationListSection: View {
   let newHelp: String
   /// The accessibility label of the header's new-conversation button.
   let newLabel: String
-  /// The number of multi-selected sessions that the row's Delete item deletes.
-  let removableSelection: Int
+  /// The number of multi-selected sessions that the row's Delete item deletes, or nil for a list outside the
+  /// sidebar, whose rows are never in its multi-selection.
+  let removableSelection: Int?
+  /// Whether the Archive group is open.
+  @Binding var archive: Bool
   let new: () -> Void
 
   var body: some View {
@@ -40,7 +43,7 @@ struct ConversationListSection: View {
     Section {
       ForEach(c.pinned + c.active) { row($0) }
       if !c.archived.isEmpty {
-        DisclosureGroup(isExpanded: $model.showingArchive) {
+        DisclosureGroup(isExpanded: $archive) {
           ForEach(c.archived) { row($0) }
         } label: {
           CountedTitle(title: "Archive", count: c.archived.count).foregroundStyle(.secondary)
@@ -73,7 +76,7 @@ struct ConversationListSection: View {
   }
 }
 
-/// A Manager conversation's sidebar row: its title, the time of its last
+/// A conversation's row in the sidebar or in a group chat's column: its title, the time of its last
 /// message, a preview of Claude's last reply, its mark, and a pin.
 struct ConversationRow: View {
   @EnvironmentObject var model: BoardModel

@@ -2,13 +2,13 @@ import SwitchboardCore
 
 /// What the delete dialog on ContentView shows for the session that `confirmingDelete` holds, and the request that
 /// its destructive button sends. It reads only that snapshot, so the request drops and resolves only the items that
-/// the dialog lists. A Manager conversation's delete goes through `manager-end`, because `rm-queue` refuses it.
+/// the dialog lists. A conversation's delete goes through `manager-end`, because `rm-queue` refuses it.
 enum DeleteConfirmation {
   case work(SessionSummary, TodoDeletion)
   case conversation(SessionSummary, ConversationRemovalText)
 
   init(_ s: SessionSummary) {
-    self = s.kind == .manager ? .conversation(s, ConversationRemovalText(s, .delete)) : .work(s, TodoDeletion(s))
+    self = s.kind.isUserConversation ? .conversation(s, ConversationRemovalText(s, .delete)) : .work(s, TodoDeletion(s))
   }
 
   var title: String {

@@ -9,11 +9,15 @@ public struct Pause: Codable, Equatable, Sendable {
     /// The session's name. For a group chat, it is the group's name.
     public var name: String
     public var kind: SessionKind
+    /// A group chat's own name, as `Chat.ownName` gives it. It is nil for a chat with its group's default name and
+    /// for every other kind.
+    public var conversation: String?
 
-    public init(id: String, name: String, kind: SessionKind) {
+    public init(id: String, name: String, kind: SessionKind, conversation: String? = nil) {
       self.id = id
       self.name = name
       self.kind = kind
+      self.conversation = conversation
     }
   }
 
@@ -42,14 +46,15 @@ public struct Pause: Codable, Equatable, Sendable {
     self.message = message
   }
 
-  /// "you", "Manager", "Operator", "the <group> chat", a work session's name, or "Claude" when no session is known.
+  /// "you", "Manager", "Operator", "the <group> chat" with the chat's own name after it, a work session's name, or
+  /// "Claude" when no session is known.
   public var byText: String {
     guard by == .claude else { return "you" }
     guard let from else { return "Claude" }
     switch from.kind {
     case .manager: return "Manager"
     case .operator: return Manager.operatorName
-    case .chat: return "the \(from.name) chat"
+    case .chat: return "the \(Chat.title(group: from.name, ownName: from.conversation))"
     case .work: return from.name
     }
   }

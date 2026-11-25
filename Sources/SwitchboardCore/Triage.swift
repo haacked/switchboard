@@ -934,7 +934,7 @@ public enum Triage {
   public static func inboxName(_ s: SessionSummary, groupName: String?) -> String {
     switch s.kind {
     case .work: s.name
-    case .chat: groupName.map { Chat.name(group: $0) }.map { s.name == $0 ? $0 : "\($0): \(s.name)" } ?? s.name
+    case .chat: groupName.map { Chat.title(group: $0, ownName: Chat.ownName(s.name, group: $0)) } ?? s.name
     case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
     case .operator: "Background follow-through"
     }

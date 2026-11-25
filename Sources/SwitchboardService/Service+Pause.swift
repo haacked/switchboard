@@ -320,10 +320,13 @@ extension Service {
     }
   }
 
-  /// The session that paused another, with a chat named by its group.
+  /// The session that paused another. A chat goes by its group's name and its own name, as the Inbox names it.
   private func pauser(_ id: String) -> Pause.Pauser {
     let s = entries[id]!.session
-    return Pause.Pauser(id: id, name: s.chat.flatMap { groups[$0]?.name } ?? s.name, kind: s.kind)
+    guard let group = s.chat.flatMap({ groups[$0]?.name }) else {
+      return Pause.Pauser(id: id, name: s.name, kind: s.kind)
+    }
+    return Pause.Pauser(id: id, name: group, kind: s.kind, conversation: Chat.ownName(s.name, group: group))
   }
 
   /// Sets the line that the session's Claude pane shows once claude exits. A session with no Claude pane has

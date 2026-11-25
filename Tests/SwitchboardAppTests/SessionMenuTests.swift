@@ -46,8 +46,8 @@ private func isDeleteSelection(_ a: SessionMenuAction) -> Bool {
 private func isDestructive(_ a: SessionMenuAction) -> Bool {
   switch a {
   case .cleanUp, .delete, .deleteSelection: true
-  case .highlight, .snooze, .copyLink, .notes, .pause, .resume, .startNow, .stop, .moveToAccount, .unlinkParent,
-    .divider:
+  case .highlight, .snooze, .copyLink, .notes, .rename, .pause, .resume, .startNow, .stop, .moveToAccount,
+    .unlinkParent, .divider:
     false
   }
 }
@@ -149,7 +149,7 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
 
   /// A session with no destructive action shows no divider, and Unlink still shows.
   @Test func offersUnlinkForASessionWithNoDestructiveAction() {
-    let actions = SessionMenu.actions(for: chatItem("c1", group: "g1"), selectionCount: nil, parentName: "planner")
+    let actions = SessionMenu.actions(for: operatorItem(), selectionCount: nil, parentName: "planner")
 
     #expect(actions.last == .unlinkParent("Unlink from planner"))
     #expect(!actions.contains(.divider))
@@ -216,9 +216,8 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
     #expect(SessionMenu.actions(for: liveWork(), selectionCount: nil).last == .delete("Delete the session…"))
   }
 
-  @Test(arguments: [SessionKind.chat, .operator])
-  func offersNoDeleteForAChatOrTheOperator(_ kind: SessionKind) {
-    let actions = SessionMenu.actions(for: ofKind(kind), selectionCount: nil)
+  @Test func offersNoDeleteForTheOperator() {
+    let actions = SessionMenu.actions(for: ofKind(.operator), selectionCount: nil)
 
     #expect(!actions.contains(where: isDelete))
   }
@@ -313,8 +312,8 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
     }
   }
 
-  /// Risk 1: `.delete` shows only for a work session under today's rule and for a Manager conversation, and only
-  /// with no removal outside a multi-selection. A group chat and the Operator never get it.
+  /// Risk 1: `.delete` shows only for a work session under today's rule, for a Manager conversation, and for a group
+  /// chat conversation, and only with no removal outside a multi-selection. The Operator never gets it.
   @Test(
     arguments: [SessionKind.work, .manager, .chat, .operator], RemovalShape.allCases)
   func offersDeleteOnlyForWorkAndConversationsWithNoRemovalOutsideASelection(
@@ -326,11 +325,82 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
 
       let deletes = SessionMenu.actions(for: s, selectionCount: selectionCount).filter(isDelete)
 
-      let offered = removal == .none && selectionCount == nil && (kind == .work || kind == .manager)
+      let offered = removal == .none && selectionCount == nil && kind != .operator
       let expected: [SessionMenuAction] =
-        !offered ? [] : kind == .manager ? [Self.conversationDelete] : [expectedDelete(s)]
+        !offered ? [] : kind == .work ? [expectedDelete(s)] : [Self.conversationDelete]
       #expect(deletes == expected, "\(kind) \(removal) selection \(String(describing: selectionCount))")
     }
+  }
+}
+
+/// Decision 6: a group chat's conversation row offers "Delete the conversation…", which removes it through
+/// `manager-end` as a Manager conversation's does.
+@Suite struct SessionMenuTests {
+  private static let conversationDelete = SessionMenuAction.delete("Delete the conversation…")
+
+  @Test(arguments: [true, false])
+  func offersDeleteTheConversationLastAfterTheDividerForAChat(_ live: Bool) {
+    var chat = chatItem("c1", group: "g1")
+    chat.live = live
+
+    let actions = SessionMenu.actions(for: chat, selectionCount: nil)
+
+    #expect(actions.last == Self.conversationDelete)
+    #expect(actions.dropLast().last == .divider)
+  }
+
+  @Test(arguments: [AttentionState.working, .needsYou, .waiting, .done])
+  func offersDeleteForAChatInAnyState(_ state: AttentionState) {
+    #expect(
+      SessionMenu.actions(for: chatItem("c1", group: "g1", state: state), selectionCount: nil)
+        .contains(Self.conversationDelete))
+  }
+
+  @Test func offersDeleteForAPausedChat() {
+    var chat = chatItem("c1", group: "g1")
+    chat.pause = paused
+
+    #expect(SessionMenu.actions(for: chat, selectionCount: nil).contains(Self.conversationDelete))
+  }
+
+  // MARK: Rename (Decision 10)
+
+  @Test(arguments: [SessionKind.manager, .chat], [true, false])
+  func offersRenameForAConversation(_ kind: SessionKind, _ live: Bool) {
+    #expect(SessionMenu.actions(for: ofKind(kind, live: live), selectionCount: nil).contains(.rename))
+  }
+
+  @Test(arguments: [SessionKind.work, .operator])
+  func offersNoRenameForAWorkSessionOrTheOperator(_ kind: SessionKind) {
+    #expect(!SessionMenu.actions(for: ofKind(kind), selectionCount: nil).contains(.rename))
+  }
+
+  @Test(arguments: [SessionKind.manager, .chat])
+  func offersRenameOnceBeforeTheDivider(_ kind: SessionKind) {
+    let actions = SessionMenu.actions(for: ofKind(kind), selectionCount: nil, parentName: "planner")
+
+    #expect(actions.filter { $0 == .rename }.count == 1)
+    let rename = actions.firstIndex(of: .rename)
+    let divider = actions.firstIndex(of: .divider)
+    #expect(rename != nil && divider != nil && rename! < divider!, "\(actions)")
+  }
+
+  @Test func offersRenameForAPausedConversation() {
+    var s = ofKind(.chat)
+    s.pause = paused
+
+    #expect(SessionMenu.actions(for: s, selectionCount: nil).contains(.rename))
+  }
+
+  @Test func renameIsNotDestructive() {
+    #expect(!isDestructive(.rename))
+  }
+
+  @Test func offersNoDeleteForAChatWithARemoval() {
+    var chat = chatItem("c1", group: "g1")
+    chat.removal = Removal(requested: 0, notBefore: 0, worktree: false, branch: false, remoteBranch: false, resolve: [])
+
+    #expect(!SessionMenu.actions(for: chat, selectionCount: nil).contains(where: isDelete))
   }
 }
 
@@ -419,14 +489,16 @@ private let startedStates = AttentionState.allCases.filter { $0 != .notStarted }
       ])
   }
 
-  @Test func showsPauseAndStopButNoSnoozeOrDeleteForALiveChat() {
+  @Test func showsPauseStopAndDeleteTheConversationButNoSnoozeForALiveChat() {
     #expect(
-      SessionMenu.actions(for: chatItem("c1", group: "g1"), selectionCount: nil) == [.copyLink, .notes, .pause, .stop])
+      SessionMenu.actions(for: chatItem("c1", group: "g1"), selectionCount: nil).filter { $0 != .rename } == [
+        .copyLink, .notes, .pause, .stop, .divider, .delete("Delete the conversation…"),
+      ])
   }
 
   @Test func showsPauseAndDeleteForAManagerConversationThatIsNotRunning() {
     #expect(
-      SessionMenu.actions(for: ofKind(.manager, live: false), selectionCount: nil) == [
+      SessionMenu.actions(for: ofKind(.manager, live: false), selectionCount: nil).filter { $0 != .rename } == [
         .copyLink, .notes, .pause, .divider, .delete("Delete the conversation…"),
       ])
   }
