@@ -331,12 +331,12 @@ extension Service {
 
   /// The line that tells a work session its group's context changed since the session last heard it, or nil. It
   /// records the current context as heard, so each change reaches the session once. A session that never heard a
-  /// context, such as one that an older sbd launched, hears the current one without a notice.
+  /// context, such as one that an older sbd launched, hears the current one without a notice. A session in no group
+  /// hears an empty context, so it gets a notice once it joins a group.
   func groupContextNotice(_ id: String) -> String? {
-    guard let e = entries[id], let group = contextGroup(of: e.session) else { return nil }
+    guard let e = entries[id] else { return nil }
     let heardBefore = e.facts.groupContextHeard != nil
-    let changed = hearGroupContext(id)
-    guard changed, heardBefore else { return nil }
+    guard hearGroupContext(id), heardBefore, let group = contextGroup(of: e.session) else { return nil }
     return GroupContext.changedNotice(name: group.name, id: group.id)
   }
 

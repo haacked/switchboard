@@ -310,4 +310,25 @@ private let otherSecrets = ["billing-secret", "docs-secret", "ops-secret"]
       #expect(heard == GroupContext.fingerprint(groups[0]))
     }
   }
+
+  /// An ungrouped session that an older sbd launched records the empty context at its first prompt, so joining a
+  /// group later is a change that it hears.
+  @Test(.timeLimit(.minutes(1)))
+  func anUngroupedSessionThatNeverHeardAContextHearsTheGroupItJoins() throws {
+    try withGroups { service in
+      let first = service.queue.sync { () -> String? in
+        service.entries["l1"]?.session.group = nil
+        return service.groupContextNotice("l1")
+      }
+      #expect(first == nil)
+      #expect(service.queue.sync { service.entries["l1"]?.facts.groupContextHeard } == "")
+
+      let joined = service.queue.sync { () -> String? in
+        service.entries["l1"]?.session.group = "gflag2"
+        return service.groupContextNotice("l1")
+      }
+
+      #expect(joined?.contains("sb group show gflag2") == true, "\(joined ?? "nil")")
+    }
+  }
 }
