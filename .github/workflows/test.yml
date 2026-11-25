@@ -80,8 +80,10 @@ jobs:
   # integration suites. The matrix holds only the parts that the changes job
   # picked.
   swift-test:
-    # A draft run's skipped checks have their own names, so they never hide the
-    # results of the ready run on the same commit.
+    # GitHub names a skipped job's check after this expression's text, not its
+    # value. A draft run's skipped checks therefore never share a name with the
+    # checks of the ready run on the same commit, so they never hide its
+    # results. The draft names apply if GitHub evaluates the expression.
     name: ${{ github.event.pull_request.draft && 'swift-test (draft)' || format('swift-test ({0})', matrix.part) }}
     needs: changes
     if: needs.changes.outputs.parts != '[]'
