@@ -20,14 +20,12 @@ struct SessionHeader: View {
           .foregroundStyle(.secondary)
           .fixedSize()
         Spacer(minLength: 8)
-        Group {
-          // The toolbar has no room for Notes at 1024 pt.
-          NotesButton(session: session, always: true)
-          SessionAccountControl(session: session)
-          if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
-          if session.kind == .manager { ManagerHeaderControls(session: session) }
-        }
-        .fixedSize()
+        // The toolbar has no room for Notes at 1024 pt.
+        NotesButton(session: session, always: true).fixedSize()
+        // These controls truncate or drop to an icon before they push the row past the header's width.
+        SessionAccountControl(session: session)
+        if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
+        if session.kind == .manager { ManagerHeaderControls(session: session) }
       }
       InlineText(plain: session.reason).foregroundStyle(.secondary)
         .lineLimit(1)
