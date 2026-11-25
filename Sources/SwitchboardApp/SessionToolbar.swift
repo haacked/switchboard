@@ -10,6 +10,11 @@ struct SessionToolbarItems: ToolbarContent {
   @Binding var showsSidePanel: Bool
   let requestRemoval: () -> Void
 
+  /// The Session menu's shortcuts act on the selected session, so a session shown beside the Inbox has none.
+  private func help(_ shortcut: AppShortcut, _ text: String) -> String {
+    model.selection == session.id ? shortcut.help(text) : text
+  }
+
   var body: some ToolbarContent {
     let actions = SessionActions.list(for: session)
     ToolbarItemGroup {
@@ -27,14 +32,14 @@ struct SessionToolbarItems: ToolbarContent {
         .help(PauseBanner.resumeHelp)
     case .run(.stop):
       Button("Stop Claude", systemImage: "stop.circle") { model.stop(session.id) }
-        .help(AppShortcut.stopClaude.help(BoardModel.stopHelp))
+        .help(help(.stopClaude, BoardModel.stopHelp))
     case .run(.startNow):
       Button("Start Now", systemImage: "play.circle") { model.startNow(session.id) }
         .disabled(model.startingNow.contains(session.id))
         .help(BoardModel.startNowHelp)
     case .run(.restart):
       Button("Resume Claude", systemImage: "arrow.clockwise.circle") { model.resume(session.id) }
-        .help(AppShortcut.resumeClaude.help("Restart claude in this session. It continues the conversation."))
+        .help(help(.resumeClaude, "Restart claude in this session. It continues the conversation."))
     case .pause:
       PauseMenuItems(id: session.id, systemImage: "pause.circle")
         .help("Stop claude until you resume it, or until a time you pick.")
@@ -44,7 +49,8 @@ struct SessionToolbarItems: ToolbarContent {
         systemImage: marked ? "arrow.uturn.backward.circle" : "checkmark.circle"
       ) { model.setDone(session.id, !marked) }
       .help(
-        AppShortcut.markDone.help(
+        help(
+          .markDone,
           marked
             ? "Mark the session not done. It returns to its own group on the board, and to the Inbox if it needs you or claude can continue."
             : "Mark the session done. It leaves the Inbox and moves to Done on the board."))

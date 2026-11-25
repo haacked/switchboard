@@ -65,14 +65,20 @@ struct SessionView: View {
       WorkSkillOfferBar(session: session)
       SessionMessageField(session: session.id, draft: model.messageDraft(for: session))
     }
-    // A request that no view took would otherwise take focus the next time this session shows.
     // Every view that observes the model draws again on each assignment, even of the same value.
-    .onChange(of: session.id, initial: true) { if model.shownSession != session.id { model.shownSession = session.id } }
-    .onDisappear { [model, id = session.id] in
+    .onChange(of: session.id, initial: true) {
+      model.shownSessionOwner = ObjectIdentifier(ui)
+      if model.shownSession != session.id { model.shownSession = session.id }
+    }
+    // A request that no view took would otherwise take focus the next time this session shows.
+    .onDisappear { [model, ui, id = session.id] in
       model.releaseTerminalFocus(id)
       model.forgetMessageField(id)
-      // The next session's view can appear before this one goes.
-      if model.shownSession == id { model.shownSession = nil }
+      // The next view of this session can appear before this one goes, so only the view that set it clears it.
+      if model.shownSessionOwner == ObjectIdentifier(ui) {
+        model.shownSessionOwner = nil
+        model.shownSession = nil
+      }
     }
     .task(id: session.id) {
       // `open` refuses a session whose folder cleanup removed.
