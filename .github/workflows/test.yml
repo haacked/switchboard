@@ -19,9 +19,7 @@ env:
   SB_CI_PARTS: 4
 
 concurrency:
-  # Draft runs have their own group, so a draft run never cancels the run that
-  # marking the PR ready starts, whichever reaches GitHub first.
-  group: test-${{ github.ref }}${{ github.event.pull_request.draft && '-draft' || '' }}
+  group: test-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,9 +29,6 @@ jobs:
   # skipped job counts as passed, so a PR whose files no job reads still gets
   # passing checks.
   changes:
-    # The draft name keeps a later draft run from hiding a failed changes check
-    # of the ready run on the same commit.
-    name: ${{ github.event.pull_request.draft && 'changes (draft)' || 'changes' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -47,7 +42,6 @@ jobs:
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           PR_FILES: ${{ github.event.pull_request.changed_files }}
-          DRAFT: ${{ github.event.pull_request.draft }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
@@ -57,7 +51,10 @@ jobs:
           # The PR API lists at most 3000 files. A compare lists at most 300
           # and does not say how many it left out, so a full page runs every
           # job.
-          if [ "$DRAFT" = true ]; then
+          # The event's payload can call the PR a draft after it was marked ready,
+          # when GitHub handles a push after the ready_for_review event. That run
+          # then tests the head, so the PR's state comes from the API.
+          if [ -n "$PR" ] && [ "$(gh api "repos/$REPO/pulls/$PR" --jq .draft)" = true ]; then
             mode=draft files='' count=0
           elif [ -n "$PR" ]; then
             mode='pr'
@@ -83,11 +80,6 @@ jobs:
   # integration suites. The matrix holds only the parts that the changes job
   # picked.
   swift-test:
-    # GitHub names a skipped job's check after this expression's text, not its
-    # value. A draft run's skipped checks therefore never share a name with the
-    # checks of the ready run on the same commit, so they never hide its
-    # results. The draft names apply if GitHub evaluates the expression.
-    name: ${{ github.event.pull_request.draft && 'swift-test (draft)' || format('swift-test ({0})', matrix.part) }}
     needs: changes
     if: needs.changes.outputs.parts != '[]'
     runs-on: macos-26
@@ -128,7 +120,6 @@ jobs:
   # drops check. On the runner, that check's click on Send does not send the
   # message. The same check passes on a developer's Mac.
   gui-test:
-    name: ${{ github.event.pull_request.draft && 'gui-test (draft)' || 'gui-test' }}
     needs: changes
     if: needs.changes.outputs.gui == 'true'
     runs-on: macos-26
