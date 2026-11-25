@@ -248,6 +248,11 @@ final class GitHubPoller {
     t.schedule(deadline: .now() + .milliseconds(Int(max(0, at - nowMs()))))
   }
 
+  /// The PRs that a session, a wait, or a merge trigger names. A poll reads only these.
+  private var namedPRIds: Set<String> {
+    Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
+  }
+
   /// Whether this Mac's GitHub login may read `repo` for a session on `host`. A session on this Mac reads any repo.
   /// A box chooses the repo of its session through its git remotes, its transcript, its PR's body, and its waits. A
   /// session on a host therefore reads only a repo that `Service.hostMayRead` allows.
@@ -318,7 +323,7 @@ final class GitHubPoller {
     // The next poll reads the requested PRs that a failed poll didn't read and that a session, wait, or merge
     // trigger still names. A timed request would schedule a wake that fails again at once while GitHub keeps failing.
     if failure != nil {
-      let named = Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
+      let named = namedPRIds
       for (id, trigger) in requested where named.contains(id) && prs[id]?.polled != now {
         readRequests.readAtNextPoll([id], trigger: trigger)
       }
@@ -337,7 +342,7 @@ final class GitHubPoller {
     resolveWaits(interest, stats: &stats)
     recordDependencies(sessions, now: now, stats: &stats)
     updatePlans(all: all, now: now, stats: &stats)
-    let kept = Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId))
+    let kept = namedPRIds
     prs = prs.filter { kept.contains($0.key) }
     recordedDepot = recordedDepot.filter { kept.contains($0.key) }
     pruneCodeOwners()
@@ -589,7 +594,7 @@ final class GitHubPoller {
     // polls at once when the wait is newer than the last read. That read can't show what happened after the wait
     // was set. A requested PR, such as an edge that `recordDependencies` kept, is read at once.
     var candidates: [String: ReadCandidate] = [:]
-    for id in Set(tracked.values.flatMap(\.readIds)).union(targets.values.compactMap(\.prId)) {
+    for id in namedPRIds {
       candidates[id] = ReadCandidate(
         pr: prs[id]?.pr, lastPolled: prs[id]?.polled, waitedAt: waited.created[id], requested: requested[id],
         needs: waited.needs[id, default: []].union(queued.contains(id) ? .trunkQueue : []))

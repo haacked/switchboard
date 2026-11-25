@@ -149,6 +149,7 @@ private final class RequestedReads {
     try #require(wakes.count == 1)
     #expect(wakes[0] >= before + 10_000)
     #expect(r.poller.queue.sync { r.poller.readRequests.timed.keys.sorted() } == ["PR_7"])
+    #expect(r.poller.queue.sync { r.poller.readRequests.timedReads["PR_7"]?.trigger } == .confirm)
   }
 }
 
@@ -201,6 +202,29 @@ private final class RequestedReads {
     #expect(Set(r.readRequests.nextPoll.keys) == ["PR_7"])
     #expect(Set(r.readRequests.timed.keys) == ["PR_8"])
     #expect(r.pendingReads() == ["PR_7": .event, "PR_8": .confirm])
+  }
+
+  /// A poll that reads a requested PR and then fails on a later query doesn't put that read back.
+  @Test func aFailureAfterTheStatusReadDoesNotPutTheReadBack() throws {
+    let r = try RequestedReads()
+    // The PR's base isn't its repo's default branch, so the poll reads the merged base after the status, and that
+    // read fails.
+    let node: JSON = [
+      "id": "PR_7", "number": 7, "state": "OPEN", "headRefName": "feature", "baseRefName": "stack-1", "body": "",
+      "mergeCommit": .null, "repository": ["nameWithOwner": "acme/widgets", "defaultBranchRef": ["name": "main"]],
+    ]
+    let status = Data(JSON.object(["data": ["rateLimit": ["cost": 1], "nodes": [node]]]).text.utf8)
+    r.poller.client.transport = { req in
+      let query = JSON.parse(String(decoding: req.httpBody ?? Data(), as: UTF8.self))?["query"]?.string
+      return query == GitHub.statusQuery ? (200, [:], status) : (502, [:], Data(#"{"message":"bad gateway"}"#.utf8))
+    }
+    r.request(["PR_7"], after: 0, trigger: .event)
+
+    let result = r.poller.poll(all: false)
+
+    #expect(result["error"] != nil)
+    #expect(r.poller.queue.sync { r.poller.prs["PR_7"]?.pr.base } == "stack-1")
+    #expect(r.pendingReads().isEmpty)
   }
 
   /// A failed poll drops a requested read of a PR that no session, wait, or merge trigger names.

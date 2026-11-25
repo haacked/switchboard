@@ -8,8 +8,9 @@ import Foundation
 /// shares one wake and one poll, and a stream of requests can't put a PR's read off.
 ///
 /// Each request keeps the reason for its read, which `sb poll --stats` reports. A PR that is requested twice keeps
-/// the reason of the request that comes due first. On a tie the earlier request's reason stays. A poll that takes a
-/// PR's request at the next poll and leaves its timed request reads the PR again later for the timed reason.
+/// the reason of the request that comes due first. On a tie the earlier request's reason stays. A PR with a next-poll
+/// request and a later timed request reads twice: at the next poll for the next-poll reason, and at the timed
+/// request's time for its own reason.
 public struct ReadRequests: Equatable, Sendable {
   /// The PRs that the next poll reads, each with why it is read.
   public private(set) var nextPoll: [String: ReadTrigger] = [:]
