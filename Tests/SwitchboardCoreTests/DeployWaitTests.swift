@@ -388,6 +388,8 @@ import Testing
     #expect(wait(service: "feature-flags").readsPRWhilePending(nil))
     #expect(wait().readsPRWhilePending(pr()))
     #expect(waitOn(.ci).readsPRWhilePending(pr()))
+    #expect(wait(service: "feature-flags").needs(for: pr()) == [])
+    #expect(wait(service: "feature-flags").needs(for: pr(.open)) == Wait.Kind.deploy.needs)
   }
 
   // MARK: One environment's state

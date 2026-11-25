@@ -153,14 +153,15 @@ public enum GitHub {
   }
 
   /// Why the poller reads a PR at `now`, or nil when the PR isn't due. `all` reads every PR. `waitedAt` is the
-  /// newest wait, dependency edge, or finished turn that needs a read after it. `pendingRate` makes the PR poll
-  /// at `pendingMs` whatever its state.
+  /// newest wait, finished turn, or expired acknowledgment that needs a read after it. `requested` reads the PR
+  /// whether or not it is due, with that trigger. `pendingRate` makes the PR poll at `pendingMs` whatever its state.
   public static func readTrigger(
-    _ pr: PullRequest?, lastPolled: Int64?, waitedAt: Int64?, all: Bool, pendingRate: Bool, now: Int64,
-    pendingMs: Int64, idleMs: Int64
+    _ pr: PullRequest?, lastPolled: Int64?, waitedAt: Int64?, requested: ReadTrigger? = nil, all: Bool,
+    pendingRate: Bool, now: Int64, pendingMs: Int64, idleMs: Int64
   ) -> ReadTrigger? {
     if all { return .poll }
     if (waitedAt ?? 0) > (lastPolled ?? 0) { return .wait }
+    if let requested { return requested }
     guard let pr else { return .first }
     let pending = pendingRate || pr.isPending || pr.awaitsReview
     guard elapsed(since: lastPolled, pending ? pendingMs : idleMs, now: now) else { return nil }

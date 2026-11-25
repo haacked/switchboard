@@ -66,7 +66,7 @@ extension GitHubPoller {
             continue
           }
           edges.append(before)
-          readRequests.readAtNextPoll([read.pr.id])
+          readRequests.readAtNextPoll([read.pr.id], trigger: .wait)
         }
       }
       guard edges != old else { continue }
