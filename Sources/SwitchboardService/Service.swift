@@ -873,6 +873,8 @@ public final class Service {
       return try removalRequest(op, args)
     case "manager-ls":
       return try JSON(encoding: managerList())
+    case "chat-ls":
+      return try JSON(encoding: chatList(args))
     case "manager-mcp":
       return try managerMCP(args)
     case "manager-mcp-request":
@@ -3083,7 +3085,7 @@ public final class Service {
         facts: facts, created: s.created, pause: s.pause)
       if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: facts.pr, branch: e.branch) }
     }
-    if s.kind == .manager { addConversationFields(to: &out, e, facts) }
+    if s.kind.isUserConversation { addConversationFields(to: &out, e, facts) }
     return out
   }
 

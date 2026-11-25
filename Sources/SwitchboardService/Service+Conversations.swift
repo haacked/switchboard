@@ -36,12 +36,11 @@ extension Service {
     }
   }
 
-  /// The `manager-pin` request, which pins the Manager conversation that
-  /// `session` names to the top of the sidebar, or with `pinned` false unpins
-  /// it. A pin is not activity, so it doesn't reorder the list.
+  /// The `manager-pin` request, which pins the Manager conversation or group chat that `session` names to the top
+  /// of its list, or with `pinned` false unpins it. A pin is not activity, so it doesn't reorder the list.
   func managerPin(_ args: JSON) throws -> JSON {
     guard let ref = args["session"]?.string, !ref.isEmpty else { throw APIError("name a Manager conversation") }
-    let id = try managerConversation(ref)
+    let id = try userConversation(ref)
     let session = entries[id]!.session
     let pinned = args["pinned"]?.bool ?? true
     if (session.pinned == true) != pinned {
@@ -51,8 +50,8 @@ extension Service {
     return try JSON(encoding: summary(id))
   }
 
-  /// Sets the summary fields that only a Manager conversation has. `summary`
-  /// calls it after every other field is set.
+  /// Sets the summary fields that only a Manager conversation or a group chat has. `summary` calls it after every
+  /// other field is set.
   func addConversationFields(to out: inout SessionSummary, _ e: Entry, _ facts: SessionFacts) {
     let s = e.session
     out.pinned = s.pinned

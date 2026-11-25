@@ -67,14 +67,21 @@ extension Service {
 
   static let endCommand = "sb manager end"
 
-  /// Refuses to remove a Manager conversation while a message is queued for it or claude has not confirmed one,
-  /// whatever its pause state, because no id names a message and the removal would drop it unseen. It also
-  /// refuses while its own waits, its pause condition, or its schedules hold an id that `endingDrops[id]` does
-  /// not name. A wait handed to the operator sits on the operator, so it never blocks. `removalEntry` and
+  /// The command that ends the session: `sb chat <group> --end` for a chat whose group exists, else
+  /// `sb manager end`, which also ends a chat whose group is gone. It runs on the state queue.
+  func endCommand(of session: Session) -> String {
+    guard let group = session.chat, groups[group] != nil else { return Self.endCommand }
+    return "sb chat \(group) --end"
+  }
+
+  /// Refuses to remove a Manager conversation or a group chat while a message is queued for it or claude has not
+  /// confirmed one, whatever its pause state, because no id names a message and the removal would drop it unseen.
+  /// It also refuses while its own waits, its pause condition, or its schedules hold an id that `endingDrops[id]`
+  /// does not name. A wait handed to the operator sits on the operator, so it never blocks. `removalEntry` and
   /// `forgetSession` both call it, because a wait, a pause, or a message can land while the panes stop. It runs
   /// on the state queue.
   func refuseConversationRemoval(_ id: String) throws {
-    guard let e = entries[id], e.session.kind == .manager else { return }
+    guard let e = entries[id], e.session.kind.isUserConversation else { return }
     let session = e.session
     if e.hasMessageOnItsWay { throw messagesRefusal(e) }
     let drops = endingDrops[id] ?? []
@@ -85,7 +92,7 @@ extension Service {
     throw APIError(
       "\(session.name) has waits or schedules of its own that removing it would drop:\n"
         + unnamed.joined(separator: "\n")
-        + "\nTo end it and drop them, run: \(Self.endCommand) \(id) \(flags)")
+        + "\nTo end it and drop them, run: \(endCommand(of: session)) \(id) \(flags)")
   }
 
   /// The refusal for a conversation that holds messages, with the step that delivers them in its state.
@@ -109,8 +116,9 @@ extension Service {
         + lines.joined(separator: "\n") + "\n" + remedy)
   }
 
-  /// The `manager-end` request, which removes a Manager conversation, and with `new` starts one in its place
-  /// with the same account, MCP servers, and pin. `drop` names the conversation's own waits, pause condition, and
+  /// The `manager-end` request, which removes a Manager conversation or a group chat, and with `new` starts one of
+  /// the same kind in its place, in the same group for a chat, with the same account, MCP servers, and pin. With
+  /// `group`, `session` must name a chat of that group. `drop` names the conversation's own waits, pause condition, and
   /// schedules that the removal may drop. `resolve` and `by` pass to `rm`, which resolves the named to-dos under the
   /// same rules as a delete of a work session. Only the user ends a conversation, so it refuses a request that names a
   /// `caller` and a client below any local session's live pane. It also refuses a client below sbd's tmux
@@ -119,10 +127,17 @@ extension Service {
     if let from = args["caller"]?.string {
       let name = queue.sync { entries[from]?.session.name } ?? from
       throw APIError(
-        "\(name) can't end a Manager conversation. Only the user ends one, from a terminal outside every session.")
+        "\(name) can't end a conversation. Only the user ends one, from a terminal outside every session.")
     }
-    let ancestry = try caller.ancestry(command: Self.endCommand)
-    guard let ref = args["session"]?.string, !ref.isEmpty else { throw APIError("name a Manager conversation") }
+    let ref = args["session"]?.string ?? ""
+    // Only the refusals' wording reads this lookup, so a ref that names nothing falls to the throwing lookup below.
+    let command =
+      ref.isEmpty
+      ? Self.endCommand
+      : queue.sync { (try? endTarget(ref, args)).flatMap { entries[$0].map { endCommand(of: $0.session) } } }
+        ?? Self.endCommand
+    let ancestry = try caller.ancestry(command: command)
+    guard !ref.isEmpty else { throw APIError("name a Manager conversation") }
     let drops = Set(args["drop"]?.array?.compactMap(\.string) ?? [])
     // A pane that started after the last tick is in no older snapshot.
     let fresh = ancestry == nil ? nil : buildSnapshot()
@@ -133,18 +148,18 @@ extension Service {
         let place = callerPlace(ancestry)
         if let pane = place.inside.first {
           throw APIError(
-            "`\(Self.endCommand)` runs inside a pane of \(mention(pane)). "
+            "`\(command)` runs inside a pane of \(mention(pane)). "
               + "Only the user ends a conversation. Run it from a terminal outside the session.")
         }
         // A program that a session starts with `tmux new-session` or `tmux new-window` runs below the server and
         // outside every pane.
         if place.inServer {
           throw APIError(
-            "`\(Self.endCommand)` runs in sbd's tmux server, where the sessions run. "
+            "`\(command)` runs in sbd's tmux server, where the sessions run. "
               + "Only the user ends a conversation. Run it from a terminal outside the sessions.")
         }
       }
-      let id = try managerConversation(ref)
+      let id = try endTarget(ref, args)
       let e = entries[id]!
       if e.facts.inTurnOrJob {
         throw APIError(
@@ -190,15 +205,38 @@ extension Service {
     var dropped: [String]
   }
 
-  /// Starts an untitled conversation, or one named `name`, with the account, MCP servers, and pin of `ended`.
-  /// It runs off the state queue.
+  /// The conversation that `manager-end` ends: a chat of the request's `group` when it names one, else a Manager
+  /// conversation or a group chat. It runs on the state queue.
+  private func endTarget(_ ref: String, _ args: JSON) throws -> String {
+    guard args["group"] != nil else { return try userConversation(ref) }
+    return try groupChat(ref, of: lookupGroup(args))
+  }
+
+  /// Starts an untitled conversation of the kind of `ended`, or one named `name`, with the account, MCP servers,
+  /// and pin of `ended`. A chat starts in the group of `ended`, which must still exist. It runs off the state queue.
   private func startInPlace(of ended: Session, name: String?) throws -> SessionSummary {
-    try ensureManagerFolder()
+    let name = name.flatMap { $0.isEmpty ? nil : $0 }
+    if let group = ended.chat {
+      try queue.sync {
+        guard let found = groups[group] else { throw APIError("the group \(group) was removed") }
+        try ensureChatFolder(group, description: found.description)
+      }
+    } else {
+      try ensureManagerFolder()
+    }
     awaitMCPServers()
     return try queue.sync {
-      let id = try createManager(
-        name: name.flatMap { $0.isEmpty ? nil : $0 }, prompt: nil, account: ended.claudeConfigDir, mcp: ended.mcp
-      ).id
+      let id: String
+      if let group = ended.chat {
+        guard groups[group] != nil else { throw APIError("the group \(group) was removed") }
+        id = try createChat(group, name: name ?? Manager.untitled, prompt: nil) {
+          $0.claudeConfigDir = ended.claudeConfigDir
+          $0.mcp = ended.mcp
+          $0.mcpScoped = ended.mcpScoped
+        }.id
+      } else {
+        id = try createManager(name: name, prompt: nil, account: ended.claudeConfigDir, mcp: ended.mcp).id
+      }
       if ended.pinned == true {
         try update(id) { $0.pinned = true }
         record(id, "pinned")

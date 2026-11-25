@@ -257,6 +257,12 @@ extension Service {
     try conversation(ref, kinds: [.manager], noun: "Manager conversation")
   }
 
+  /// The Manager conversation or group chat that `ref` names by id, unique id prefix, or unique name. An error names
+  /// the session as a Manager conversation, as it did before a group chat could be named.
+  func userConversation(_ ref: String) throws -> String {
+    try conversation(ref, kinds: [.manager, .chat], noun: "Manager conversation")
+  }
+
   /// The session of one of `kinds` that `ref` names by id, unique id prefix, or unique name. An error names the
   /// session as `noun`.
   func conversation(_ ref: String, kinds: Set<SessionKind>, noun: String) throws -> String {
@@ -272,9 +278,11 @@ extension Service {
     return id
   }
 
-  /// Names an untitled conversation after the first line of its first prompt.
+  /// Names an untitled Manager conversation or group chat after the first line of its first prompt.
   func nameConversation(_ id: String, prompt: String?) throws {
-    guard entries[id]?.session.kind == .manager, entries[id]?.session.name == Manager.untitled else { return }
+    guard entries[id]?.session.kind.isUserConversation == true, entries[id]?.session.name == Manager.untitled else {
+      return
+    }
     let name = Manager.name(fromPrompt: prompt ?? "")
     guard name != Manager.untitled else { return }
     try update(id) { $0.name = name }

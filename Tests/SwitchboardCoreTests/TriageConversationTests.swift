@@ -334,8 +334,10 @@ import Testing
   @Test(
     arguments: [
       (SessionKind.chat, "Flags chat", "Flags", "Flags chat"),
-      (.chat, "Flags chat", "Billing", "Billing chat"),
-      (.chat, "my notes", "Flags", "Flags chat"),
+      (.chat, "Billing chat", "Billing", "Billing chat"),
+      (.chat, "Flags chat", "Billing", "Billing chat: Flags chat"),
+      (.chat, "my notes", "Flags", "Flags chat: my notes"),
+      (.chat, Manager.untitled, "Flags", "Flags chat: \(Manager.untitled)"),
       (.chat, "my notes", nil, "my notes"),
       (.manager, "Manager", nil, "Manager"),
       (.manager, "deploy watch", nil, "Manager: deploy watch"),

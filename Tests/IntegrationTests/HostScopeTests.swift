@@ -381,7 +381,7 @@ private let otherDestination = "haacked@other.local"
     "group-note", "group-describe", "group-link-add", "group-link-rm", "group-account", "group-suggest", "manager",
     "manager-ls", "manager-mcp",
     "manager-model", "manager-skills", "chat",
-    "chat-log", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "item-context",
+    "chat-log", "chat-ls", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "item-context",
     "manager-mcp-request", "operator",
     "operator-report", "operator-reports", "quick-ask", "ref-details", "pause", "snooze", "unsnooze", "highlight",
     "parent", "schedule", "wait-approve",

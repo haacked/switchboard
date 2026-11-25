@@ -3,9 +3,10 @@ import SwitchboardCore
 
 /// Group chats. `plans/group-chats.md` in the notes repo describes them.
 extension Service {
-  /// The `chat` request: creates the group's chat the first time, with `text`
-  /// as its first prompt. After that it sends `text` to the chat, or without
-  /// text opens it (resumes a stopped claude). The answer is the chat's
+  /// The `chat` request. With `new`, it starts another conversation in the group chat, with `text` as its first
+  /// prompt, named `name`, else the first line of `text`, else `Manager.untitled`. With `session`, it sends
+  /// `text` to that chat of the group, or without text opens it. With neither, it does the same for the group's
+  /// most recent chat, and starts one named `Chat.name(group:)` when the group has none. The answer is the chat's
   /// summary, with `delivery` when it took text.
   func chatRequest(_ args: JSON) -> Response {
     do {
@@ -15,16 +16,24 @@ extension Service {
         return group
       }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-      if let id = queue.sync(execute: { mostRecentChat(of: group) }) { return try openOrSend(id, text) }
+      let isNew = args["new"]?.bool == true
+      let ref = args["session"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+      if isNew, ref != nil { throw APIError("pass session or new, not both") }
+      if !isNew {
+        let found = try queue.sync { () -> String? in
+          if let ref { return try groupChat(ref, of: group) }
+          return mostRecentChat(of: group)
+        }
+        if let id = found { return try openOrSend(id, text) }
+      }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
       let (id, created, queued) = try queue.sync { () -> (String, SessionSummary?, Bool) in
-        if let id = mostRecentChat(of: group) { return (id, nil, false) }
-        guard let name = groups[group]?.name else { throw APIError("group \(group) was removed") }
-        let folder = home.chatFolder(group)
-        let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
-        let chat = try create(new, (folder, nil, nil)) { $0.chat = group }
+        if !isNew, let id = mostRecentChat(of: group) { return (id, nil, false) }
+        guard let groupName = groups[group]?.name else { throw APIError("group \(group) was removed") }
+        let name = isNew ? args["name"]?.string.flatMap { $0.isEmpty ? nil : $0 } : Chat.name(group: groupName)
+        let chat = try createChat(group, name: name, prompt: text)
         return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
       guard let created else { return try openOrSend(id, text) }
@@ -143,7 +152,31 @@ extension Service {
   /// The group's newest chat that is not done, or its newest done chat when every chat is done.
   func mostRecentChat(of group: String) -> String? { chats(of: group).first }
 
-  private func ensureChatFolder(_ group: String, description: String?) throws {
+  /// The `chat-ls` request: the group's chats in the order of `chats(of:)`.
+  func chatList(_ args: JSON) throws -> [SessionSummary] { try chats(of: lookupGroup(args)).map { summary($0) } }
+
+  /// The chat of the group that `ref` names by id, unique id prefix, or unique name. A session that is not a chat
+  /// of the group is an error.
+  func groupChat(_ ref: String, of group: String) throws -> String {
+    try resolveRef(
+      ref, "chat of group \(groups[group]?.name ?? group)",
+      entries.values.map(\.session).filter { $0.chat == group }.map { ($0.id, $0.name) })
+  }
+
+  /// A new chat of the group, in the group's chat folder. Without a name, it takes the first line of `prompt`, or
+  /// `Manager.untitled` until its first prompt names it. It runs on the state queue.
+  func createChat(
+    _ group: String, name: String?, prompt: String?, configure: (inout Session) -> Void = { _ in }
+  ) throws -> SessionSummary {
+    let folder = home.chatFolder(group)
+    let named = name ?? prompt.map(Manager.name(fromPrompt:)) ?? Manager.untitled
+    return try create(NewSession(path: folder, name: named, prompt: prompt), (folder, nil, nil)) {
+      $0.chat = group
+      configure(&$0)
+    }
+  }
+
+  func ensureChatFolder(_ group: String, description: String?) throws {
     let folder = home.chatFolder(group)
     try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     try writeGuide(Chat.guide(description: description), in: folder)
@@ -163,20 +196,27 @@ extension Service {
     if isDirectory(folder) { try writeGuide(Chat.guide(description: groups[group]?.description), in: folder) }
   }
 
-  /// Rewrites the group's chat guide, and tells the chat when its claude
-  /// runs. A chat whose claude is not live reads the new guide when it
-  /// starts. The pane reads `starting` while a stopped claude exits, so the
-  /// check reads `live` and not the pane.
+  /// Rewrites the group's chat guide, and tells each chat of the group that is not done and whose claude runs. A
+  /// chat whose claude is not live reads the new guide when it starts. The pane reads `starting` while a stopped
+  /// claude exits, so the check reads `live` and not the pane. A failed send is logged, so the other chats still
+  /// get the notice.
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
-    guard let id = mostRecentChat(of: group), let e = entries[id], !e.session.done, e.facts.live else { return }
-    _ = try send(id, Chat.describedNotice(groups[group]?.description), by: .sbd, trigger: .chat)
+    for id in chats(of: group) {
+      guard let e = entries[id], !e.session.done, e.facts.live else { continue }
+      do {
+        _ = try send(id, Chat.describedNotice(groups[group]?.description), by: .sbd, trigger: .chat)
+      } catch {
+        logLine("groups: can't tell \(id) about the description of \(group): \(error)")
+      }
+    }
   }
 
-  /// Marks the group's chat done, because its tools can no longer find the group.
-  func retireChat(of group: String) throws {
-    guard let id = mostRecentChat(of: group), entries[id]?.session.done == false else { return }
-    try update(id) { $0.done = true }
-    record(id, "done")
+  /// Marks each chat of the group done, because their tools can no longer find the group.
+  func retireChats(of group: String) throws {
+    for id in chats(of: group) where entries[id]?.session.done == false {
+      try update(id) { $0.done = true }
+      record(id, "done")
+    }
   }
 }

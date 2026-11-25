@@ -186,11 +186,13 @@ import Testing
     #expect(model.selected?.chat == "g1")
   }
 
-  @Test func aChatsInboxNameIsItsGroupsCurrentName() throws {
+  /// A chat whose name is not the default name of its group's current name reads as the group's chat, then its own
+  /// name.
+  @Test func aChatsInboxNameStartsWithItsGroupsCurrentName() throws {
     let model = appliedModel([try chatCard("c", group: "g1")])
     let chat = try #require(model.triage.first)
     model.groups = [GroupSummary(SessionGroup(id: "g1", name: "Billing", description: nil, created: 0), sessions: [])]
-    #expect(model.inboxName(chat) == "Billing chat")
+    #expect(model.inboxName(chat) == "Billing chat: \(chat.name)")
 
     model.groups = [GroupSummary(SessionGroup(id: "g2", name: "Flags", description: nil, created: 0), sessions: [])]
     #expect(model.inboxName(chat) == chat.name)

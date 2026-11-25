@@ -128,17 +128,6 @@ import Testing
     #expect(try sbd.get(work.id).pinned != true)
   }
 
-  @Test func managerPinOnAGroupChatFails() throws {
-    let sbd = try Instance()
-    _ = try decode(GroupSummary.self, sbd.sb("group", "add", "--json", "Flags"))
-    let c = try decode(SessionSummary.self, sbd.sb("chat", "Flags", "--json"))
-
-    let error = failure(sbd, "manager-pin", ["session": .string(c.id), "pinned": true])
-
-    #expect(error != "no error")
-    #expect(try sbd.get(c.id).pinned != true)
-  }
-
   @Test func pinningTheOlderConversationLeavesTheOrderAndItsLastActivity() throws {
     let sbd = try Instance()
     let older = try idleConversation(sbd, name: "older")
@@ -249,18 +238,5 @@ import Testing
     _ = try unpin(sbd, c.id)
 
     #expect(try listed(sbd, c.id).activity?.archived == true)
-  }
-
-  @Test func aGroupChatIsNeverArchived() throws {
-    let sbd = try Instance()
-    _ = try decode(GroupSummary.self, sbd.sb("group", "add", "--json", "Flags"))
-    let id = try #require(try decode(JSON.self, sbd.sb("chat", "Flags", "--send", "hello", "--json"))["id"]?.string)
-    try sbd.waitFor(id, "the reply") { $0.lastReply == "Done: hello" }
-    _ = try sbd.sb("chat", "Flags", "--read")
-    try stopAndSettle(sbd, id)
-    let lastActivity = try sbd.get(id).lastActivity
-    try sbd.advanceClock(lastActivity + Conversations.archiveAfterMs + 1 - (try sbd.now()))
-
-    #expect(try sbd.get(id).activity?.archived != true)
   }
 }
