@@ -59,8 +59,13 @@
 # claude.ai artifact. In a window 1024 pt wide, it checks through the app's ShellSelfTest commands that the
 # session's side panel lists both links inside the panel, that Remove deletes one, and that the group's Links
 # popover on the Board lists the group link and the session link but not the artifact link.
+# The group check shows the Board in group lanes in a window 1024 pt wide and drives a group's lane header through
+# the app's ShellSelfTest commands. It clicks Accept on a description that Claude wrote and checks through sb that
+# the description is the user's. It opens the Links popover, removes the seeded link, adds a link through the
+# popover's fields and Return, and checks both through sb. It adds a claude.ai artifact link through the same fields and
+# removes it from the Artifacts popover. It opens the Notes link and checks that the popover shows each note.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# settings, boardselect, boarddrag, wake, links). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# settings, boardselect, boarddrag, wake, links, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -75,9 +80,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | boardselect | boarddrag | wake | links) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | boardselect | boarddrag | wake | links | group) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, boardselect, boarddrag, wake, and links." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, boardselect, boarddrag, wake, links, and group." >&2
     exit 2
     ;;
   esac
@@ -152,6 +157,18 @@ wait_for() { # <seconds> <command…>
 }
 
 app_gone() { ! kill -0 "$app_pid" 2>/dev/null; }
+
+# The ShellSelfTest helpers below set the calling check's local `result`.
+clicked() { # <anchor>
+  result=$(app click-anchor "$1")
+  [[ $result == "clicked at "* ]]
+}
+
+# Sets the window to the 1024 pt width of CI's display. The check runs `app width restore` before it ends the app.
+pinned() {
+  result=$(app width 1024)
+  [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
+}
 
 end_app() {
   kill -KILL "$app_pid" 2>/dev/null || true
@@ -1050,16 +1067,8 @@ check_links() {
     result=$(app anchors panel-link- session-side-panel)
     all_in "$result" "panel-link-$rfc" "panel-link-$rfc-remove" "panel-link-$slack" "panel-link-$slack-remove"
   }
-  clicked() {
-    result=$(app click-anchor "$1")
-    [[ $result == "clicked at "* ]]
-  }
   terminal_shows() { [ "$(app panes)" = 1 ]; }
   only_link_left() { [ "$(sb get "$a" --json | jq -c '[.links[]?.id]')" = "[\"$1\"]" ]; }
-  pinned() {
-    result=$(app width 1024)
-    [ "$result" = "width 1024" ] || fail "the app could not pin the window to 1024 pt: $result"
-  }
 
   # A launch argument shows the side panel for this run only, whatever the user's saved setting is.
   SB_SELECT="$a" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -sessionSidePanel YES >>"$shots/app.log" 2>&1 &
@@ -1098,3 +1107,60 @@ check_links() {
 }
 
 if wants links; then check_links; fi
+
+check_group() {
+  check=group
+  local shots="$home/shots/group" group rfc notes artifact result
+  mkdir "$shots"
+  echo "Checking a group's description author, links, and notes on the Board…"
+  new_session group-work
+  group=$(sb group add group-context "$session" --json | jq -r '.id')
+  CLAUDECODE=1 sb group describe "$group" "Ship the flag cache." >/dev/null
+  sb group note "$group" "Ask Ana before the deploy." >/dev/null
+  sb group note "$group" "The cache lives in Redis." >/dev/null
+  sb group link add "$group" https://example.com/rfc --title RFC >/dev/null
+  group_json() { sb group ls --json | jq -rc --arg g "$group" ".groups[] | select(.id == \$g) | $1"; }
+  rfc=$(group_json '.links[0].id')
+  notes=$(group_json '[.notes[].id | "group-note-" + . + ":in"] | sort | join(",")')
+  author_is() { [ "$(group_json '.descriptionBy // "you"')" = "$1" ]; }
+  links_are() { [ "$(group_json '[.links[]?.title]')" = "$1" ]; }
+  shows() { [ "$(app where)" = "$1" ]; }
+  # A control can draw a moment after the Board shows, so each first click on it is retried.
+  notes_shown() { [ "$(app anchors group-note-)" = "$notes" ]; }
+  author_is claude || fail "sb did not record Claude as the author: $(group_json .descriptionBy)"
+
+  SB_HISTORY=board SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" -boardLanes group >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows board || fail "the app did not show the Board: $(app where)"
+  pinned
+  wait_for 10 clicked "group-description-accept-$group" || fail "the app could not click Accept: $result"
+  wait_for 10 author_is you || fail "Accept did not make the description yours: $(group_json .descriptionBy)"
+  [ "$(group_json .description)" = "Ship the flag cache." ] || fail "Accept changed the text: $(group_json .description)"
+  wait_for 10 clicked "group-links-$group" || fail "the app could not open the links: $result"
+  wait_for 5 clicked "group-link-$group-$rfc-remove" || fail "the links popover did not show the RFC link: $result"
+  wait_for 10 links_are '[]' || fail "Remove did not remove the link: $(group_json .links)"
+  [ "$(app fill 'Link URL|https://example.com/design')" = filled ] || fail "the app could not fill the URL field"
+  # On macOS 26 the Add button is not an AppKit button, so a click posted to its view does nothing. Return in the
+  # title field runs the same add as the button.
+  [ "$(app submit 'Link title (optional)|Design doc')" = submitted ] || fail "the app could not submit the title field"
+  wait_for 10 links_are '["Design doc"]' || fail "Add did not add the link: $(group_json .links)"
+  app snapshot "$shots/links.png" >/dev/null
+  # A link to a claude.ai artifact lists under Artifacts, not Links, so Artifacts has to remove it.
+  [ "$(app submit 'Link URL|https://claude.ai/artifact/GroupGui1')" = submitted ] ||
+    fail "the app could not submit the URL field"
+  wait_for 10 links_are '["Design doc","https://claude.ai/artifact/GroupGui1"]' ||
+    fail "Add did not add the artifact link: $(group_json .links)"
+  artifact=$(group_json '.links[] | select(.url == "https://claude.ai/artifact/GroupGui1") | .id')
+  wait_for 10 clicked "group-artifacts-$group" || fail "the app could not open the artifacts: $result"
+  wait_for 5 clicked "group-artifact-$artifact-remove" || fail "the artifacts popover did not offer Remove: $result"
+  wait_for 10 links_are '["Design doc"]' || fail "Remove in Artifacts did not remove the link: $(group_json .links)"
+  wait_for 10 clicked "group-notes-$group" || fail "the app could not open the notes: $result"
+  wait_for 5 notes_shown || fail "the notes popover did not show $notes inside the window: $(app anchors group-note-)"
+  app snapshot "$shots/notes.png" >/dev/null
+  app width restore >/dev/null
+  end_app
+  save_shots
+  echo "ok: group (Accept, links add and remove, notes, 1024 pt)"
+}
+
+if wants group; then check_group; fi

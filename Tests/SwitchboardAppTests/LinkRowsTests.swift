@@ -228,10 +228,10 @@ extension LinkRowsTests {
       #expect(groupRows(nil, live: [sessionFixture("s1", links: nil)]).isEmpty)
     }
 
-    @Test func aGroupWithNoLinksHasNoLinkTitle() {
+    @Test func aGroupWithNoLinksOffersToAddOne() {
       let rows = LinkRows(group: groupFixture(nil), liveSessions: byId([sessionFixture("s1", links: nil)]), now: now)
 
-      #expect(rows.linkTitle == nil)
+      #expect(rows.linkTitle == "Add a link")
     }
 
     @Test func linkTitleCountsTheGroupsAndTheSessionsRows() {
@@ -247,10 +247,10 @@ extension LinkRowsTests {
       #expect(LinkRows(group: groupFixture(links), liveSessions: [:], now: now).linkTitle == "Links 1")
     }
 
-    @Test func aGroupWhoseOnlyLinkIsAnArtifactHasNoLinkTitle() {
+    @Test func aGroupWhoseOnlyLinkIsAnArtifactOffersToAddOne() {
       let links = [linkFixture("l1", url: artifactURL)]
 
-      #expect(LinkRows(group: groupFixture(links), liveSessions: [:], now: now).linkTitle == nil)
+      #expect(LinkRows(group: groupFixture(links), liveSessions: [:], now: now).linkTitle == "Add a link")
     }
 
     /// `sb rm` takes a session out of `ls`, and the group list leaves out a removed session's links.

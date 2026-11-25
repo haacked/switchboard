@@ -1183,7 +1183,9 @@ extension OperatorAskTests {
   @Test func anOverdueActionWaitLeavesItsSubjectWorkingWhileItsTurnRuns() throws {
     let sbd = try Instance()
     let kid = try sbd.new(prompt: "slow held", name: "kid")
-    try sbd.waitFor(kid.id, "the kid's turn") { $0.state == .working }
+    // The kid reads Working before its turn starts. A clock jump between SessionStart and UserPromptSubmit would
+    // let the idle stop end claude.
+    try ScheduleFireTests().waitForPrompt(sbd, kid.id, "slow held")
     _ = try follow.arm(sbd, ["--kind", "session", "--target", kid.id, "--state", "done", "--then", "rm"])
 
     try sbd.advanceClock(25 * WaitTests.hourMs)
