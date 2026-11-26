@@ -881,8 +881,7 @@ extension CIReaderTests {
     let (_, wait) = try armedUndecided(.judgeFails, github, sbd)
     let op = try follow.theOperator(sbd)
     // A running claude takes the message as a paste, which never checks the folder.
-    try sbd.sb("stop", op.id)
-    try sbd.waitFor(op.id, "the Operator's claude to stop", timeout: 30) { !$0.live }
+    try sbd.stop(op.id)
     let away = op.cwd + ".away"
     try FileManager.default.moveItem(atPath: op.cwd, toPath: away)
     try failTwice(sbd, wait, head: head(github))
@@ -907,8 +906,7 @@ extension CIReaderTests {
     let sbd = try instance(github)
     let (_, wait) = try armedUndecided(.judgeFails, github, sbd)
     let op = try follow.theOperator(sbd)
-    try sbd.sb("stop", op.id)
-    try sbd.waitFor(op.id, "the Operator's claude to stop", timeout: 30) { !$0.live }
+    try sbd.stop(op.id)
     let away = op.cwd + ".away"
     try FileManager.default.moveItem(atPath: op.cwd, toPath: away)
     try failTwice(sbd, wait, head: head(github))

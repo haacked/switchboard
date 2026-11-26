@@ -376,6 +376,14 @@ final class Instance {
 
   func get(_ id: String) throws -> SessionSummary { try client.session(id) }
 
+  /// Stops the session's claude with `sb stop` and waits until sbd shows it stopped. sbd refuses to stop a claude
+  /// that has not started. This waits for the claude's pid before the stop.
+  func stop(_ id: String) throws {
+    try waitFor(id, "the claude to start before the stop", timeout: 30) { $0.claudePid != nil }
+    try sb("stop", id)
+    try waitFor(id, "the claude to stop", timeout: 30) { $0.claudePid == nil && !$0.live }
+  }
+
   /// Attaches a control-mode tmux client to the session's Claude pane, which
   /// counts as a terminal that shows the session. It returns a function that
   /// detaches the client.

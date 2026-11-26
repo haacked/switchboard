@@ -421,8 +421,7 @@ private func placeholders(_ text: String, id: String, cwd: String, repo: String)
     let (s, _) = try cleanWorktree(sbd)
     let local = try sbd.client.call(
       "new", ["path": .string(s.cwd), "name": "mac"], as: SessionSummary.self)
-    try sbd.sb("stop", local.id)
-    try sbd.waitFor(local.id, "the local claude to stop") { $0.claudePid == nil && !$0.live }
+    try sbd.stop(local.id)
     let tmux = try #require(findExecutable("tmux"))
     try runCommand(tmux, ["-S", sbd.home.tmuxSocket, "kill-session", "-t", "=\(local.id)-shell"])
 
