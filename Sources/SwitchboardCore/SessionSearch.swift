@@ -4,8 +4,10 @@ import Foundation
 public enum SessionSearch {
   /// The fields that a query searches.
   public enum Field: Sendable {
-    case name, branch, pr, issue, repo, prTitle, group, reason, note
+    case name, branch, pr, issue, repo, prTitle, group, reason, note, transcript
 
+    /// Every transcript match scores `substring` at weight 1. That is below the lowest score in any other field, so a
+    /// transcript match ranks last.
     var weight: Int {
       switch self {
       case .name: 10
@@ -14,6 +16,7 @@ public enum SessionSearch {
       case .prTitle, .group: 7
       case .reason: 5
       case .note: 4
+      case .transcript: 1
       }
     }
 
@@ -22,7 +25,7 @@ public enum SessionSearch {
     var allowsSubsequence: Bool {
       switch self {
       case .name, .branch, .repo, .group: true
-      case .pr, .issue, .prTitle, .reason, .note: false
+      case .pr, .issue, .prTitle, .reason, .note, .transcript: false
       }
     }
 
@@ -37,6 +40,7 @@ public enum SessionSearch {
       case .group: "Group"
       case .reason: "Reason"
       case .note: "Note"
+      case .transcript: "Transcript"
       }
     }
 
@@ -45,7 +49,7 @@ public enum SessionSearch {
     public var shownOnRow: Bool {
       switch self {
       case .name, .branch, .pr, .issue, .repo: true
-      case .prTitle, .group, .reason, .note: false
+      case .prTitle, .group, .reason, .note, .transcript: false
       }
     }
   }
@@ -60,6 +64,25 @@ public enum SessionSearch {
     }
   }
 
+  /// A conversation's messages, folded once when they are read, so that `rank` folds none of them per keystroke.
+  public struct Transcript: Equatable, Sendable {
+    fileprivate struct Message: Equatable, Sendable {
+      var text: String
+      var folded: String
+    }
+
+    fileprivate var messages: [Message]
+
+    public init(_ messages: [String]) {
+      self.messages = messages.map { text in
+        var folded = SessionSearch.fold(text)
+        // `containsBytes` reads the UTF-8 in place only when the string stores it contiguously.
+        folded.makeContiguousUTF8()
+        return Message(text: text, folded: folded)
+      }
+    }
+  }
+
   public struct Result: Equatable, Sendable, Identifiable {
     public var session: SessionSummary
     /// The session's repo label, for the row.
@@ -71,8 +94,11 @@ public enum SessionSearch {
   }
 
   /// The sessions that match every term of `query`, best match first, then the most recent activity. An
-  /// empty query returns every session by recent activity.
-  public static func rank(_ sessions: [SessionSummary], query: String) -> [Result] {
+  /// empty query returns every session by recent activity. `transcripts` holds the messages to search for a session,
+  /// by its id.
+  public static func rank(
+    _ sessions: [SessionSummary], query: String, transcripts: [String: Transcript] = [:]
+  ) -> [Result] {
     let terms = fold(query).split(whereSeparator: \.isWhitespace).map { term -> String in
       let digits = term.dropFirst()
       return term.first == "#" && !digits.isEmpty && digits.allSatisfy(\.isASCII) && digits.allSatisfy(\.isNumber)
@@ -82,12 +108,20 @@ public enum SessionSearch {
     var results: [(result: Result, name: String)] = []
     sessions: for s in sessions {
       let values = searchable(s, repo: labels[s.id])
+      let transcript = transcripts[s.id]
       var score = 0
       var hint: Hit?
       for term in terms {
-        guard let best = bestHit(term, in: values) else { continue sessions }
-        score += best.score
-        if hint == nil, !best.value.shown { hint = Hit(field: best.value.field, text: best.value.text) }
+        if let best = bestHit(term, in: values) {
+          score += best.score
+          if hint == nil, !best.value.shown { hint = Hit(field: best.value.field, text: best.value.text) }
+        } else if let message = transcript?.messages.first(where: { containsBytes($0.folded, term) }) {
+          // Every other field outranks a transcript match, so `rank` searches the transcript only when none matched.
+          score += substring * Field.transcript.weight
+          if hint == nil { hint = Hit(field: .transcript, text: excerpt(message.text, around: term)) }
+        } else {
+          continue sessions
+        }
       }
       // `searchable` puts the name first.
       let result = Result(session: s, repo: labels[s.id].map(RepoLabels.capped), score: score, hint: hint)
@@ -128,6 +162,16 @@ public enum SessionSearch {
     return nil
   }
 
+  /// Whether the UTF-8 of `text` holds the UTF-8 of `term`. It is much faster than a search by Character, which
+  /// matters for the thousands of transcript messages that each keystroke searches.
+  private static func containsBytes(_ text: String, _ term: String) -> Bool {
+    var text = text
+    var term = term
+    return text.withUTF8 { t in
+      term.withUTF8 { p in memmem(t.baseAddress, t.count, p.baseAddress, p.count) != nil }
+    }
+  }
+
   private static func isSubsequence(_ term: String, of text: String) -> Bool {
     var rest = term[...]
     for c in text where c == rest.first {
@@ -137,7 +181,7 @@ public enum SessionSearch {
     return false
   }
 
-  private static func fold(_ text: String) -> String {
+  fileprivate static func fold(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
   }
 
@@ -172,6 +216,20 @@ public enum SessionSearch {
     add(.reason, s.reason)
     for note in s.notes { add(.note, note.text) }
     return values
+  }
+
+  /// How much of a message a transcript hint shows before the matched term.
+  static let excerptLead = 30
+
+  /// `text` from a word start up to `excerptLead` characters before the first match of the folded `term`, so that a
+  /// hint that the row cuts at its end still shows the match. A cut start gets a leading ellipsis. The search runs on
+  /// `text` itself, because a position in the folded text can point elsewhere in `text`.
+  static func excerpt(_ text: String, around term: String) -> String {
+    guard let match = text.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) else { return text }
+    let lead = text.index(match.lowerBound, offsetBy: -excerptLead, limitedBy: text.startIndex) ?? text.startIndex
+    guard lead > text.startIndex else { return text }
+    let start = text[lead..<match.lowerBound].firstIndex(where: \.isWhitespace).map(text.index(after:)) ?? lead
+    return "…" + text[start...]
   }
 
   /// The highest-scoring value for `term`. A tie goes to the earlier value.

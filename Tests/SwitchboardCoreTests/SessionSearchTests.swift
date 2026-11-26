@@ -25,9 +25,13 @@ private func pr(_ number: Int, repo: String = "o/r", title: String = "") -> PRSu
       id: "PR_\(number)", number: number, url: "https://github.com/\(repo)/pull/\(number)", repo: repo, title: title))
 }
 
-private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
-  SessionSearch.rank(sessions, query: query).map(\.id)
+private func ids(
+  _ sessions: [SessionSummary], _ query: String, transcripts: [String: SessionSearch.Transcript] = [:]
+) -> [String] {
+  SessionSearch.rank(sessions, query: query, transcripts: transcripts).map(\.id)
 }
+
+private func transcript(_ messages: [String]) -> SessionSearch.Transcript { SessionSearch.Transcript(messages) }
 
 @Suite struct SessionSearchTests {
 
@@ -209,7 +213,7 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
   /// `27` is a subsequence of 217 but not a substring, so only a gapped match would find the PR or issue.
   @Test(arguments: [
     (SessionSearch.Field.name, true), (.branch, true), (.repo, true), (.group, true),
-    (.pr, false), (.issue, false), (.prTitle, false), (.reason, false), (.note, false),
+    (.pr, false), (.issue, false), (.prTitle, false), (.reason, false), (.note, false), (.transcript, false),
   ])
   func subsequenceFollowsTheField(_ field: SessionSearch.Field, _ allowed: Bool) {
     let text = "fix-kafka-timeout"
@@ -224,10 +228,12 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
       case .prTitle: session("s", pr: pr(5, title: text))
       case .reason: session("s", reason: text)
       case .note: session("s", notes: [text])
+      case .transcript: session("s")
       }
+    let transcripts = field == .transcript ? ["s": transcript([text])] : [:]
     let query = field == .pr || field == .issue ? "27" : "fkt"
 
-    #expect(ids([target, session("other")], query) == (allowed ? ["s"] : []))
+    #expect(ids([target, session("other")], query, transcripts: transcripts) == (allowed ? ["s"] : []))
   }
 
   /// `capped` shortens the label to `…ong-repository-name-for-tests` for the row.
@@ -432,5 +438,205 @@ private func ids(_ sessions: [SessionSummary], _ query: String) -> [String] {
     let result = try #require(SessionSearch.rank(sessions, query: "queue").first)
 
     #expect(result.hint == SessionSearch.Hit(field: .prTitle, text: "Queue badge"))
+  }
+
+  // MARK: Transcripts
+
+  @Test func theTranscriptFieldIsHiddenFromTheRowAndTitledTranscript() {
+    #expect(!SessionSearch.Field.transcript.shownOnRow)
+    #expect(SessionSearch.Field.transcript.title == "Transcript")
+  }
+
+  /// Every transcript match scores substring (40) at weight 1, whether the message is the term or holds it inside a
+  /// word.
+  @Test(arguments: [("kafka", 40), ("Ask about notkafka lag", 40)])
+  func aTranscriptMatchScoresSubstringAtWeightOne(_ message: String, _ score: Int) throws {
+    let sessions = [session("s"), session("other")]
+
+    let result = try #require(
+      SessionSearch.rank(sessions, query: "kafka", transcripts: ["s": transcript([message])]).first)
+
+    #expect(result.id == "s")
+    #expect(result.score == score)
+  }
+
+  @Test func aTermFoundOnlyInATranscriptFindsTheSession() {
+    let sessions = [session("s", name: "cache plan"), session("other", name: "deploy")]
+    let transcripts = ["s": transcript(["How do I tune the Kafka consumer?", "Raise the batch size."])]
+
+    #expect(ids(sessions, "kafka", transcripts: transcripts) == ["s"])
+  }
+
+  @Test(arguments: [("Résumé parser", "resume"), ("resume parser", "RÉSUMÉ"), ("RESUME", "résumé")])
+  func aTranscriptMatchIgnoresCaseAndDiacritics(_ message: String, _ query: String) {
+    let sessions = [session("s"), session("other")]
+
+    #expect(ids(sessions, query, transcripts: ["s": transcript([message])]) == ["s"])
+  }
+
+  /// Each field's weakest hit beats a transcript hit of 40: a name subsequence (200), a reason substring
+  /// (200), a note substring (160), and a group subsequence (140). The transcript's session has the newer
+  /// activity, so only the score can put it last.
+  @Test(arguments: [
+    session("other", name: "k-a-f-k-a", lastActivity: 1),
+    session("other", reason: "xkafkax", lastActivity: 1),
+    session("other", notes: ["xkafkax"], lastActivity: 1),
+    session("other", group: "k-a-f-k-a", lastActivity: 1),
+  ])
+  func aMatchInAnyOtherFieldOutranksATranscriptMatch(_ other: SessionSummary) {
+    let sessions = [session("t", lastActivity: 9), other]
+
+    #expect(ids(sessions, "kafka", transcripts: ["t": transcript(["kafka"])]) == ["other", "t"])
+  }
+
+  @Test func termsMayMatchTheNameAndTheTranscript() {
+    let sessions = [
+      session("both", name: "cache plan"), session("nameOnly", name: "cache keys"),
+      session("transcriptOnly", name: "deploy"),
+    ]
+    let transcripts = [
+      "both": transcript(["Check the Kafka lag first."]), "transcriptOnly": transcript(["Kafka is slow today."]),
+    ]
+
+    #expect(ids(sessions, "cache kafka", transcripts: transcripts) == ["both"])
+  }
+
+  @Test func aTranscriptTermAndATermThatMatchesNothingGiveNoResults() {
+    let sessions = [session("s", name: "cache plan")]
+
+    #expect(ids(sessions, "kafka zzz", transcripts: ["s": transcript(["Kafka lag"])]).isEmpty)
+  }
+
+  @Test func aNameTermAndATranscriptTermGiveATranscriptHint() throws {
+    let sessions = [session("s", name: "cache plan")]
+
+    let result = try #require(
+      SessionSearch.rank(sessions, query: "cache kafka", transcripts: ["s": transcript(["Check the Kafka lag."])])
+        .first)
+
+    #expect(result.hint?.field == .transcript)
+  }
+
+  /// The note also holds the term and scores higher, so the hint names the note.
+  @Test func aNoteMatchHidesATranscriptMatchOfTheSameTerm() throws {
+    let sessions = [session("s", notes: ["Ask about the kafka lag"])]
+
+    let result = try #require(
+      SessionSearch.rank(sessions, query: "kafka", transcripts: ["s": transcript(["kafka"])]).first)
+
+    #expect(result.hint == SessionSearch.Hit(field: .note, text: "Ask about the kafka lag"))
+  }
+
+  @Test func theHintComesFromTheFirstMatchingMessage() throws {
+    let sessions = [session("s")]
+    let transcripts = ["s": transcript(["No match here", "Ask about notkafka lag", "kafka"])]
+
+    let result = try #require(SessionSearch.rank(sessions, query: "kafka", transcripts: transcripts).first)
+
+    #expect(result.hint == SessionSearch.Hit(field: .transcript, text: "Ask about notkafka lag"))
+  }
+
+  @Test func aTranscriptForASessionThatIsNotListedIsIgnored() {
+    let sessions = [session("a", name: "cache plan"), session("b", name: "deploy")]
+
+    #expect(ids(sessions, "kafka", transcripts: ["gone": transcript(["kafka"])]).isEmpty)
+    #expect(
+      SessionSearch.rank(sessions, query: "cache", transcripts: ["gone": transcript(["cache"])])
+        == SessionSearch.rank(sessions, query: "cache"))
+  }
+
+  @Test(arguments: ["", "kafka", "badge", "zzz"])
+  func transcriptsThatMatchNoTermChangeNothing(_ query: String) {
+    let sessions = [
+      session("a", name: "kafka-retry", lastActivity: 3), session("b", name: "queue-badge", lastActivity: 2),
+    ]
+    let transcripts = ["a": transcript(["Unrelated words"]), "b": transcript(["Nothing here", "Or here"])]
+
+    #expect(
+      SessionSearch.rank(sessions, query: query, transcripts: transcripts) == SessionSearch.rank(sessions, query: query)
+    )
+  }
+
+  // MARK: Transcript hint window
+
+  /// Words of several lengths, so a window that starts mid-word shows.
+  static let filler = String(repeating: "alpha be gamma delta epsilon zeta ", count: 20)
+
+  private func hint(_ message: String, query: String = "kafka") throws -> SessionSearch.Hit {
+    try #require(
+      SessionSearch.rank([session("s")], query: query, transcripts: ["s": transcript([message])]).first?.hint)
+  }
+
+  @Test func aMatchDeepInALongMessageShowsTheTermInTheFirst90Characters() throws {
+    let message = Self.filler + "the Kafka retry plan needs review " + Self.filler
+    try #require(message.distance(from: message.startIndex, to: message.range(of: "Kafka")!.lowerBound) > 500)
+
+    let hint = try self.hint(message)
+
+    #expect(hint.field == .transcript)
+    #expect(hint.text.prefix(90).contains("Kafka"))
+  }
+
+  @Test func aWindowThatCutsTheStartBeginsWithAnEllipsisAtAWordBoundary() throws {
+    let message = Self.filler + "the Kafka retry plan needs review"
+
+    let hint = try self.hint(message)
+
+    #expect(hint.text.hasPrefix("…"))
+    var shown = String(hint.text.dropFirst())
+    if shown.hasSuffix("…") { shown.removeLast() }
+    let start = try #require(message.range(of: shown)?.lowerBound)
+    let before = message[message.index(before: start)]
+    #expect(!before.isLetter && !before.isNumber, "\(hint.text)")
+    #expect(shown.first.map { !$0.isWhitespace } ?? false, "\(hint.text)")
+  }
+
+  /// "Up to about 30 characters before the match" leaves room for the word that the boundary keeps.
+  @Test func aWindowShowsOnlyAShortStretchBeforeTheMatch() throws {
+    let message = Self.filler + "the Kafka retry plan needs review"
+
+    let hint = try self.hint(message)
+
+    let offset = try #require(hint.text.range(of: "Kafka")).lowerBound
+    #expect(hint.text.distance(from: hint.text.startIndex, to: offset) <= 40, "\(hint.text)")
+  }
+
+  @Test func aMatchAtTheStartOfTheMessageShowsTheMessageFromItsStart() throws {
+    let message = "Kafka retry plan: " + Self.filler
+
+    let hint = try self.hint(message)
+
+    #expect(hint.text.hasPrefix("Kafka retry plan"))
+  }
+
+  @Test func aMatchNearTheStartIsNotCut() throws {
+    let message = "Please look at the Kafka lag before " + Self.filler
+
+    let hint = try self.hint(message)
+
+    #expect(hint.text.hasPrefix("Please look at the Kafka"))
+  }
+
+  /// The window comes from the unfolded message, so it shows the message's own spelling of the term.
+  @Test(arguments: [("résumé", "resume"), ("KAFKA", "kafka"), ("kafka", "KAFKA"), ("Ångström", "angstrom")])
+  func aDeepMatchWithADifferentCaseOrDiacriticShowsTheMessagesSpelling(_ spelled: String, _ query: String) throws {
+    let message = Self.filler + "check the \(spelled) parser " + Self.filler
+
+    let hint = try self.hint(message, query: query)
+
+    #expect(hint.text.prefix(90).contains(spelled), "\(hint.text)")
+  }
+
+  /// Folding can change a string's length, as ß to ss and the ﬁ ligature to fi. A window placed by an index into
+  /// the folded text would then point at the wrong place in the message.
+  @Test(arguments: ["Straße ", "ﬁle "])
+  func aDeepMatchAfterCharactersThatFoldToADifferentLengthShowsTheTerm(_ word: String) throws {
+    let message = String(repeating: word, count: 120) + "the Kafka retry plan " + Self.filler
+    try #require(
+      message.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil).count != message.count)
+
+    let hint = try self.hint(message)
+
+    #expect(hint.text.prefix(90).contains("Kafka"), "\(hint.text)")
   }
 }

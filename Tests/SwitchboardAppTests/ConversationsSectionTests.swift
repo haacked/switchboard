@@ -46,6 +46,35 @@ import Testing
     #expect(list.numberOfRows == 1)
   }
 
+  /// A chat of g1 named "Deploy plan".
+  func deployPlanChat(pinned: Bool? = nil) -> SessionSummary {
+    var c = chatItem("c", group: "g1", state: .working)
+    c.name = "Deploy plan"
+    c.pinned = pinned
+    return c
+  }
+
+  /// The labels of the section's buttons, with sbd listing g1 as Infra.
+  func buttonLabels(_ list: [SessionSummary]) -> [String] {
+    let (model, _) = recordingModel(list)
+    model.applyGroups([GroupSummary(SessionGroup(id: "g1", name: "Infra", created: 0), sessions: [])])
+    let hosted = host(model)
+    return hosted.elements.filter { $0.role == "AXButton" }.map(\.label)
+  }
+
+  @Test func thePinLabelsTitleAChatWithItsGroupAndAConversationWithItsBareName() {
+    let labels = buttonLabels([needsItem("m", manager: true, state: .working), deployPlanChat()])
+
+    #expect(labels.contains("Pin Infra chat: Deploy plan"))
+    #expect(!labels.contains("Pin Deploy plan"))
+    #expect(labels.contains("Pin m"))
+    #expect(!labels.contains { $0.hasPrefix("Pin Manager") })
+  }
+
+  @Test func aPinnedChatRowNamesItsGroupInTheUnpinLabel() {
+    #expect(buttonLabels([deployPlanChat(pinned: true)]).contains("Unpin Infra chat: Deploy plan"))
+  }
+
   @Test func withConversationsTheHeaderShowsOnceWithTheirRows() throws {
     let (model, _) = recordingModel([needsItem("m", manager: true, state: .working)])
     let hosted = host(model)

@@ -1,8 +1,8 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The sidebar's Manager conversations. The header shows with no
-/// conversations, because its button is the sidebar's way to start one.
+/// The sidebar's Manager conversations and group chats. The header shows with no conversations, because its button
+/// is the sidebar's way to start a Manager conversation.
 struct ConversationsSection: View {
   @EnvironmentObject var model: BoardModel
   let activeAccount: String
@@ -13,7 +13,7 @@ struct ConversationsSection: View {
     ConversationListSection(
       title: "Conversations", sessions: model.sidebarConversations, activeAccount: activeAccount,
       newHelp: AppShortcut.newConversation.help("Start a Manager conversation"), newLabel: "New Manager conversation",
-      removableSelection: removableSelection, archive: $model.showingArchive
+      removableSelection: removableSelection, archive: $model.showingArchive, rowTitle: model.conversationTitle
     ) {
       model.openManager(new: true)
     }
@@ -83,12 +83,11 @@ struct ConversationListSection: View {
 struct ConversationRow: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
-  var title: String? = nil
+  let title: String
   let activeAccount: String
   var hoverCard: HoverCard<String>? = nil
 
   var body: some View {
-    let title = title ?? session.name
     let mark = ChatMark(session)
     let unread = (session.activity?.unread ?? 0) > 0
     let pinned = session.pinned == true

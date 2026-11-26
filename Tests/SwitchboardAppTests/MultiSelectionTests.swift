@@ -691,6 +691,58 @@ private func boardSessions() -> BoardModel {
 
     #expect(model.multiSelection.isEmpty)
   }
+
+  // MARK: Conversations in the multi-selection
+
+  /// A conversation row that the sidebar's multi-selection can hold beside a work session. A delete removes only
+  /// work sessions, and sbd's plan skips the others.
+  enum SelectedConversation: String, CaseIterable, Sendable {
+    case chat, managerConversation, archivedChat
+
+    var session: SessionSummary {
+      switch self {
+      case .chat:
+        var s = chatItem("c", group: "g1", state: .working)
+        s.activity = ChatActivity(replies: 1, unread: 0)
+        return s
+      case .managerConversation:
+        var s = needsItem("c", manager: true, state: .working)
+        s.activity = ChatActivity(replies: 1, unread: 0)
+        return s
+      case .archivedChat:
+        var s = chatItem("c", group: "g1", state: .needsYou)
+        s.triage = nil
+        s.activity = ChatActivity(replies: 1, unread: 0, lastMessageAt: 1, archived: true)
+        return s
+      }
+    }
+  }
+
+  func withConversation(_ row: SelectedConversation) -> BoardModel {
+    let list = [needsItem("w", state: .waiting), row.session]
+    let model = multiSelected(SentRequests(), list, plan: RemovalPlan(remove: ["w", "c"].map(removalItem), skip: []))
+    model.showingArchive = true
+    return model
+  }
+
+  @Test(arguments: SelectedConversation.allCases)
+  func aConversationRowJoinsTheMultiSelectionButNotTheDelete(_ row: SelectedConversation) {
+    let model = withConversation(row)
+
+    #expect(Set(model.multiSelected.map(\.id)) == ["w", "c"], "\(row.rawValue)")
+    #expect(model.removableSelectionCount == 1, "\(row.rawValue)")
+  }
+
+  @Test func aMultiSelectionOfOnlyChatsCountsNothingToDelete() {
+    var c1 = chatItem("c1", group: "g1", state: .working)
+    c1.activity = ChatActivity(replies: 1, unread: 0)
+    var c2 = chatItem("c2", group: "g2", state: .working)
+    c2.activity = ChatActivity(replies: 1, unread: 0)
+    let model = multiSelected(SentRequests(), [c1, c2])
+
+    #expect(Set(model.multiSelected.map(\.id)) == ["c1", "c2"])
+    #expect(model.removableSelectionCount == 0)
+  }
 }
 
 @Suite struct MultiSelectionText {
