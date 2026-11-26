@@ -140,6 +140,10 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// Whether the folder no longer exists, as the poller found when its count
   /// failed. A count that failed for another reason leaves this false.
   public var folderGone = false
+  /// Whether the folder's HEAD is on a remote's default branch, as the poller last found it for a work session
+  /// that never had a PR. A `worktree` event without the field reads false, and so does every fact from before the
+  /// latest turn started.
+  public var headOnDefault = false
   /// What the cleanup checks of the last `worktree` event found.
   public var cleanupChecked: CleanupStatus?
   /// The removal that a `cleanup` event recorded.
@@ -483,6 +487,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "worktree":
       dirty = d["dirty"]?.int
       folderGone = d["gone"]?.bool ?? false
+      headOnDefault = d["onDefault"]?.bool ?? false
       cleanupChecked = d["cleanup"].map { CleanupStatus(blocker: $0.string) }
     case "cleanup":
       let kept = d["branch_removed"]?.bool == false ? d["branch"]?.string : nil
@@ -537,6 +542,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
       turnRunning = true
       turnStarted = t
       acknowledgment = nil
+      // The turn can commit, so a session without a PR waits for the poller's next count before it reads Done.
+      headOnDefault = false
       if let s = snooze, !s.isActive(at: t) { snooze = nil }
     }
   }
@@ -773,6 +780,7 @@ public enum Attention {
       }
       return Verdict(state: .needsYou, reason: "give it a first prompt")
     }
+    if let v = finishedWithoutPR(session, facts, now: now) { return v }
     if let v = blockedPR(facts, stateOf: stateOf) { return v }
     if let v = openPR(facts) { return v }
     if let v = awaitingReview(facts) { return v }

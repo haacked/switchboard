@@ -145,6 +145,13 @@ extension GitHub {
     return made
   }
 
+  /// Whether `git for-each-ref --format=%(symref) 'refs/remotes/*/HEAD'` output names a symbolic ref's target. The
+  /// `<remote>/HEAD` symbolic ref names the remote's default branch. A branch whose name ends in `/HEAD` matches the
+  /// pattern too, but it is not symbolic, so its line is blank.
+  public static func namesRemoteHead(_ symrefs: String) -> Bool {
+    symrefs.split(separator: "\n").contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+  }
+
   /// The values of `git config --get-regexp` output, by key.
   public static func gitConfig(_ text: String) -> [String: String] {
     var values: [String: String] = [:]

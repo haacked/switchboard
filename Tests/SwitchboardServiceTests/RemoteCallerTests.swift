@@ -63,7 +63,8 @@ private func watched(
   _ id: String, cwd: String, at site: any SessionSite, configDir: String, facts: SessionFacts = SessionFacts()
 ) -> GitHubPoller.Watched {
   GitHubPoller.Watched(
-    id: id, cwd: cwd, claudeSessionId: "u-\(id)", configDir: configDir, site: site, branch: nil, facts: facts)
+    id: id, cwd: cwd, claudeSessionId: "u-\(id)", configDir: configDir, site: site, branch: nil, kind: .work,
+    facts: facts)
 }
 
 private func remoteSession(_ id: String, cwd: String = "/srv/repo", host: String? = "mini") -> Session {

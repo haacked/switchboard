@@ -184,6 +184,7 @@ final class GitHubPoller {
     var site: any SessionSite
     /// The branch that sbd shows for the session.
     var branch: String?
+    var kind: SessionKind
     var facts: SessionFacts
   }
 
@@ -316,7 +317,7 @@ final class GitHubPoller {
         Watched(
           id: id, cwd: e.session.cwd, claudeSessionId: e.session.claudeSessionId,
           configDir: service.transcriptAccount(e.session),
-          site: service.site(for: e.session), branch: e.branch, facts: e.facts)
+          site: service.site(for: e.session), branch: e.branch, kind: e.session.kind, facts: e.facts)
       }
     }
     let now = nowMs()
@@ -530,6 +531,35 @@ final class GitHubPoller {
     } catch {
       return nil
     }
+  }
+
+  /// Whether some remote's default branch contains the folder's HEAD, or nil when git can't tell.
+  func headOnDefault(_ s: Watched) -> Bool? {
+    try? s.site.confirmed("whether \(s.id)'s HEAD is on a default branch") { machine in
+      self.git(
+        s.cwd, ["for-each-ref", "--contains=HEAD", "--format=%(symref)", "refs/remotes/*/HEAD"],
+        at: CheckedSite(s.site, machine: machine)
+      ).map(GitHub.namesRemoteHead)
+    }
+  }
+
+  /// The `worktree` event's fields beyond the count, and whether they differ from the session's facts. A finished
+  /// PR adds its cleanup checks. A session without a PR adds whether HEAD is on a default branch. It returns nil when
+  /// that read failed, so the poller records nothing.
+  private func folderExtra(_ s: Watched, finished pr: PullRequest?, dirty: Int?) -> (
+    data: [String: JSON], changed: Bool
+  )? {
+    guard let pr else {
+      guard let onDefault = dirty == 0 ? headOnDefault(s) : false else { return nil }
+      return (["onDefault": .bool(onDefault)], onDefault != s.facts.headOnDefault)
+    }
+    // The checks run 8 git commands, or 9 in a worktree that Supacode locked.
+    // `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
+    let checked: CleanupStatus? =
+      dirty != 0 || pr.state != .merged
+      ? nil
+      : s.facts.turnRunning ? s.facts.cleanupChecked : CleanupStatus(blocker: service.cleanupBlocker(s.id, pr: pr))
+    return (checked.map { ["cleanup": $0.reason.map(JSON.string) ?? .null] } ?? [:], checked != s.facts.cleanupChecked)
   }
 
   private func git(_ cwd: String, _ args: [String], at site: any SessionSite) -> String? {
@@ -771,21 +801,19 @@ final class GitHubPoller {
       event(s.id, "pr-refused", ["number": .null])
     }
     if let name = t.branch.name, name != s.branch { event(s.id, "branch", ["branch": .string(name)]) }
-    if let pr = t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr, pr.state != .open,
-      s.facts.cleanedUp == nil,
-      shouldCount(t, s, pr.id, all, now), let (dirty, gone) = worktreeCount(s)
+    let finished = (t.prId.flatMap({ prs[$0]?.pr }) ?? s.facts.pr).flatMap {
+      $0.state != .open && s.facts.cleanedUp == nil ? $0 : nil
+    }
+    // An empty key marks the count of a session without a PR, so a PR that the session opens later gets its own count.
+    let countKey =
+      finished?.id ?? (t.prId == nil && Attention.awaitsFolderCheck(kind: s.kind, s.facts, now: now) ? "" : nil)
+    if let key = countKey, shouldCount(t, s, key, all, now), let (dirty, gone) = worktreeCount(s),
+      let extra = folderExtra(s, finished: finished, dirty: dirty)
     {
-      t.counted = (now, s.facts.lastActivity, pr.id)
-      // The checks run 8 git commands, or 9 in a worktree that Supacode locked.
-      // `sb cleanup` refuses a running turn, so the poller keeps the last result during one.
-      let checked: CleanupStatus? =
-        dirty != 0 || pr.state != .merged
-        ? nil
-        : s.facts.turnRunning ? s.facts.cleanupChecked : CleanupStatus(blocker: service.cleanupBlocker(s.id, pr: pr))
-      if dirty != s.facts.dirty || gone != s.facts.folderGone || checked != s.facts.cleanupChecked {
-        var data: [String: JSON] = ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)]
-        if let checked { data["cleanup"] = checked.reason.map(JSON.string) ?? .null }
-        event(s.id, "worktree", .object(data))
+      t.counted = (now, s.facts.lastActivity, key)
+      if dirty != s.facts.dirty || gone != s.facts.folderGone || extra.changed {
+        let data: [String: JSON] = ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)]
+        event(s.id, "worktree", .object(data.merging(extra.data) { $1 }))
       }
     }
     var changed = false
@@ -831,10 +859,12 @@ final class GitHubPoller {
   /// A finished PR's folder is counted when the PR finishes, after the
   /// session's next activity, and once per idle interval while it is dirty.
   /// `git status` takes 0.1 to 0.3 s in a large repo, so a clean or missing
-  /// folder isn't counted again on its own.
+  /// folder isn't counted again on its own. The folder of a session without a PR, whose `prId` is empty, is also
+  /// counted after a newer acknowledgment, which moves no activity.
   private func shouldCount(_ t: Tracked, _ s: Watched, _ prId: String, _ all: Bool, _ now: Int64) -> Bool {
     guard !all, let counted = t.counted, counted.prId == prId else { return true }
     if s.facts.lastActivity > counted.activity { return true }
+    if prId.isEmpty, let at = s.facts.acknowledgment?.at, at > counted.at { return true }
     return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
   }
 
