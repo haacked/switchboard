@@ -308,29 +308,146 @@ import Testing
     #expect(MessageDrafts.key(for: needsItem("m", manager: true)) == "m")
   }
 
-  @Test func keyForAGroupChatNamesTheGroup() {
-    #expect(MessageDrafts.key(for: chatItem("c1", group: "g1")) == "group:g1")
+  /// Decision 12: each conversation of a group chat keeps its own draft.
+  @Test func keyForAGroupChatIsItsId() {
+    #expect(MessageDrafts.key(for: chatItem("c1", group: "g1")) == "c1")
   }
 
-  @Test func keyForASessionWithChatSetNamesTheGroupWhateverItsKind() {
+  @Test func keyForASessionWithChatSetIsItsIdWhateverItsKind() {
     var session = needsItem("c1")
     session.chat = "g1"
 
-    #expect(MessageDrafts.key(for: session) == "group:g1")
+    #expect(MessageDrafts.key(for: session) == "c1")
   }
 
-  @Test func keysForTwoChatsOfTheSameGroupAreEqual() {
+  @Test func keysForTwoChatsOfTheSameGroupDiffer() {
     let first = MessageDrafts.key(for: chatItem("c1", group: "g1"))
     let second = MessageDrafts.key(for: chatItem("c2", group: "g1"))
 
-    #expect(first == second)
+    #expect(first != second)
   }
 
   @Test func keysForChatsOfDifferentGroupsDiffer() {
     let first = MessageDrafts.key(for: chatItem("c1", group: "g1"))
-    let second = MessageDrafts.key(for: chatItem("c1", group: "g2"))
+    let second = MessageDrafts.key(for: chatItem("c2", group: "g2"))
 
     #expect(first != second)
+  }
+
+  // MARK: The group draft that an older app saved (Decision 12)
+
+  /// The key under which an app from before several conversations per group saved a group chat's draft.
+  static func legacyKey(_ group: String) -> String { "group:\(group)" }
+
+  /// A chat of `group` whose last activity is `lastActivity`, so that the newest one is the group's most recent.
+  func conversation(_ id: String, group: String = "g1", lastActivity: Int64, done: Bool = false) -> SessionSummary {
+    var s = chatItem(id, group: group)
+    s.lastActivity = lastActivity
+    s.created = lastActivity
+    s.markedDone = done
+    if done { s.state = .done }
+    return s
+  }
+
+  /// Saves `text` under the group's old key in the store's folder, as an older app left it.
+  func saveLegacyDraft(_ text: String, group: String = "g1") {
+    let old = MessageDrafts(folder: folder)
+    old.draft(for: Self.legacyKey(group)).text = text
+    old.saveNow()
+  }
+
+  /// A model on the store's folder that has applied `list`.
+  func relaunchedModel(_ list: [SessionSummary]) -> BoardModel {
+    _ = NSApplication.shared
+    let model = BoardModel(client: offlineClient(), draftsFolder: folder)
+    model.apply(.success(list), followups: nil)
+    return model
+  }
+
+  @Test func aLegacyGroupDraftLoadsForTheGroupsMostRecentConversation() {
+    saveLegacyDraft("rebase first")
+
+    let model = relaunchedModel([conversation("old", lastActivity: 10), conversation("new", lastActivity: 20)])
+
+    #expect(model.messageDraft(for: conversation("new", lastActivity: 20)).text == "rebase first")
+  }
+
+  @Test func aLegacyGroupDraftDoesNotLoadForAnOlderConversation() {
+    saveLegacyDraft("rebase first")
+
+    let model = relaunchedModel([conversation("old", lastActivity: 10), conversation("new", lastActivity: 20)])
+
+    #expect(model.messageDraft(for: conversation("old", lastActivity: 10)).text.isEmpty)
+  }
+
+  /// Decision 3: the group's most recent conversation is the newest one that is not done.
+  @Test func aLegacyGroupDraftSkipsAConversationThatIsDone() {
+    saveLegacyDraft("rebase first")
+
+    let model = relaunchedModel([
+      conversation("finished", lastActivity: 20, done: true), conversation("live", lastActivity: 10),
+    ])
+
+    #expect(model.messageDraft(for: conversation("live", lastActivity: 10)).text == "rebase first")
+    #expect(model.messageDraft(for: conversation("finished", lastActivity: 20, done: true)).text.isEmpty)
+  }
+
+  @Test func aLegacyGroupDraftLoadsOnlyForItsOwnGroup() {
+    saveLegacyDraft("rebase first", group: "g1")
+
+    let model = relaunchedModel([conversation("other", group: "g2", lastActivity: 30)])
+
+    #expect(model.messageDraft(for: conversation("other", group: "g2", lastActivity: 30)).text.isEmpty)
+  }
+
+  /// The legacy draft moves once. A later refresh in which another conversation is the most recent leaves it where
+  /// it moved.
+  @Test func aLegacyGroupDraftMovesOnce() throws {
+    saveLegacyDraft("rebase first")
+    let model = relaunchedModel([conversation("old", lastActivity: 10), conversation("new", lastActivity: 20)])
+    try #require(model.messageDraft(for: conversation("new", lastActivity: 20)).text == "rebase first")
+
+    model.apply(
+      .success([conversation("old", lastActivity: 30), conversation("new", lastActivity: 20)]), followups: nil)
+
+    #expect(model.messageDraft(for: conversation("old", lastActivity: 30)).text.isEmpty)
+    #expect(model.messageDraft(for: conversation("new", lastActivity: 20)).text == "rebase first")
+  }
+
+  /// After the move, the draft saves under the conversation's key and the group's old key is gone.
+  @Test func aMovedLegacyDraftSavesUnderTheSessionKey() async {
+    saveLegacyDraft("rebase first")
+    let model = relaunchedModel([conversation("old", lastActivity: 10), conversation("new", lastActivity: 20)])
+    _ = model.messageDraft(for: conversation("new", lastActivity: 20))
+
+    await settle {
+      let reloaded = MessageDrafts(folder: self.folder)
+      return reloaded.draft(for: "new").text == "rebase first" && reloaded.draft(for: Self.legacyKey("g1")).isEmpty
+    }
+
+    let reloaded = MessageDrafts(folder: folder)
+    #expect(reloaded.draft(for: "new").text == "rebase first")
+    #expect(reloaded.draft(for: Self.legacyKey("g1")).isEmpty)
+  }
+
+  /// A conversation that already holds a draft keeps it, and gets the group's text after its own.
+  @Test func aLegacyGroupDraftJoinsTheDraftThatTheConversationAlreadyHolds() async {
+    let old = MessageDrafts(folder: folder)
+    old.draft(for: Self.legacyKey("g1")).text = "rebase first"
+    old.draft(for: "new").text = "keep me"
+    old.saveNow()
+
+    let model = relaunchedModel([conversation("old", lastActivity: 10), conversation("new", lastActivity: 20)])
+
+    #expect(model.messageDraft(for: conversation("new", lastActivity: 20)).text == "keep me\n\nrebase first")
+    await settle {
+      let reloaded = MessageDrafts(folder: self.folder)
+      return reloaded.draft(for: "new").text == "keep me\n\nrebase first"
+        && reloaded.draft(for: Self.legacyKey("g1")).isEmpty
+    }
+    let reloaded = MessageDrafts(folder: folder)
+    #expect(reloaded.draft(for: "new").text == "keep me\n\nrebase first")
+    #expect(reloaded.draft(for: Self.legacyKey("g1")).isEmpty)
   }
 
   // MARK: prune(keeping:)
@@ -560,7 +677,7 @@ import Testing
     #expect(MessageDrafts.decisionKeys([s]).isEmpty)
   }
 
-  /// A group chat keeps its message draft under `group:<id>`. Its decision keys still name the session.
+  /// A group chat's decision keys name the session, not the group.
   @Test func decisionKeysOfAGroupChatNameTheSessionNotTheGroup() {
     var s = deciding("c1", [1, 2])
     s.chat = "g1"
@@ -871,8 +988,11 @@ import Testing
     #expect(model.messageDraft(for: needsItem("a")).text == "kept")
   }
 
-  @Test func twoChatSessionsOfOneGroupShareOneDraft() {
-    let model = appliedModel([chatItem("c", group: "g")])
-    #expect(model.messageDraft(for: chatItem("c", group: "g")) === model.messageDraft(for: chatItem("d", group: "g")))
+  @Test func twoChatSessionsOfOneGroupHaveTheirOwnDrafts() {
+    let model = appliedModel([chatItem("c", group: "g"), chatItem("d", group: "g")])
+    model.messageDraft(for: chatItem("c", group: "g")).text = "for c"
+
+    #expect(model.messageDraft(for: chatItem("c", group: "g")) !== model.messageDraft(for: chatItem("d", group: "g")))
+    #expect(model.messageDraft(for: chatItem("d", group: "g")).text.isEmpty)
   }
 }

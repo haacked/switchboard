@@ -390,7 +390,7 @@ import Testing
   }
 
   /// `send` throws because the session's folder is gone. The run records the failure once and waits a whole
-  /// interval, unlike a wait, which stays open and tries again on each tick.
+  /// interval.
   @Test func aRunThatCantBeSentRecordsTheFailureOnceAndMovesToTheNextTime() throws {
     let sbd = try Instance()
     let folder = "\(sbd.home.path)/doomed"

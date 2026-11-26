@@ -92,7 +92,7 @@ enum HostScope {
     for op in [
       "send-group", "send-pending", "group-ls", "group-add", "group-rm", "group-move", "group-note", "group-describe",
       "group-link-add", "group-link-rm", "group-account", "group-suggest", "manager", "manager-ls", "manager-hint",
-      "manager-mcp", "manager-skills", "chat", "chat-log",
+      "manager-mcp", "manager-skills", "chat", "chat-log", "chat-ls",
       "parent",
     ] {
       refused[op] = reaches
@@ -102,7 +102,8 @@ enum HostScope {
       "host-connect",
       "slash-commands", "removed-ls", "manager-pin", "manager-model", "operator-model", "operator-judge",
       "item-context", "manager-mcp-request", "operator",
-      "operator-report", "operator-reports", "wait-approve", "quick-ask", "ref-details", "pause", "snooze", "unsnooze",
+      "operator-report", "operator-reports", "wait-approve", "wait-check", "quick-ask", "ref-details", "pause",
+      "snooze", "unsnooze",
       "highlight",
       "schedule",
       "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log",
@@ -110,7 +111,9 @@ enum HostScope {
       "rm-queue",
       "rm-cancel", "rm-keep", "rm-retry",
       "removal-notices", "removal-notice-dismiss",
-      "host-disconnect", "live", "live-next", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+      "host-disconnect", "live", "live-next", "auto-mode", "open-shell", "autocontinue", "snapshots", "poll", "sources",
+      "repos",
+      "repo-add",
       "clock",
       "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
       "decision-ask",

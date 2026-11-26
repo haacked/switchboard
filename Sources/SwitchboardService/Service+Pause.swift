@@ -280,13 +280,11 @@ extension Service {
     guard let session = entries[id]?.session, let pause = session.pause else { throw APIError("\(id) isn't paused") }
     if let refusal = beingDeletedRefusal(id) { throw refusal }
     try requireRead(id)
-    var folderGone: Error?
+    var folderGone: FolderGone?
     do {
       try requireFolder(session)
-    } catch let error as HostUnread {
-      throw error
-    } catch {
-      folderGone = error
+    } catch let gone as FolderGone {
+      folderGone = gone
     }
     let now = nowMs()
     try update(id) { s in
@@ -322,10 +320,13 @@ extension Service {
     }
   }
 
-  /// The session that paused another, with a chat named by its group.
+  /// The session that paused another. A chat goes by its group's name and its own name, as the Inbox names it.
   private func pauser(_ id: String) -> Pause.Pauser {
     let s = entries[id]!.session
-    return Pause.Pauser(id: id, name: s.chat.flatMap { groups[$0]?.name } ?? s.name, kind: s.kind)
+    let group = s.chat.flatMap { groups[$0]?.name }
+    return Pause.Pauser(
+      id: id, name: group ?? s.name, kind: s.kind,
+      conversation: group.flatMap { s.name == Chat.name(group: $0) ? nil : s.name })
   }
 
   /// Sets the line that the session's Claude pane shows once claude exits. A session with no Claude pane has

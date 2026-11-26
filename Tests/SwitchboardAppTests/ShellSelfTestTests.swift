@@ -102,3 +102,48 @@ import Testing
     #expect(!ShellSelfTest.anchorIsInside(frame, window: Self.window, container: wide))
   }
 }
+
+/// `toolbar` reports the window toolbar's items in order, each as `<title>:in` when it is in the toolbar's visible
+/// items or `<title>:out` when the overflow menu holds it, joined by commas. Items with no title are left out.
+@MainActor
+@Suite struct ShellSelfTestToolbarReport {
+  @Test func reportsEveryVisibleItemAsInInOrder() {
+    let report = ShellSelfTest.toolbarReport([
+      (title: "Back", visible: true), (title: "Stop Claude", visible: true), (title: "New Session", visible: true),
+    ])
+
+    #expect(report == "Back:in,Stop Claude:in,New Session:in")
+  }
+
+  @Test func reportsAnItemInTheOverflowMenuAsOut() {
+    let report = ShellSelfTest.toolbarReport([
+      (title: "Stop Claude", visible: true), (title: "Delete…", visible: false), (title: "New Session", visible: true),
+    ])
+
+    #expect(report == "Stop Claude:in,Delete…:out,New Session:in")
+  }
+
+  /// A spacer has no title, so it never shows in the report.
+  @Test func leavesOutAnItemWithNoTitle() {
+    let report = ShellSelfTest.toolbarReport([
+      (title: "Back", visible: true), (title: nil, visible: true), (title: "New Session", visible: false),
+    ])
+
+    #expect(report == "Back:in,New Session:out")
+  }
+
+  @Test(arguments: [true, false])
+  func leavesOutAnItemWithAnEmptyTitle(_ visible: Bool) {
+    let report = ShellSelfTest.toolbarReport([(title: "", visible: visible), (title: "Notes", visible: true)])
+
+    #expect(report == "Notes:in")
+  }
+
+  @Test func reportsNothingForAToolbarWithNoTitledItems() {
+    #expect(ShellSelfTest.toolbarReport([(title: nil, visible: true), (title: nil, visible: false)]) == "")
+  }
+
+  @Test func reportsNothingForAnEmptyToolbar() {
+    #expect(ShellSelfTest.toolbarReport([]) == "")
+  }
+}

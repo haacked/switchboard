@@ -3,11 +3,13 @@ import SwitchboardCore
 
 /// Group chats. `plans/group-chats.md` in the notes repo describes them.
 extension Service {
-  /// The `chat` request: creates the group's chat the first time, with `text`
-  /// as its first prompt. After that it sends `text` to the chat, or without
-  /// text opens it (resumes a stopped claude). The answer is the chat's
-  /// summary, with `delivery` when it took text.
-  func chatRequest(_ args: JSON) -> Response {
+  /// The `chat` request. With `new`, it starts another conversation in the group chat, with `text` as its first
+  /// prompt, named `name`, else the first line of `text`, else `Manager.untitled`. With `session`, it sends
+  /// `text` to that chat of the group, or without text opens it. With neither, it does the same for the group's
+  /// most recent chat, and starts one named `Chat.name(group:)` when the group has none. The answer is the chat's
+  /// summary, with `delivery` when it took text. `author` is who wrote `text` that goes to a chat that exists, as
+  /// `openOrSend` takes it.
+  func chatRequest(_ args: JSON, by author: MessageAuthor? = nil) -> Response {
     do {
       let group = try queue.sync {
         let group = try lookupGroup(args)
@@ -15,19 +17,23 @@ extension Service {
         return group
       }
       let text = args["text"]?.string.flatMap { $0.isEmpty ? nil : $0 }
-      if let id = queue.sync(execute: { chatID(group) }) { return try openOrSend(id, text) }
+      let isNew = args["new"]?.bool == true
+      let ref = args["session"]?.string.flatMap { $0.isEmpty ? nil : $0 }
+      if isNew, ref != nil { throw APIError("pass session or new, not both") }
+      if !isNew, let id = try queue.sync(execute: { try groupChat(ref, of: group) }) {
+        return try openOrSend(id, text, by: author)
+      }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
       let (id, created, queued) = try queue.sync { () -> (String, SessionSummary?, Bool) in
-        if let id = chatID(group) { return (id, nil, false) }
-        guard let name = groups[group]?.name else { throw APIError("group \(group) was removed") }
-        let folder = home.chatFolder(group)
-        let new = NewSession(path: folder, name: Chat.name(group: name), prompt: text)
-        let chat = try create(new, (folder, nil, nil)) { $0.chat = group }
+        if !isNew, let id = mostRecentChat(of: group) { return (id, nil, false) }
+        guard let groupName = groups[group]?.name else { throw APIError("group \(group) was removed") }
+        let name = isNew ? args["name"]?.string.flatMap { $0.isEmpty ? nil : $0 } : Chat.name(group: groupName)
+        let chat = try createConversation(chat: group, name: name, prompt: text, mcp: nil)
         return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
-      guard let created else { return try openOrSend(id, text) }
+      guard let created else { return try openOrSend(id, text, by: author) }
       return try createdAnswer(created, text: text, queued: queued)
     } catch {
       return .failure("\(error)")
@@ -35,15 +41,20 @@ extension Service {
   }
 
   /// Sends `text` to the chat, or without text opens it. `sender` holds the `from` and `insideClaude` of the
-  /// request that carried the text, which say who wrote it.
-  func openOrSend(_ id: String, _ text: String?, sender: JSON = [:]) throws -> Response {
-    var request: [String: JSON] = ["session": .string(id)]
-    request["text"] = text.map(JSON.string)
-    request["from"] = sender["from"]
-    request["insideClaude"] = sender["insideClaude"]
-    let response = handle(Request(op: text == nil ? "open" : "send", args: .object(request)))
-    guard text != nil, let delivery = response.result?["delivery"] else { return response }
-    return .success(try queue.sync { try withDelivery(summary(id), delivery) })
+  /// request that carried the text, which say who wrote it. A non-nil `author` says who wrote it instead. sbd's own
+  /// messages pass `sbd`, which no request field can set.
+  func openOrSend(_ id: String, _ text: String?, sender: JSON = [:], by author: MessageAuthor? = nil) throws
+    -> Response
+  {
+    guard let text else { return handle(Request(op: "open", args: ["session": .string(id)])) }
+    var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    args["from"] = sender["from"]
+    args["insideClaude"] = sender["insideClaude"]
+    let request = Request(op: "send", args: .object(args))
+    let reply = try prepared(request, origin: .mac) {
+      try sendRequest(request.args, by: author ?? Service.author(request.args))
+    }
+    return .success(try queue.sync { try withDelivery(summary(id), reply["delivery"] ?? .null) })
   }
 
   /// The answer for a session that a request just created, with `text` as
@@ -115,11 +126,11 @@ extension Service {
       id = found
     } else if args["manager"]?.bool == true {
       id = try managerConversation(args["session"]?.string)
-    } else if args["session"] != nil {
+    } else if args["session"] != nil, args["group"] == nil {
       id = try lookup(args)
     } else {
       let group = try lookupGroup(args)
-      guard let chat = chatID(group) else {
+      guard let chat = try groupChat(args["session"]?.string, of: group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
       }
       id = chat
@@ -131,11 +142,37 @@ extension Service {
     return id
   }
 
-  func chatID(_ group: String) -> String? {
-    entries.values.first { $0.session.chat == group }?.session.id
+  /// The ids of the group's chats in `Chat.Order`, read from the entries without building summaries.
+  func chats(of group: String) -> [String] {
+    entries.values.filter { $0.session.chat == group }.sorted { chatOrder($0) < chatOrder($1) }.map(\.session.id)
   }
 
-  private func ensureChatFolder(_ group: String, description: String?) throws {
+  /// The group's newest chat that is not done, or its newest done chat when every chat is done.
+  func mostRecentChat(of group: String) -> String? {
+    entries.values.lazy.filter { $0.session.chat == group }.min { chatOrder($0) < chatOrder($1) }?.session.id
+  }
+
+  private func chatOrder(_ e: Entry) -> Chat.Order {
+    Chat.Order(done: e.session.done, lastActivity: e.facts.lastActivity, created: e.session.created, id: e.session.id)
+  }
+
+  /// The `chat-ls` request: the group's chats in the order of `chats(of:)`.
+  func chatList(_ args: JSON) throws -> [SessionSummary] { try chats(of: lookupGroup(args)).map { summary($0) } }
+
+  /// The chat of the group that `ref` names by id, unique id prefix, or unique name. A session that is not a chat
+  /// of the group is an error.
+  func groupChat(_ ref: String, of group: String) throws -> String {
+    try resolveSession(ref, noun: "chat of group \(groups[group]?.name ?? group)") { $0.chat == group }
+  }
+
+  /// The chat of the group that `ref` names, or the group's most recent chat without a ref. It is nil when the
+  /// group has no chat.
+  func groupChat(_ ref: String?, of group: String) throws -> String? {
+    if let ref, !ref.isEmpty { return try groupChat(ref, of: group) as String }
+    return mostRecentChat(of: group)
+  }
+
+  func ensureChatFolder(_ group: String, description: String?) throws {
     let folder = home.chatFolder(group)
     try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     try writeGuide(Chat.guide(description: description), in: folder)
@@ -155,20 +192,27 @@ extension Service {
     if isDirectory(folder) { try writeGuide(Chat.guide(description: groups[group]?.description), in: folder) }
   }
 
-  /// Rewrites the group's chat guide, and tells the chat when its claude
-  /// runs. A chat whose claude is not live reads the new guide when it
-  /// starts. The pane reads `starting` while a stopped claude exits, so the
-  /// check reads `live` and not the pane.
+  /// Rewrites the group's chat guide, and tells each chat of the group that is not done and whose claude runs. A
+  /// chat whose claude is not live reads the new guide when it starts. The pane reads `starting` while a stopped
+  /// claude exits, so the check reads `live` and not the pane. A failed send is logged, so the other chats still
+  /// get the notice.
   func groupDescribed(_ group: String) throws {
     try refreshChatGuide(group)
-    guard let id = chatID(group), let e = entries[id], !e.session.done, e.facts.live else { return }
-    _ = try send(id, Chat.describedNotice(groups[group]?.description), by: .sbd, trigger: .chat)
+    for id in chats(of: group) {
+      guard let e = entries[id], !e.session.done, e.facts.live else { continue }
+      do {
+        _ = try send(id, Chat.describedNotice(groups[group]?.description), by: .sbd, trigger: .chat)
+      } catch {
+        logLine("groups: can't tell \(id) about the description of \(group): \(error)")
+      }
+    }
   }
 
-  /// Marks the group's chat done, because its tools can no longer find the group.
-  func retireChat(of group: String) throws {
-    guard let id = chatID(group), entries[id]?.session.done == false else { return }
-    try update(id) { $0.done = true }
-    record(id, "done")
+  /// Marks each chat of the group done, because their tools can no longer find the group.
+  func retireChats(of group: String) throws {
+    for id in chats(of: group) where entries[id]?.session.done == false {
+      try update(id) { $0.done = true }
+      record(id, "done")
+    }
   }
 }

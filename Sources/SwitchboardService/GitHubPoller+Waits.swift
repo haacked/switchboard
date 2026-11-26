@@ -47,10 +47,16 @@ extension GitHubPoller {
   }
 
   /// For each PR that an open wait is about, when the newest such wait was
-  /// set, and the PRs that one of those waits needs read at the pending rate.
+  /// set, and the changes that those waits need the poller to see at the
+  /// pending rate.
   struct Waited {
     var created: [String: Int64] = [:]
-    var pending: Set<String> = []
+    var needs: [String: ChangeSignals] = [:]
+
+    /// What the PR's open waits need, and what Trunk's queue needs when `queued` holds the PR.
+    func needs(of id: String, queued: Set<String>) -> ChangeSignals {
+      needs[id, default: []].union(queued.contains(id) ? .trunkQueue : [])
+    }
   }
 
   func waitedOn(_ interest: Interest) -> Waited {
@@ -58,7 +64,7 @@ extension GitHubPoller {
     for (session, wait) in interest.waits {
       guard let id = prId(of: wait, session: session) else { continue }
       waited.created[id] = max(waited.created[id] ?? 0, wait.created)
-      if wait.readsPRWhilePending(prs[id]?.pr) { waited.pending.insert(id) }
+      waited.needs[id, default: []].formUnion(wait.needs(for: prs[id]?.pr))
     }
     return waited
   }
@@ -98,10 +104,15 @@ extension GitHubPoller {
         !service.queue.sync(execute: { service.entries[s.session]?.session.done ?? true })
       else { continue }
       do {
-        _ = try service.resolveWait(
+        let summary = try service.resolveWait(
           session: s.session, wait: s.wait.id, outcome: s.settlement.outcome, changedAt: s.settlement.changedAt,
           met: s.settlement.met)
         stats.resolved += 1
+        // A wait with an action stays open while the action runs, and its time to `wait-resolved` would include the
+        // action's run. Only a wait that this call closed gives the hub a time.
+        if !summary.waits.contains(where: { $0.id == s.wait.id }) {
+          hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
+        }
       } catch {
         logLine("github: can't resolve wait \(s.wait.id) of \(s.session): \(error)")
       }
@@ -145,7 +156,7 @@ extension GitHubPoller {
     var reads: [String: ActionsRead] = [:]
     for chunk in GitHub.chunks(ids.sorted()) {
       do {
-        let response = try request(GitHub.actionsQuery, idsVariable(chunk), stats: &stats)
+        let response = try client.request(GitHub.actionsQuery, idsVariable(chunk), stats: &stats)
         for (id, read) in (response["data"]?["nodes"]?.array ?? []).compactMap(GitHub.parseActions) {
           reads[id] = read
         }
@@ -177,7 +188,9 @@ extension GitHubPoller {
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, s.polled)
-      if let after = confirmReadAfter { requestRead([s.prId], after: after) }
+      if let after = confirmReadAfter ?? hub.confirmDelay(s.prId, kind: wait.kind) {
+        requestRead([s.prId], after: after, trigger: .confirm)
+      }
       return false
     }
     return s.polled > first.polled

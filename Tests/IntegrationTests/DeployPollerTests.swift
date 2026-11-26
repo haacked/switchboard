@@ -190,7 +190,7 @@ func deployResponse(_ name: String) throws -> String {
 
     try sbd.poll()
 
-    #expect(github.restRequests.isEmpty)
+    #expect(github.restRequestsWithoutEvents.isEmpty)
   }
 
   // MARK: A named service
@@ -485,11 +485,11 @@ func deployResponse(_ name: String) throws -> String {
     let s = try mergedSession(github, sbd)
     try serveFeatureFlags(github, jobs: try flagsJobs([DeployPollerTests.prodEUSync: ("in_progress", nil)]))
     try sbd.sb("wait", s.id, "--kind", "deploy", "--service", "feature-flags")
-    let before = (graphQL: github.requests.count, rest: github.restRequests.count)
+    let before = (graphQL: github.requests.count, rest: github.restRequestsWithoutEvents.count)
 
     let result = try sbd.poll()
 
-    let rest = github.restRequests.count - before.rest
+    let rest = github.restRequestsWithoutEvents.count - before.rest
     #expect(rest > 0)
     #expect(result["requests"]?.int == github.requests.count - before.graphQL + rest)
   }

@@ -381,7 +381,7 @@ private let otherDestination = "haacked@other.local"
     "group-note", "group-describe", "group-link-add", "group-link-rm", "group-account", "group-suggest", "manager",
     "manager-ls", "manager-mcp",
     "manager-model", "manager-skills", "chat",
-    "chat-log", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "item-context",
+    "chat-log", "chat-ls", "slash-commands", "removed-ls", "manager-pin", "manager-end", "manager-hint", "item-context",
     "manager-mcp-request", "operator",
     "operator-report", "operator-reports", "quick-ask", "ref-details", "pause", "snooze", "unsnooze", "highlight",
     "parent", "schedule", "wait-approve",
@@ -394,7 +394,9 @@ private let otherDestination = "haacked@other.local"
     "account-move",
     "usage", "mcp",
     "hosts",
-    "host-connect", "host-disconnect", "live", "auto-mode", "autocontinue", "snapshots", "poll", "repos", "repo-add",
+    "host-connect", "host-disconnect", "live", "auto-mode", "open-shell", "autocontinue", "snapshots", "poll",
+    "sources", "repos",
+    "repo-add",
     "clock",
     "triage", "choose", "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard",
     "decision-ask",
@@ -494,6 +496,8 @@ private let otherDestination = "haacked@other.local"
     add("snapshots")
     add("autocontinue", ["on": true])
     add("auto-mode", ["autoMode": true])
+    add("open-shell")
+    add("open-shell", ["openShell": false])
     add("poll")
     add("importable")
     add("import", ["refs": [text]])

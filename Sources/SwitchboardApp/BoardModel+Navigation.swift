@@ -36,12 +36,23 @@ extension BoardModel {
   /// archived conversation.
   func showInSidebar(_ session: SessionSummary) {
     if session.kind == .work { collapsed.remove(session.state) }
-    if session.activity?.archived == true { showingArchive = true }
+    openArchive(of: session)
     selection = session.id
     // Setting `selection` widens a filter that hides the session. The query check has to read the widened filter.
     if session.kind == .work, sidebarQueryHides(session) { sidebarQuery = "" }
     // A list focus request would take keyboard focus from an open sheet's fields.
     if !presentingSheet { requestListFocus() }
+  }
+
+  /// Opens the Archive group that lists the conversation when it is archived: the sidebar's for a Manager
+  /// conversation, the group column's for a group chat.
+  func openArchive(of session: SessionSummary) {
+    guard session.activity?.archived == true else { return }
+    if session.kind == .chat, let group = session.chat {
+      shownChatArchives.insert(group)
+    } else if session.kind == .manager {
+      showingArchive = true
+    }
   }
 
   /// The focused Board card while the Board still shows it, else the first card, as the Inbox falls back to

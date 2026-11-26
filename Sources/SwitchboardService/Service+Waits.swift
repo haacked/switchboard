@@ -42,13 +42,16 @@ extension Service {
   /// on the session that holds the wait, with `from` for a handed-off wait,
   /// and returns the id of that session. The caller holds the state queue.
   /// A wait from a host must pass `requireGitHubWait`. A wait with an action must pass `armAction`. A merge wait must
-  /// land on the operator, because only the operator approves a merge.
+  /// land on the operator, because only the operator approves a merge. A reply wait without a target takes the
+  /// session's one Slack thread. A reply wait needs the Slack poll on.
   func setWait(_ args: JSON, waiter named: String, from origin: RequestOrigin, caller: Caller) throws -> String {
     let session = entries[named]!.session
     try refuseNotStarted(session)
-    let request = try JSONCoding.convert(args, to: WaitRequest.self)
+    var request = try JSONCoding.convert(args, to: WaitRequest.self)
+    if request.kind == Wait.Kind.reply.rawValue && request.target == nil { request.target = try replyTarget(of: named) }
     // The checks run against `named`, so a conversation still can't wait on itself.
     var wait = try request.makeWait(id: "", waiter: named, now: nowMs(), findSession: waitTarget)
+    if wait.kind == .reply { try requireSlackPoll() }
     if case .remote(let host) = origin { try requireGitHubWait(wait, on: named, from: host) }
     if wait.action != nil { try armAction(&wait, args, origin: origin, caller: caller) }
     if wait.kind == .ci && wait.pr == nil {
@@ -256,13 +259,18 @@ extension Service {
     }
   }
 
-  /// Resolves the waits that sbd watches itself: dates, rechecks, and other
-  /// sessions' states. `tick` calls it after it records each session's state.
+  /// Resolves the waits that sbd watches itself: dates, rechecks, other
+  /// sessions' states, and Slack replies in the rows that the poll stored.
+  /// `tick` calls it after it records each session's state.
   func resolveDueWaits(now: Int64) {
     for (session, wait) in waitsToResolve() {
-      guard let settlement = wait.settlement(now: now, stateOf: lastState) else { continue }
+      guard
+        let settlement = wait.settlement(now: now, stateOf: lastState)
+          ?? wait.settlement(thread: { slackThreads[$0] })
+      else { continue }
       do {
-        try resolve(session.id, wait, outcome: settlement.outcome, met: settlement.met)
+        try resolve(
+          session.id, wait, outcome: settlement.outcome, changedAt: settlement.changedAt, met: settlement.met)
       } catch {
         logLine("can't resolve wait \(wait.id) of \(session.id): \(error)")
       }
@@ -271,6 +279,8 @@ extension Service {
 
   /// Sends the message of a `resume` wait, then removes the wait. A failed
   /// send leaves the wait open, so the next tick or the poller tries again.
+  /// A send that fails because the session's folder is gone still removes the wait, because a retry would fail on
+  /// every tick. The `wait-resolved` event records the failure in `error`, and sbd logs it once.
   /// A met action wait starts its action and stays, unless its action waits for an answer, a retry, or a run.
   ///
   /// An unmet outcome resolves a held or questioned action wait with a message that says sbd did not run the action.
@@ -288,11 +298,16 @@ extension Service {
         return
       }
     }
-    if wait.then == .resume {
-      _ = try send(
-        id, wait.message(outcome: outcome, met: met), by: .sbd, trigger: .wait, extra: handedFromData(id, wait))
-    }
     var extra: [String: JSON] = ["outcome": .string(outcome)]
+    if wait.then == .resume {
+      do {
+        _ = try send(
+          id, wait.message(outcome: outcome, met: met), by: .sbd, trigger: .wait, extra: handedFromData(id, wait))
+      } catch let gone as FolderGone {
+        extra["error"] = .string(gone.description)
+        logLine("closed wait \(wait.id) of \(id) without resuming it: \(gone)")
+      }
+    }
     if let changedAt { extra["changedAt"] = .number(Double(changedAt)) }
     try closeWait(id, wait, extra: extra)
   }

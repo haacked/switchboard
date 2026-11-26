@@ -84,7 +84,7 @@ struct ConversationRemovalText: Equatable {
         "A new conversation opens in its place with the same account, MCP servers, and pin. "
           + "The transcript stays on disk."
       case .delete:
-        "Claude stops and the conversation leaves the sidebar. The transcript stays on disk."
+        "Claude stops and the conversation leaves its list. The transcript stays on disk."
       }
     }
   }

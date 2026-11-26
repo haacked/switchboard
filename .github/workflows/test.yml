@@ -2,83 +2,118 @@ name: Test
 
 on:
   pull_request:
+    # A draft PR runs no macOS job, so marking it ready starts the run that
+    # tests it.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
 permissions:
+  actions: read
   contents: read
   pull-requests: read
 
 # Each runner runs one job, so the machine-wide build queue is off.
 env:
   SB_BUILD_SLOTS: 0
+  # The number of swift-test parts. bin/lib/ci-jobs picks which of them run.
+  SB_CI_PARTS: 4
 
 concurrency:
   group: test-${{ github.ref }}
-  cancel-in-progress: true
+  # A ready_for_review run never cancels a run. GitHub can handle a push after
+  # the ready_for_review event that followed it, and the ready run then has
+  # the previous commit. Cancelling the push's run would leave the PR's head
+  # without a Test check.
+  cancel-in-progress: ${{ github.event.action != 'ready_for_review' }}
 
 jobs:
-  # Decides whether the change can affect a build or a test. Only the
-  # Markdown files at the repository root cannot, because no build or test
-  # reads them. A skipped swift-test job counts as passed, so a docs-only PR
-  # still gets passing checks.
+  # Decides which macOS jobs the change runs (bin/lib/ci-jobs). A draft PR
+  # runs none, and a push to main runs all of them. A ready PR runs the
+  # swift-test parts and gui-test that its changed files can affect. A
+  # skipped job counts as passed, so a PR whose files no job reads still gets
+  # passing checks.
   changes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
-      code: ${{ steps.diff.outputs.code }}
+      parts: ${{ steps.jobs.outputs.parts }}
+      gui: ${{ steps.jobs.outputs.gui }}
     steps:
-      - id: diff
+      - uses: actions/checkout@v4
+      - id: jobs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR: ${{ github.event.pull_request.number }}
           PR_FILES: ${{ github.event.pull_request.changed_files }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          RUN_ID: ${{ github.run_id }}
           BEFORE: ${{ github.event.before }}
           SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
           names='.filename, (.previous_filename // empty)'
-          # The PR API lists at most 3000 files. A compare lists at most 300
-          # and does not say how many it left out, so a full page runs the
-          # tests.
+          package=$RUNNER_TEMP/package.json
+          # A pull_request event's payload describes the PR when the event
+          # happened, so the PR's draft state and head come from the API. A
+          # failed lookup runs the jobs.
+          live='' newer=0
           if [ -n "$PR" ]; then
+            live=$(gh api "repos/$REPO/pulls/$PR" --jq '"\(.draft) \(.head.sha)"') || live=''
+            # A run that starts later at the same commit waits for this one,
+            # and it decides which jobs the commit runs.
+            newer=$(gh api "repos/$REPO/actions/workflows/test.yml/runs?head_sha=$HEAD_SHA" \
+              --jq "[.workflow_runs[] | select(.id > $RUN_ID)] | length") || newer=0
+          fi
+          skip=''
+          if [ -n "$live" ] && [ "${live#* }" != "$HEAD_SHA" ]; then
+            skip="the PR's head moved to ${live#* }, and its own run tests it"
+          elif [ "$newer" -gt 0 ]; then
+            skip="a later run tests this commit"
+          fi
+          # The PR API lists at most 3000 files. A compare lists at most 300
+          # and does not say how many it left out, so a full page runs every
+          # job.
+          if [ -n "$skip" ]; then
+            echo "$skip, so no job runs"
+            printf 'parts=[]\ngui=false\n' | tee -a "$GITHUB_OUTPUT"
+            exit 0
+          elif [ "${live%% *}" = true ]; then
+            mode=draft files='' count=0
+          elif [ -n "$PR" ]; then
+            mode='pr'
             files=$(gh api "repos/$REPO/pulls/$PR/files" --paginate --jq ".[] | $names")
             count=$PR_FILES
+            # bin/lib/ci-jobs runs every job when the package can't be read.
+            swift package dump-package >"$package" || echo "::warning::swift package dump-package failed, so every job runs"
           elif [ -n "$BEFORE" ] && [ "$BEFORE" != 0000000000000000000000000000000000000000 ]; then
+            mode=push
             files=$(gh api "repos/$REPO/compare/$BEFORE...$SHA" --jq ".files[] | $names")
             count=$(grep -c . <<<"$files" || true)
             if [ "$count" -ge 300 ]; then count=0; fi
           else
-            files=
-            count=0
+            mode=push files='' count=0
           fi
           echo "$files"
-          # A list that comes back empty, short, or long runs the tests. A
-          # rename lists its old path too, so a renamed file in a PR runs them.
-          listed=$(grep -c . <<<"$files" || true)
-          other=$(grep -c -v -E '^[^/]+\.md$' <<<"$files" || true)
-          code=true
-          if [ "$count" -gt 0 ] && [ "$listed" -eq "$count" ] && [ "$other" -eq 0 ]; then
-            code=false
-          fi
-          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+          bin/lib/ci-jobs "$mode" "$count" "$package" <<<"$files" | tee -a "$GITHUB_OUTPUT"
 
   # The suite takes longer than one 3-CPU runner can finish within the time
   # limit, so the matrix splits it across runners. Each part builds the tests
   # and runs its share of them (bin/lib/shard-plan). The last part runs the
   # unit test targets and MeasureTests. The parts before it run the
-  # integration suites.
+  # integration suites. The matrix holds only the parts that the changes job
+  # picked.
   swift-test:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.parts != '[]'
     runs-on: macos-26
     # The build alone takes up to 17 minutes on a loaded runner.
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        part: [1, 2, 3, 4]
+        part: ${{ fromJSON(needs.changes.outputs.parts) }}
     steps:
       - uses: actions/checkout@v4
       - run: swift --version
@@ -103,7 +138,7 @@ jobs:
       # tests at once (SB_TEST_SLOTS in bin/test). The job sets no value. A
       # higher value would count as 2, because the width never exceeds one less
       # than the CPU count.
-      - run: bin/test --shards 4 --part ${{ matrix.part }}/${{ strategy.job-total }}
+      - run: bin/test --shards 4 --part "${{ matrix.part }}/$SB_CI_PARTS"
 
   # bin/test-gui drives the real app, so it needs a logged-in session with a
   # display. GitHub's macOS runners log in a user. The job leaves out the
@@ -111,7 +146,7 @@ jobs:
   # message. The same check passes on a developer's Mac.
   gui-test:
     needs: changes
-    if: needs.changes.outputs.code == 'true'
+    if: needs.changes.outputs.gui == 'true'
     runs-on: macos-26
     timeout-minutes: 30
     steps:

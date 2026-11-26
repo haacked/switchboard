@@ -140,8 +140,9 @@ private func refusal(_ body: () throws -> Void) -> String? {
     }
   }
 
-  /// Only a Manager conversation's waits and schedules stay with it. The operator has its own guard.
-  @Test(arguments: [work, chat, theOperator]) func theGuardLetsAnotherKindOfSessionThrough(_ id: String) throws {
+  /// Only a Manager conversation's or a group chat's waits and schedules stay with it. The operator has its own
+  /// guard.
+  @Test(arguments: [work, theOperator]) func theGuardLetsAnotherKindOfSessionThrough(_ id: String) throws {
     try withSessions { service in
       let made = try schedule("r1")
       service.queue.sync {
@@ -152,6 +153,23 @@ private func refusal(_ body: () throws -> Void) -> String? {
       let error = refusal { try service.queue.sync { try service.refuseConversationRemoval(id) } }
 
       #expect(error == nil)
+    }
+  }
+
+  /// A group chat's own wait refuses its removal. The refusal names `sb chat` while the chat's group exists, and
+  /// `sb manager end` once the group is gone, because `sb chat` can't find a removed group.
+  @Test(arguments: [true, false]) func theGuardRefusesAGroupChatWithAnOwnWait(_ groupExists: Bool) throws {
+    try withSessions { service in
+      service.queue.sync {
+        service.entries[chat]?.session.waits = [dateWait("w1")]
+        if groupExists { service.groups["Flags"] = SessionGroup(id: "Flags", name: "Flags", created: created) }
+      }
+
+      let text = try #require(refusal { try service.queue.sync { try service.refuseConversationRemoval(chat) } })
+
+      #expect(text.contains("w1"), Comment(rawValue: text))
+      let command = groupExists ? "sb chat Flags --end \(chat) --drop w1" : "sb manager end \(chat) --drop w1"
+      #expect(text.contains(command), Comment(rawValue: text))
     }
   }
 

@@ -230,7 +230,7 @@ private enum PollFx {
 
   /// The outcomes by "channel/thread", so a test can name `keyA` and `keyB`.
   static func outcomes(_ output: String, asked: [SlackPoll.Ask], now: Int64 = now) throws -> [String: Outcome] {
-    let results = try SlackPoll.parseThreads(output, asked: asked, now: now)
+    let results = try SlackPoll.parseThreads(output, asked: asked, you: selfId, now: now)
     #expect(results.count == asked.count)
     let outcomes = results.map { (result) -> Outcome in
       switch result {
@@ -524,6 +524,73 @@ extension SlackPollTests {
         })
 
       #expect(Set(SlackPoll.batch(refs, rows: rows).map(\.key)) == Set(refs.dropFirst().map(\.key)))
+    }
+
+    // MARK: Check now (#504 D15)
+
+    /// Rows in which the poll asked for every thread at the same time, so only `first` can change the order.
+    static func askedAtOnce(_ refs: [SlackThreadRef]) -> [String: SlackThread] {
+      Dictionary(uniqueKeysWithValues: refs.map { ($0.key, Self.row($0, read: Self.now, tried: Self.now)) })
+    }
+
+    @Test func aFirstKeyGoesFirst() {
+      let refs = Self.refs(3)
+
+      let batch = SlackPoll.batch(refs, rows: Self.askedAtOnce(refs), first: [refs[2].key])
+
+      #expect(batch.first == refs[2])
+    }
+
+    @Test func aFirstKeyGoesBeforeAThreadNeverAskedFor() {
+      let refs = Self.refs(2)
+      let rows = [refs[1].key: Self.row(refs[1], read: Self.now, tried: Self.now)]
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[1].key])
+
+      #expect(batch.map(\.key) == [refs[1].key, refs[0].key])
+    }
+
+    /// The thread asked for most recently would be the one left out of 21.
+    @Test func aFirstKeyIsInTheBatchAheadOfTwentyThreadsAskedForLongerAgo() {
+      let refs = Self.refs(21)
+      var rows = Dictionary(
+        uniqueKeysWithValues: refs.enumerated().map { i, ref in
+          (ref.key, Self.row(ref, read: Self.now, tried: Self.now - Int64(i + 1) * 1000))
+        })
+      rows[refs[0].key] = Self.row(refs[0], read: Self.now, tried: Self.now)
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[0].key])
+
+      #expect(batch.count == SlackPoll.maxThreads)
+      #expect(batch.first == refs[0])
+    }
+
+    @Test func theOtherThreadsKeepTheirOrderAfterTheFirstKeys() {
+      let refs = Self.refs(4)
+      let rows = Dictionary(
+        uniqueKeysWithValues: refs.enumerated().map { i, ref in
+          (ref.key, Self.row(ref, read: Self.now, tried: Self.now - Int64(10 - i) * 1000))
+        })
+
+      let batch = SlackPoll.batch(refs, rows: rows, first: [refs[3].key])
+
+      #expect(batch.map(\.key) == [refs[3], refs[0], refs[1], refs[2]].map(\.key))
+    }
+
+    @Test func aFirstKeyThatNoRefHasChangesNothing() {
+      let refs = Self.refs(3)
+      let rows = Self.askedAtOnce(refs)
+
+      #expect(
+        SlackPoll.batch(refs, rows: rows, first: ["slack:example/C0NOPE/1794965000.000100"])
+          == SlackPoll.batch(refs, rows: rows))
+    }
+
+    @Test func noFirstKeysGiveTheBatchWithout() {
+      let refs = Self.refs(3)
+      let rows = Self.askedAtOnce(refs)
+
+      #expect(SlackPoll.batch(refs, rows: rows, first: []) == SlackPoll.batch(refs, rows: rows))
     }
   }
 }
@@ -1335,13 +1402,24 @@ extension SlackPollTests {
     }
 
     /// The id is in the result text, so only the id's form refuses it.
-    @Test(arguments: ["B0BOT", "u0other", "U1", "U0 OTHER", "C0EXAMPLE02"])
-    func aUserIdThatIsNotASlackUserIdFails(_ id: String) throws {
+    @Test(arguments: ["b0bot", "B1", "u0other", "U1", "U0 OTHER", "C0EXAMPLE02"])
+    func aUserIdThatIsNotASlackAuthorIdFails(_ id: String) throws {
       var b = PollFx.goodB()
       b.resultText = PollFx.threadText(count: 1, user: id, name: "Alice")
       b.setAnswer("last_reply_user_id", .string(id))
 
       #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    /// A bot's message can be the last reply. Its id starts with B.
+    @Test func aBotIdAsTheLastReplyUserIsAccepted() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, user: "B0BOT", name: "Deploy Bot")
+      b.setAnswer("last_reply_user_id", "B0BOT")
+      b.setAnswer("last_reply_user_name", "Deploy Bot")
+
+      #expect(
+        try PollFx.outcomeOfB(b) == .read(PollFx.Read(count: 1, ts: PollFx.reply1, user: "B0BOT", name: "Deploy Bot")))
     }
 
     /// A ts that the model made up would mark a reply that no one wrote.
@@ -1553,7 +1631,9 @@ extension SlackPollTests {
   /// A failure of the whole call throws, because no thread's read can be checked.
   @Suite struct ParseThreadsWholeCall {
     @Test func emptyOutputThrows() {
-      #expect(throws: (any Error).self) { try SlackPoll.parseThreads("", asked: [PollFx.askA], now: PollFx.now) }
+      #expect(throws: (any Error).self) {
+        try SlackPoll.parseThreads("", asked: [PollFx.askA], you: PollFx.selfId, now: PollFx.now)
+      }
     }
 
     @Test func noResultLineThrows() {
@@ -1563,13 +1643,17 @@ extension SlackPollTests {
         PollFx.toolResult(id: "toolu_A", text: PollFx.threadText(count: 1)),
       ])
 
-      #expect(throws: (any Error).self) { try SlackPoll.parseThreads(output, asked: [PollFx.askA], now: PollFx.now) }
+      #expect(throws: (any Error).self) {
+        try SlackPoll.parseThreads(output, asked: [PollFx.askA], you: PollFx.selfId, now: PollFx.now)
+      }
     }
 
     @Test func anErrorEnvelopeThrows() {
       let output = PollFx.lines([PollFx.initLine(tools: PollFx.pollTools), PollFx.result(nil, isError: true)])
 
-      #expect(throws: (any Error).self) { try SlackPoll.parseThreads(output, asked: [PollFx.askA], now: PollFx.now) }
+      #expect(throws: (any Error).self) {
+        try SlackPoll.parseThreads(output, asked: [PollFx.askA], you: PollFx.selfId, now: PollFx.now)
+      }
     }
 
     @Test func noStructuredOutputThrows() {
@@ -1577,7 +1661,7 @@ extension SlackPollTests {
       lines[lines.count - 1] = PollFx.result(nil)
 
       #expect(throws: (any Error).self) {
-        try SlackPoll.parseThreads(PollFx.lines(lines), asked: [PollFx.askA], now: PollFx.now)
+        try SlackPoll.parseThreads(PollFx.lines(lines), asked: [PollFx.askA], you: PollFx.selfId, now: PollFx.now)
       }
     }
   }
@@ -1682,6 +1766,704 @@ extension SlackPollTests {
 
     @Test func emptyOutputThrows() {
       #expect(throws: (any Error).self) { try SlackPoll.parseSelf("") }
+    }
+  }
+}
+
+// MARK: - Message headers
+
+/// The body of `SlackPoll.hasHeader` before #504 rewrote it on top of `headers(in:)`. The parity table runs every
+/// text through this copy and through the new form.
+private func oldHasHeader(_ text: String, user: String, ts: String) -> Bool {
+  let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+  for (i, line) in lines.enumerated() where line.hasPrefix("From: ") && line.hasSuffix(" (\(user))") {
+    let next = lines[(i + 1)...].first { !$0.hasPrefix("Time: ") }
+    if next.map(String.init) == "Message TS: \(ts)" { return true }
+  }
+  return false
+}
+
+/// One text of the parity table.
+struct HeaderText: Sendable, CustomTestStringConvertible {
+  var name: String
+  var text: String
+
+  var testDescription: String { name }
+}
+
+extension SlackPollTests {
+  /// `headers(in:)` lists every message header in a `slack_read_thread` result in the grammar of `hasHeader`: a
+  /// `From: … (<id>)` line, then any `Time:` lines, then a `Message TS: <ts>` line with a well formed ts.
+  @Suite struct Headers {
+    static let reply1 = PollFx.reply1
+
+    @Test func oneHeaderGivesItsUserNameAndTs() {
+      let text = "From: Alice (U0OTHER)\nMessage TS: \(Self.reply1)\nLooks good to me.\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func aHeaderWithOneTimeLineIsListed() {
+      let text = "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nMessage TS: \(Self.reply1)\nHi.\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func aHeaderWithTwoTimeLinesIsListed() {
+      let text =
+        "From: Alice (U0OTHER)\nTime: 2026-11-20 02:57:42 PST\nTime: 2026-11-20 10:57:42 UTC\n"
+        + "Message TS: \(Self.reply1)\nHi.\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func theNameLeavesOutATrailingEmail() {
+      let text = "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: Self.reply1)])
+    }
+
+    @Test func theNameIsTrimmed() {
+      let text = "From:    Alice    (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text).map(\.name) == ["Alice"])
+    }
+
+    @Test func aFromLineWithOnlyAnIdHasNoName() {
+      let text = "From: (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: nil, ts: Self.reply1)])
+    }
+
+    @Test func aFromLineWithOnlyAnEmailHasNoName() {
+      let text = "From: <alice@example.com> (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0OTHER", name: nil, ts: Self.reply1)])
+    }
+
+    @Test func aLongNameIsCutTo80Characters() {
+      let text = "From: \(String(repeating: "a", count: 100)) (U0OTHER)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text).map(\.name) == [String(repeating: "a", count: 79) + "…"])
+    }
+
+    /// The display name holds `(U0OTHER)`, but the line's own id is U0EVE.
+    @Test func onlyTheTrailingIdIsTheUser() {
+      let text = "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0EVE", name: "Eve (U0OTHER)", ts: Self.reply1)])
+    }
+
+    @Test func aFromLineWithoutATrailingIdIsNotAHeader() {
+      let text = "From: Alice <alice@example.com>\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text).isEmpty)
+    }
+
+    @Test func aLineOtherThanTimeBeforeTheMessageTsLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text).isEmpty)
+    }
+
+    @Test func aBlankLineBeforeTheMessageTsLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\n\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text).isEmpty)
+    }
+
+    @Test func aFromLineAtTheEndOfTheTextIsNotAHeader() {
+      #expect(SlackPoll.headers(in: "Please review.\nFrom: Alice (U0OTHER)").isEmpty)
+    }
+
+    @Test(arguments: ["12345", "1794965246.46", "1794965246", "soon", "", "\(PollFx.reply1) (edited)"])
+    func aMalformedMessageTsIsNotAHeader(_ ts: String) {
+      #expect(SlackPoll.headers(in: "From: Alice (U0OTHER)\nMessage TS: \(ts)\n").isEmpty)
+    }
+
+    /// A mention puts Alice's id in Carol's text. Only Carol's header is listed.
+    @Test func aMentionOfAnIdInTheTextIsNotAHeader() {
+      let text = "From: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n<@U0OTHER|alice> looks good.\n(U0OTHER)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+    }
+
+    /// Of two From lines in a row, only the one that the Message TS line follows is a header.
+    @Test func aFromLineFollowedByAnotherFromLineIsNotAHeader() {
+      let text = "From: Alice (U0OTHER)\nFrom: Carol (U0CAROL)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.reply1)])
+    }
+
+    /// The connector's layout, from the `twoReplies` fixture: the parent and two replies, in the text's order.
+    @Test func theParentAndTwoRepliesAreListedInOrder() {
+      #expect(
+        SlackPoll.headers(in: ParseThreadsHeaderPair.twoReplies) == [
+          SlackPoll.Header(user: "U0ROOT", name: "Bob", ts: PollFx.rootB),
+          SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply1),
+          SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2),
+        ])
+    }
+
+    @Test func aBotIdClosesAHeader() {
+      let text = "From: Deploy Bot (B0BOT1234)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "B0BOT1234", name: "Deploy Bot", ts: Self.reply1)])
+    }
+
+    @Test func anEmptyTextHasNoHeaders() {
+      #expect(SlackPoll.headers(in: "").isEmpty)
+    }
+  }
+
+  /// Risk 2a: `hasHeader` and `headers(in:)` agree with the old `hasHeader` body for every valid author id, a user
+  /// id or a bot id, and every well formed ts in each text.
+  @Suite struct HeaderParity {
+    static let parent = ParseThreadsHeaderPair.parent
+    static let r1 = PollFx.reply1
+    static let r2 = PollFx.reply2
+
+    static let rows: [HeaderText] = [
+      HeaderText(name: "the connector's two replies", text: ParseThreadsHeaderPair.twoReplies),
+      HeaderText(
+        name: "the stub's header without a Time line", text: parent + "From: Alice (U0OTHER)\nMessage TS: \(r1)\nHi.\n"),
+      HeaderText(
+        name: "two Time lines",
+        text: "From: Alice (U0OTHER)\nTime: 02:57 PST\nTime: 10:57 UTC\nMessage TS: \(r1)\nHi.\n"),
+      HeaderText(name: "an empty Time line", text: "From: Alice (U0OTHER)\nTime: \nMessage TS: \(r1)\n"),
+      HeaderText(name: "a Time line without a space", text: "From: Alice (U0OTHER)\nTime:02:57\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a bot id", text: "From: Deploy Bot (B0BOT1234)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an email", text: "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "an id inside the name", text: "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "only an id", text: "From: (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "no space before the id", text: "From: Alice(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "two ids without a space", text: "From: Alice (U0OTHER)(U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "double parentheses", text: "From: Alice ((U0OTHER))\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a no-break space before the id", text: "From: Alice\u{00A0}(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a tab before the id", text: "From: Alice\t(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a trailing space on the From line", text: "From: Alice (U0OTHER) \nMessage TS: \(r1)\n"),
+      HeaderText(name: "a trailing space on the TS line", text: "From: Alice (U0OTHER)\nMessage TS: \(r1) \n"),
+      HeaderText(name: "text after the ts", text: "From: Alice (U0OTHER)\nMessage TS: \(r1) (edited)\n"),
+      HeaderText(name: "no space after Message TS", text: "From: Alice (U0OTHER)\nMessage TS:\(r1)\n"),
+      HeaderText(name: "no space after From", text: "From:Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an indented From line", text: "  From: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a lowercase From line", text: "from: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "CRLF line ends", text: "From: Alice (U0OTHER)\r\nMessage TS: \(r1)\r\nHi.\r\n"),
+      HeaderText(name: "a blank line between", text: "From: Alice (U0OTHER)\n\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a body line between", text: "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a From line at the end", text: parent + "From: Alice (U0OTHER)"),
+      HeaderText(
+        name: "two From lines in a row", text: "From: Alice (U0OTHER)\nFrom: Carol (U0CAROL)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a mention in the text",
+        text: parent + "From: Carol (U0CAROL)\nMessage TS: \(r1)\n<@U0OTHER|alice> looks good.\n"),
+      HeaderText(
+        name: "a From line in the parent's text before the replies",
+        text: """
+          === THREAD PARENT MESSAGE ===
+          From: Bob (U0ROOT)
+          Message TS: \(PollFx.rootB)
+          Please review.
+          From: Alice (U0OTHER)
+          === THREAD REPLIES (1 total) ===
+          From: Carol (U0CAROL)
+          Message TS: \(r1)
+          Done.
+
+          """),
+      HeaderText(
+        name: "a header written inside a reply's text",
+        text: "From: Carol (U0CAROL)\nMessage TS: \(r1)\nFrom: Alice (U0OTHER)\nMessage TS: \(r2)\n"),
+      HeaderText(
+        name: "a duplicated header",
+        text: "From: Alice (U0OTHER)\nMessage TS: \(r1)\n\nFrom: Alice (U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a lowercase id", text: "From: Alice (u0other)\nMessage TS: \(r1)\n"),
+      HeaderText(name: "two ids with spaces", text: "From: Alice (U0OTHER) (U0EVE)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark on the space before the id", text: "From: Alice \u{301}(U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark on the parenthesis", text: "From: Alice (\u{301}U0OTHER)\nMessage TS: \(r1)\n"),
+      HeaderText(
+        name: "a combining mark before the ts", text: "From: Alice (U0OTHER)\nMessage TS: \u{301}\(r1)\n"),
+      HeaderText(
+        name: "a combining mark on a Time line", text: "From: Alice (U0OTHER)\nTime:\u{301} 02:57\nMessage TS: \(r1)\n"),
+      HeaderText(name: "an empty text", text: ""),
+    ]
+
+    /// The valid author ids and well formed ts values that a text holds, and the fixtures' own, so every row asks
+    /// about the pairs it could match and some it can't.
+    static func pairs(_ text: String) -> [(user: String, ts: String)] {
+      let users = Set(text.matches(of: #/[UWB][A-Z0-9]{2,}/#).map { String($0.output) })
+        .union(["U0OTHER", "U0CAROL", "U0ROOT", "U0EVE", "B0BOT1234"]).filter(SlackPoll.isAuthorId).sorted()
+      let tss = Set(text.matches(of: #/[0-9]{10}\.[0-9]{6}/#).map { String($0.output) })
+        .union([PollFx.rootB, r1, r2]).filter { SlackPoll.tsValue($0) != nil }.sorted()
+      return users.flatMap { user in tss.map { (user: user, ts: $0) } }
+    }
+
+    @Test(arguments: rows)
+    func headersAgreeWithTheOldHasHeader(_ row: HeaderText) {
+      let listed = SlackPoll.headers(in: row.text)
+
+      for (user, ts) in Self.pairs(row.text) {
+        let old = oldHasHeader(row.text, user: user, ts: ts)
+        #expect(listed.contains { $0.user == user && $0.ts == ts } == old, "\(user) at \(ts)")
+      }
+    }
+
+    @Test(arguments: rows)
+    func hasHeaderAgreesWithTheOldHasHeader(_ row: HeaderText) {
+      for (user, ts) in Self.pairs(row.text) {
+        #expect(
+          SlackPoll.hasHeader(SlackPoll.headers(in: row.text), user: user, ts: ts)
+            == oldHasHeader(row.text, user: user, ts: ts),
+          "\(user) at \(ts)")
+      }
+    }
+
+    /// The table holds texts that the old form accepts and texts that it refuses, so agreement isn't empty.
+    @Test func theTableHoldsAcceptedAndRefusedTexts() {
+      let accepted = Self.rows.filter { row in
+        Self.pairs(row.text).contains { oldHasHeader(row.text, user: $0.user, ts: $0.ts) }
+      }
+
+      #expect(accepted.count >= 5)
+      #expect(accepted.count < Self.rows.count - 5)
+    }
+  }
+}
+
+// MARK: - The newest reply that isn't yours
+
+/// A reply in a thread text that the `lastOther` tests build.
+struct LastOtherReply: Sendable {
+  var user: String
+  var name: String?
+  var ts: String
+  var body = "Looks good."
+
+  static func other(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0OTHER", name: "Alice", ts: ts) }
+  static func carol(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0CAROL", name: "Carol", ts: ts) }
+  static func you(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0EXAMPLESELF", name: "Me", ts: ts) }
+  static func bot(_ ts: String) -> LastOtherReply { LastOtherReply(user: "B0BOT1234", name: "Deploy Bot", ts: ts) }
+}
+
+/// A thread in the stub's layout and the `oldest` that the poll asks with.
+struct LastOtherShape: Sendable, CustomTestStringConvertible {
+  var name: String
+  var replies: [LastOtherReply]
+  var oldest: String? = nil
+
+  var testDescription: String { name }
+}
+
+extension SlackPollTests {
+  /// D2 and Risk 1: each accepted read gives `lastOther`, the header with the greatest ts among the headers whose
+  /// author is a valid id that is neither yours nor a bot id and whose ts is after the root, after the asked
+  /// `oldest`, and at most an hour past the scan. It comes only from the whole-thread results of the calls for
+  /// exactly the asked thread, and only when the answer's count is above 0.
+  @Suite struct ParseThreadsLastOther {
+    static let reply3 = "1794965400.000400"
+    /// An hour after `PollFx.now`, the latest ts that a read accepts.
+    static let anHourAfterTheScan = "1794969600.000000"
+    static let twoHoursAfterTheScan = "1794973200.000000"
+    static let beforeRootB = "1794965050.000000"
+
+    /// Thread text in the connector's layout: the parent from Bob at `root`, then each reply with an email, a
+    /// `Time:` line, and a `--- Reply n of m ---` separator.
+    static func connectorThread(_ replies: [LastOtherReply], root: String = PollFx.rootB) -> String {
+      var text = """
+        === THREAD PARENT MESSAGE ===
+        From: Bob (U0ROOT)
+        Time: 2026-11-19 22:52:27 PST
+        Message TS: \(root)
+        Can someone review the flag cache change?
+
+        === THREAD REPLIES (\(replies.count) total) ===
+
+        """
+      for (i, r) in replies.enumerated() {
+        let from = r.name.map { "\($0) <\($0.lowercased())@example.com> (\(r.user))" } ?? "(\(r.user))"
+        text += """
+
+          --- Reply \(i + 1) of \(replies.count) ---
+          From: \(from)
+          Time: 2026-11-20 02:57:42 PST
+          Message TS: \(r.ts)
+          \(r.body)
+
+          """
+      }
+      return text
+    }
+
+    /// A call for the asked thread whose result holds `text`, or the replies in the connector's layout, and whose
+    /// answer names `last` as the last reply.
+    fileprivate static func part(
+      _ replies: [LastOtherReply], last: LastOtherReply, ask: SlackPoll.Ask = PollFx.askB, id: String = "toolu_B",
+      text: String? = nil
+    ) -> PollFx.Part {
+      var p = PollFx.Part(ask, id: id, count: replies.count, last: last.ts, user: last.user, name: last.name)
+      p.resultText = PollFx.connectorText(text ?? connectorThread(replies, root: ask.thread))
+      return p
+    }
+
+    /// The accepted read of the one asked thread. It fails the test when the read was refused.
+    fileprivate static func read(
+      _ parts: [PollFx.Part], ask: SlackPoll.Ask = PollFx.askB, you: String = PollFx.selfId
+    ) throws -> SlackPoll.ThreadRead {
+      let results = try SlackPoll.parseThreads(PollFx.stream(parts), asked: [ask], you: you, now: PollFx.now)
+      return try #require(results.first).get()
+    }
+
+    fileprivate static func lastOther(
+      _ parts: [PollFx.Part], ask: SlackPoll.Ask = PollFx.askB, you: String = PollFx.selfId
+    ) throws -> SlackPoll.Header? {
+      try read(parts, ask: ask, you: you).lastOther
+    }
+
+    /// The common case: replies in the connector's layout, with the answer naming the reply with the greatest ts.
+    fileprivate static func lastOther(
+      of replies: [LastOtherReply], ask: SlackPoll.Ask = PollFx.askB, you: String = PollFx.selfId
+    ) throws -> SlackPoll.Header? {
+      let last = try #require(replies.max { SlackPoll.tsValue($0.ts)! < SlackPoll.tsValue($1.ts)! })
+      return try lastOther([part(replies, last: last, ask: ask)], ask: ask, you: you)
+    }
+
+    fileprivate static let alice1 = SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply1)
+
+    // MARK: Which reply is taken
+
+    @Test func anOtherReplyThenYoursGivesTheOtherReply() throws {
+      let got = try Self.lastOther(of: [.other(PollFx.reply1), .you(PollFx.reply2)])
+
+      #expect(got == Self.alice1)
+    }
+
+    @Test func anOtherReplyThenYoursKeepsYourReplyAsTheLastReply() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+
+      let read = try Self.read([Self.part([.other(PollFx.reply1), last], last: last)])
+
+      #expect(read.lastReplyUser == PollFx.selfId)
+      #expect(read.lastReplyTs == PollFx.reply2)
+    }
+
+    @Test func yourReplyThenAnOtherGivesTheOtherReply() throws {
+      let got = try Self.lastOther(of: [.you(PollFx.reply1), .other(PollFx.reply2)])
+
+      #expect(got == SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: PollFx.reply2))
+    }
+
+    /// The parent is Bob's, a valid id that isn't yours, at the root's ts.
+    @Test func onlyYourReplyGivesNoLastOther() throws {
+      #expect(try Self.lastOther(of: [.you(PollFx.reply1)]) == nil)
+    }
+
+    @Test func theNewerOfTwoOtherRepliesIsTaken() throws {
+      let got = try Self.lastOther(of: [.other(PollFx.reply1), .carol(PollFx.reply2)])
+
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
+    }
+
+    /// Carol's newer header comes before Alice's older one in the text.
+    @Test func theGreatestTsIsTakenWhateverTheTextOrder() throws {
+      let got = try Self.lastOther(of: [.carol(PollFx.reply2), .other(PollFx.reply1), .you(Self.reply3)])
+
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: PollFx.reply2))
+    }
+
+    /// The model can name someone else for the reply. The name comes from the reply's own header.
+    @Test func theNameComesFromTheHeaderNotTheAnswer() throws {
+      var p = Self.part([.other(PollFx.reply1)], last: .other(PollFx.reply1))
+      p.setAnswer("last_reply_user_name", "Mallory")
+
+      #expect(try Self.lastOther([p])?.name == "Alice")
+    }
+
+    @Test func aFromLineWithOnlyAnIdGivesNoName() throws {
+      let got = try Self.lastOther(of: [LastOtherReply(user: "U0OTHER", name: nil, ts: PollFx.reply1)])
+
+      #expect(got == SlackPoll.Header(user: "U0OTHER", name: nil, ts: PollFx.reply1))
+    }
+
+    /// The same text with Alice as you: the other reply is then the one from U0EXAMPLESELF.
+    @Test func yourIdDecidesWhichRepliesAreYours() throws {
+      let got = try Self.lastOther(of: [.other(PollFx.reply1), .you(PollFx.reply2)], you: "U0OTHER")
+
+      #expect(got == SlackPoll.Header(user: "U0EXAMPLESELF", name: "Me", ts: PollFx.reply2))
+    }
+
+    // MARK: Users
+
+    @Test(arguments: ["u0other", "U0other", "U0", "b0bot1234", "B0"])
+    func aReplyWhoseIdIsNotAnAuthorIdIsNotTaken(_ id: String) throws {
+      let got = try Self.lastOther(of: [
+        LastOtherReply(user: id, name: "Alice", ts: PollFx.reply1), .you(PollFx.reply2),
+      ])
+
+      #expect(got == nil)
+    }
+
+    /// A bot id starts with B. The read lists the bot's header, but a bot's reply is never taken.
+    @Test func aBotsReplyIsListedButNotTaken() throws {
+      let bot = LastOtherReply.bot(PollFx.reply2)
+      let replies: [LastOtherReply] = [.other(PollFx.reply1), bot, .you(Self.reply3)]
+
+      #expect(SlackPoll.headers(in: Self.connectorThread(replies)).contains { $0.user == bot.user && $0.ts == bot.ts })
+      #expect(try Self.lastOther(of: replies) == Self.alice1)
+    }
+
+    /// The bot posts after Alice and before the poll. The read is accepted and still names Alice.
+    @Test func anOtherReplyThenABotsGivesTheOtherReply() throws {
+      let bot = LastOtherReply.bot(PollFx.reply2)
+
+      let read = try Self.read([Self.part([.other(PollFx.reply1), bot], last: bot)])
+
+      #expect(read.lastReplyUser == bot.user)
+      #expect(read.lastReplyTs == bot.ts)
+      #expect(read.lastReplyName == "Deploy Bot")
+      #expect(read.lastOther == Self.alice1)
+    }
+
+    @Test func onlyABotsReplyIsAcceptedWithNoLastOther() throws {
+      let bot = LastOtherReply.bot(PollFx.reply1)
+
+      let read = try Self.read([Self.part([bot], last: bot)])
+
+      #expect(read.count == 1)
+      #expect(read.lastReplyUser == bot.user)
+      #expect(read.lastOther == nil)
+    }
+
+    /// `U0EXAMPLESELF2` and `U0EXAMPLESEL` start or end like your id but are not it.
+    @Test(arguments: ["W0OTHER", "U0EXAMPLESELF2", "U0EXAMPLESEL"])
+    func aReplyFromAnyOtherValidIdIsTaken(_ id: String) throws {
+      let got = try Self.lastOther(of: [
+        LastOtherReply(user: id, name: "Alice", ts: PollFx.reply1), .you(PollFx.reply2),
+      ])
+
+      #expect(got?.user == id)
+    }
+
+    /// Your reply mentions Alice. A mention is not a header.
+    @Test func aMentionOfAnotherUserInYourReplyIsNotTaken() throws {
+      var you = LastOtherReply.you(PollFx.reply1)
+      you.body = "<@U0OTHER|alice> thanks.\n(U0OTHER)"
+
+      #expect(try Self.lastOther(of: [you]) == nil)
+    }
+
+    @Test func aLineOtherThanTimeBetweenTheFromAndTsLinesIsNotTaken() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+      let text =
+        Self.connectorThread([last]) + "From: Alice (U0OTHER)\nLooks good.\nMessage TS: \(PollFx.reply1)\n"
+
+      #expect(try Self.lastOther([Self.part([last], last: last, text: text)]) == nil)
+    }
+
+    // MARK: Times
+
+    /// The answer's own last reply stays within the hour, so `parseThreads` accepts the read.
+    @Test func aReplyMoreThanAnHourAfterTheScanIsNotTaken() throws {
+      let last = LastOtherReply.other(PollFx.reply1)
+
+      let got = try Self.lastOther([Self.part([last, .carol(Self.twoHoursAfterTheScan)], last: last)])
+
+      #expect(got == Self.alice1)
+    }
+
+    @Test func aReplyExactlyAnHourAfterTheScanIsTaken() throws {
+      let last = LastOtherReply.you(PollFx.reply1)
+
+      let got = try Self.lastOther([Self.part([last, .carol(Self.anHourAfterTheScan)], last: last)])
+
+      #expect(got == SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: Self.anHourAfterTheScan))
+    }
+
+    @Test(arguments: [PollFx.rootB, beforeRootB])
+    func aReplyAtOrBeforeTheRootIsNotTaken(_ ts: String) throws {
+      let last = LastOtherReply.you(PollFx.reply1)
+
+      #expect(try Self.lastOther([Self.part([.other(ts), last], last: last)]) == nil)
+    }
+
+    static let askBAfterReply1 = SlackPoll.Ask(channel: PollFx.chB, thread: PollFx.rootB, oldest: PollFx.reply1)
+
+    @Test(arguments: [PollFx.reply1, "1794965200.000000"])
+    func aReplyAtOrBeforeTheAskedOldestIsNotTaken(_ ts: String) throws {
+      let ask = Self.askBAfterReply1
+      let last = LastOtherReply.you(PollFx.reply2)
+
+      #expect(try Self.lastOther([Self.part([.other(ts), last], last: last, ask: ask)], ask: ask) == nil)
+    }
+
+    @Test func aReplyJustAfterTheAskedOldestIsTaken() throws {
+      let ask = Self.askBAfterReply1
+      let last = LastOtherReply.you(PollFx.reply2)
+
+      let got = try Self.lastOther([Self.part([.other("1794965246.462680"), last], last: last, ask: ask)], ask: ask)
+
+      #expect(got?.ts == "1794965246.462680")
+    }
+
+    // MARK: Which reads count
+
+    /// The read shows no replies heading, so `parseThreads` accepts a count of 0. The header in it must still not count.
+    @Test func aCountOfZeroGivesNoLastOther() throws {
+      var p = PollFx.Part(PollFx.askB, id: "toolu_B", count: 0)
+      p.resultText = PollFx.connectorText(
+        ParseThreadsHeaderPair.parent + "From: Alice (U0OTHER)\nMessage TS: \(PollFx.reply1)\nLooks good.\n")
+
+      let read = try Self.read([p])
+
+      #expect(read.count == 0)
+      #expect(read.lastOther == nil)
+    }
+
+    /// Alice is in the first call's result and your reply in the second's.
+    @Test func twoCallsForTheThreadAreReadTogether() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+      var first = Self.part([.other(PollFx.reply1)], last: last, id: "toolu_B1")
+      first.answer = nil
+      let second = Self.part([last], last: last, id: "toolu_B2")
+
+      #expect(try Self.lastOther([first, second]) == Self.alice1)
+    }
+
+    /// The page holds a later reply from Carol, but a page isn't the whole thread.
+    @Test func aCallWhoseResultIsNotTheWholeThreadIsNotRead() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+      var page = Self.part([.carol(Self.reply3)], last: last, id: "toolu_B1")
+      page.resultText = PollFx.connectorText(Self.connectorThread([.carol(Self.reply3)]), pages: nil)
+      page.answer = nil
+      let whole = Self.part([.other(PollFx.reply1), last], last: last, id: "toolu_B2")
+
+      #expect(try Self.lastOther([page, whole]) == Self.alice1)
+    }
+
+    @Test func aCallWithAnErrorResultIsNotRead() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+      var failed = Self.part([.carol(Self.reply3)], last: last, id: "toolu_B1")
+      failed.resultError = true
+      failed.answer = nil
+      let good = Self.part([.other(PollFx.reply1), last], last: last, id: "toolu_B2")
+
+      #expect(try Self.lastOther([failed, good]) == Self.alice1)
+    }
+
+    @Test func aCallForAnotherTsIsNotRead() throws {
+      let last = LastOtherReply.you(PollFx.reply2)
+      var stray = Self.part([.carol(Self.reply3)], last: last, id: "toolu_B9")
+      stray.input = PollFx.readInput(PollFx.chB, "1794965999.000001")
+      stray.answer = nil
+      let good = Self.part([.other(PollFx.reply1), last], last: last, id: "toolu_B")
+
+      #expect(try Self.lastOther([stray, good]) == Self.alice1)
+    }
+
+    /// Thread A has Carol's reply and thread B only yours. Carol's reply is not B's.
+    @Test func anotherThreadsReplyIsNotTaken() throws {
+      let carol = LastOtherReply.carol(Self.reply3)
+      let you = LastOtherReply.you(PollFx.reply2)
+      let output = PollFx.stream([
+        Self.part([carol], last: carol, ask: PollFx.askA, id: "toolu_A"), Self.part([you], last: you),
+      ])
+
+      let results = try SlackPoll.parseThreads(
+        output, asked: [PollFx.askA, PollFx.askB], you: PollFx.selfId, now: PollFx.now)
+
+      #expect(try results[0].get().lastOther?.user == "U0CAROL")
+      #expect(try results[1].get().lastOther == nil)
+    }
+
+    /// The answer names Carol, but the read holds only Alice's header, so `parseThreads` refuses it.
+    @Test func aRefusedReadGivesNoRead() throws {
+      var p = Self.part([.other(PollFx.reply1)], last: .other(PollFx.reply1))
+      p.setAnswer("last_reply_user_id", "U0CAROL")
+
+      let results = try SlackPoll.parseThreads(
+        PollFx.stream([p]), asked: [PollFx.askB], you: PollFx.selfId, now: PollFx.now)
+
+      #expect(throws: SlackPoll.ReadError.self) { try results[0].get() }
+    }
+  }
+
+  /// Risk 2b: on each thread in the stub's layout, `lastOther` is the newest kept reply that isn't yours. So when
+  /// the answer's last reply isn't yours, `lastOther` is that reply.
+  @Suite struct LastOtherStubParity {
+    static let r1 = PollFx.reply1
+    static let r2 = PollFx.reply2
+    static let r3 = ParseThreadsLastOther.reply3
+
+    static let shapes: [LastOtherShape] = [
+      LastOtherShape(name: "one other", replies: [.other(r1)]),
+      LastOtherShape(name: "other, then you", replies: [.other(r1), .you(r2)]),
+      LastOtherShape(name: "you, then other", replies: [.you(r1), .other(r2)]),
+      LastOtherShape(name: "two others", replies: [.other(r1), .carol(r2)]),
+      LastOtherShape(name: "only you", replies: [.you(r1)]),
+      LastOtherShape(name: "other, you, carol", replies: [.other(r1), .you(r2), .carol(r3)]),
+      LastOtherShape(name: "you, other, you", replies: [.you(r1), .other(r2), .you(r3)]),
+      LastOtherShape(name: "no replies", replies: []),
+      LastOtherShape(name: "after r1: other, you, carol", replies: [.other(r1), .you(r2), .carol(r3)], oldest: r1),
+      LastOtherShape(name: "after r1: other, you", replies: [.other(r1), .you(r2)], oldest: r1),
+      LastOtherShape(name: "after r2: other, you", replies: [.other(r1), .you(r2)], oldest: r2),
+    ]
+
+    /// The replies that the stub keeps: those after the oldest, by ts.
+    static func kept(_ shape: LastOtherShape) -> [LastOtherReply] {
+      let floor = shape.oldest.flatMap(SlackPoll.tsValue) ?? 0
+      return shape.replies.filter { SlackPoll.tsValue($0.ts)! > floor }
+        .sorted { SlackPoll.tsValue($0.ts)! < SlackPoll.tsValue($1.ts)! }
+    }
+
+    /// The text that the stub's `<slack-threads>` branch prints for the kept replies.
+    static func stubText(root: String, kept: [LastOtherReply]) -> String {
+      var messages =
+        "=== THREAD PARENT MESSAGE ===\nFrom: Bob (U0ROOT)\nMessage TS: \(root)\nCan someone review this?\n\n"
+      if kept.isEmpty {
+        messages += "No thread messsages"
+      } else {
+        messages += "=== THREAD REPLIES (\(kept.count) total) ===\n\n"
+        messages += kept.map { "From: \($0.name ?? "") (\($0.user))\nMessage TS: \($0.ts)\nLooks good.\n" }
+          .joined(separator: "\n")
+      }
+      return PollFx.connectorText(messages)
+    }
+
+    /// The stub's call and answer for the shape.
+    fileprivate static func stubPart(_ shape: LastOtherShape) -> (PollFx.Part, SlackPoll.Ask) {
+      let ask = SlackPoll.Ask(channel: PollFx.chB, thread: PollFx.rootB, oldest: shape.oldest)
+      let replies = kept(shape)
+      var p = PollFx.Part(
+        ask, id: "toolu_0", count: replies.count, last: replies.last?.ts, user: replies.last?.user,
+        name: replies.last?.name)
+      p.resultText = stubText(root: ask.thread, kept: replies)
+      return (p, ask)
+    }
+
+    @Test(arguments: shapes)
+    func lastOtherIsTheNewestKeptReplyThatIsNotYours(_ shape: LastOtherShape) throws {
+      let (p, ask) = Self.stubPart(shape)
+      let expected = Self.kept(shape).last { $0.user != PollFx.selfId }
+
+      let got = try ParseThreadsLastOther.read([p], ask: ask).lastOther
+
+      #expect(got?.user == expected?.user)
+      #expect(got?.ts == expected?.ts)
+    }
+
+    /// With the stub's default self id, `[U0OTHER at t1, U0EXAMPLESELF at t2]` gives the last reply as yours at t2
+    /// and the newest other reply as U0OTHER's at t1.
+    @Test func theStubsOtherThenSelfThreadGivesBothReplies() throws {
+      let (p, ask) = Self.stubPart(LastOtherShape(name: "", replies: [.other(Self.r1), .you(Self.r2)]))
+
+      let read = try ParseThreadsLastOther.read([p], ask: ask)
+
+      #expect(read.lastReplyUser == "U0EXAMPLESELF")
+      #expect(read.lastReplyTs == Self.r2)
+      #expect(read.lastOther?.user == "U0OTHER")
+      #expect(read.lastOther?.ts == Self.r1)
     }
   }
 }

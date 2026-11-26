@@ -492,6 +492,94 @@ enum EndFixtures {
     #expect(model.selection == "m")
   }
 
+  // MARK: A group chat's conversation (Decision 6)
+
+  /// Conversation `c` of group g1, named `EndFixtures.name`, holding what `shape` holds.
+  static func chat(_ shape: EndShape = .nothing) -> SessionSummary {
+    var s = chatItem("c", group: "g1", state: .waiting)
+    s.name = EndFixtures.name
+    s.waits = shape.waits ?? []
+    s.pause = shape.pause
+    s.schedules = shape.schedules
+    s.handedWaits = shape.handed
+    return s
+  }
+
+  /// The chat as sbd stores it for `shape`.
+  static func chatSession(_ shape: EndShape) -> Session {
+    var session = Session(id: "c", name: EndFixtures.name, cwd: "/tmp", claudeSessionId: "c", created: 0)
+    session.chat = "g1"
+    session.waits = shape.waits
+    session.pause = shape.pause
+    session.schedules = shape.schedules
+    return session
+  }
+
+  /// sbd's guard on `manager-end` reads the chat's `ownItems` as it reads a Manager conversation's.
+  @Test(arguments: EndShape.allCases)
+  func aChatsDeleteDropsTheIdsThatSbdsGuardRefusesOn(_ shape: EndShape) {
+    let guarded = Self.chatSession(shape).ownItems.map(\.id)
+
+    let text = ConversationRemovalText(Self.chat(shape), .delete)
+
+    #expect(text.drop == guarded)
+  }
+
+  @Test func aChatsDeleteTitleNamesTheConversation() {
+    #expect(ConversationRemovalText(Self.chat(), .delete).title == "Delete \(EndFixtures.name)?")
+  }
+
+  @Test func deletingAChatSendsManagerEndWithTheChatAndNoNew() async {
+    let sent = await firstRequest { $0.endConversation(Self.chat(), new: false, drop: ["w1"]) }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args["session"] == "c")
+    #expect(sent.args["new"] == nil)
+    #expect(sent.args["drop"] == ["w1"])
+  }
+
+  @Test func confirmingAChatsDeleteSendsTheListedDropIds() async {
+    let session = Self.chat(.everything)
+    let text = ConversationRemovalText(session, .delete)
+
+    let sent = await firstRequest { text.confirm($0, session) }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args["session"] == "c")
+    #expect(sent.args["new"] == nil)
+    #expect(sent.args["drop"] == ["w1", "w2", "p1", "s1"])
+  }
+
+  /// The row's Delete… opens `DeleteConfirmation`. A chat's goes through `manager-end`, because `rm-queue` refuses a
+  /// conversation.
+  @Test func theDeleteDialogOfAChatSendsManagerEnd() async {
+    let sent = await firstRequest { DeleteConfirmation(Self.chat(.everything)).confirm($0) }
+
+    #expect(sent.op == "manager-end")
+    #expect(sent.args["session"] == "c")
+    #expect(sent.args["drop"] == ["w1", "w2", "p1", "s1"])
+  }
+
+  @Test func theDeleteDialogOfAChatShowsTheConversationsText() {
+    let chat = Self.chat(.everything)
+
+    let confirmation = DeleteConfirmation(chat)
+
+    #expect(confirmation.title == ConversationRemovalText(chat, .delete).title)
+    #expect(confirmation.message == ConversationRemovalText(chat, .delete).message)
+  }
+
+  @Test func aSuccessfulChatDeleteDeselectsIt() async {
+    let chat = Self.chat()
+    let (model, _) = recordingModel([chat, needsItem("a")])
+    model.selection = "c"
+
+    model.endConversation(chat, new: false, drop: [])
+    await settle { model.selection == nil }
+
+    #expect(model.selection == nil)
+  }
+
   // MARK: The hint
 
   @Test func dismissEndHintSendsManagerHintWithDismissAndNoCaller() async {

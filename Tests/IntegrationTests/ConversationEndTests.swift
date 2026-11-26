@@ -17,7 +17,6 @@ import Testing
   let handoff = OperatorHandoffTests()
   let conversationHelpers = ManagerConversationsTests()
   let operatorHelpers = OperatorTests()
-  let digest = DigestTests()
   let schedules = ScheduleTests()
   let liveCap = LiveCapTests()
 
@@ -808,9 +807,9 @@ import Testing
     try expectUnchanged(sbd, before)
   }
 
-  // MARK: Only a Manager conversation
+  // MARK: Only a Manager conversation or a group chat
 
-  enum NotAConversation: CaseIterable { case theOperator, groupChat, work }
+  enum NotAConversation: CaseIterable { case theOperator, work }
 
   @Test(arguments: NotAConversation.allCases) func aSessionThatIsNotAConversationIsRefused(_ kind: NotAConversation)
     throws
@@ -819,7 +818,6 @@ import Testing
     let s: SessionSummary
     switch kind {
     case .theOperator: s = try operatorHelpers.idleOperator(sbd)
-    case .groupChat: s = try digest.parent(sbd, .chat)
     case .work: s = try sbd.idleSession(name: "work")
     }
 

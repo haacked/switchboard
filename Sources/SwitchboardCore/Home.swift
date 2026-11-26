@@ -116,6 +116,8 @@ public struct Config: Codable, Equatable, Sendable {
   public var claudeArgs: [String] = []
   /// Whether new sessions start claude in auto mode. `sb new --no-auto` opts one out.
   public var autoMode = true
+  /// Whether new work sessions open their shell pane. `sb open-shell` changes it.
+  public var openShell = true
   /// Extra environment for both panes, such as CLAUDE_CONFIG_DIR.
   public var env: [String: String] = [:]
   /// Lets the `clock` request move sbd's clock forward. While the home holds
@@ -203,7 +205,7 @@ public struct Config: Codable, Equatable, Sendable {
   enum CodingKeys: String, CodingKey {
     case claude, codex, idleStopSeconds, liveCap, livePriority, tickSeconds, model, worktreeRoot, tmux, shell,
       claudeArgs,
-      autoMode, env
+      autoMode, openShell, env
     case testClock, machineLog, hostWaitSeconds, pasteSettleSeconds, stopWaitSeconds, reviewTimeoutSeconds, mcpServers,
       ssh, hosts, repos, repoRoots, branchPrefix, followupsFile,
       cleanupDeletes, supacode, removalDelaySeconds, conversationHintTokens
@@ -264,6 +266,7 @@ public struct Config: Codable, Equatable, Sendable {
     shell = try c.decodeIfPresent(String.self, forKey: .shell)
     claudeArgs = try c.decodeIfPresent([String].self, forKey: .claudeArgs) ?? d.claudeArgs
     autoMode = try c.decodeIfPresent(Bool.self, forKey: .autoMode) ?? d.autoMode
+    openShell = try c.decodeIfPresent(Bool.self, forKey: .openShell) ?? d.openShell
     env = try c.decodeIfPresent([String: String].self, forKey: .env) ?? d.env
     testClock = try c.decodeIfPresent(Bool.self, forKey: .testClock) ?? d.testClock
     machineLog = try c.decodeIfPresent(Bool.self, forKey: .machineLog) ?? d.machineLog

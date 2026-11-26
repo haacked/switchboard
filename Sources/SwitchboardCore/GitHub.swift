@@ -17,6 +17,8 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
   /// How often a named service's deploy state is read while a deploy wait
   /// names the service.
   public var deployPollSeconds: Double = 120
+  /// The GitHub Event Streams source of PR changes.
+  public var events = EventSettings()
 
   /// A timer cycle can start a few ms less than one period after the last
   /// one. Each interval therefore ends half a timer period early, so a PR
@@ -36,6 +38,40 @@ public struct GitHubSettings: Codable, Equatable, Sendable {
     pollSeconds = try c.decodeIfPresent(Double.self, forKey: .pollSeconds) ?? d.pollSeconds
     idlePollSeconds = try c.decodeIfPresent(Double.self, forKey: .idlePollSeconds) ?? d.idlePollSeconds
     deployPollSeconds = try c.decodeIfPresent(Double.self, forKey: .deployPollSeconds) ?? d.deployPollSeconds
+    events = try c.decodeIfPresent(EventSettings.self, forKey: .events) ?? d.events
+  }
+}
+
+/// The settings of the GitHub Event Streams source of PR changes, `github.events` in config.json.
+public struct EventSettings: Codable, Equatable, Sendable {
+  public enum Mode: String, Codable, Sendable {
+    /// sbd doesn't subscribe.
+    case off
+    /// sbd subscribes and counts what the streams report, but a signal causes no read and changes no poll rate.
+    case shadow
+    /// Each signal causes a read of the PR, and so does each stream that opens. The poll rates stay as they are with
+    /// the source off.
+    case read
+
+    /// A mode that this sbd doesn't know, such as one that a later sbd added, turns the source off, so the rest of
+    /// the config still applies.
+    public init(from decoder: Decoder) throws {
+      self = Mode(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .off
+    }
+  }
+
+  public var mode: Mode = .off
+  /// The most subscriptions that sbd keeps. GitHub allows 100 for each account, and the rest are left for
+  /// `gh event listen`.
+  public var maxSubscriptions = 80
+
+  public init() {}
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: CodingKeys.self)
+    let d = EventSettings()
+    mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? d.mode
+    maxSubscriptions = max(0, try c.decodeIfPresent(Int.self, forKey: .maxSubscriptions) ?? d.maxSubscriptions)
   }
 }
 
@@ -153,16 +189,17 @@ public enum GitHub {
   }
 
   /// Why the poller reads a PR at `now`, or nil when the PR isn't due. `all` reads every PR. `waitedAt` is the
-  /// newest wait, dependency edge, or finished turn that needs a read after it. `pendingRate` makes the PR poll
-  /// at `pendingMs` whatever its state.
+  /// newest wait, finished turn, or expired acknowledgment that needs a read after it. `requested` reads the PR
+  /// whether or not it is due, with that trigger. `pendingRate` makes the PR poll at `pendingMs` whatever its state.
   public static func readTrigger(
-    _ pr: PullRequest?, lastPolled: Int64?, waitedAt: Int64?, all: Bool, pendingRate: Bool, now: Int64,
-    pendingMs: Int64, idleMs: Int64
+    _ pr: PullRequest?, lastPolled: Int64?, waitedAt: Int64?, requested: ReadTrigger? = nil, all: Bool,
+    pendingRate: Bool, now: Int64, pendingMs: Int64, idleMs: Int64
   ) -> ReadTrigger? {
     if all { return .poll }
     if (waitedAt ?? 0) > (lastPolled ?? 0) { return .wait }
+    if let requested { return requested }
     guard let pr else { return .first }
-    let pending = pendingRate || pr.isPending || pr.awaitsReview
+    let pending = pr.pollsAtPendingRate(needed: pendingRate)
     guard elapsed(since: lastPolled, pending ? pendingMs : idleMs, now: now) else { return nil }
     return pending ? .pending : .idle
   }

@@ -118,7 +118,7 @@ struct ContentView: View {
       } message: { offer in
         Text(model.sessionNames.replacingIDs(in: offer.message))
       }
-      .mainToolbar()
+      .mainToolbar(showsImport: model.shownSession == nil)
     }
     .removingToolbarTitle()
     // The rule reads only whether the window is narrower than `collapseBelow`. Wider widths need no update.
@@ -177,6 +177,11 @@ struct ContentView: View {
     .sheet(isPresented: model.isPresent(\.shortcutsOverlay)) {
       if let request = model.shortcutsOverlay {
         ShortcutsOverlay(request: request).environmentObject(model)
+      }
+    }
+    .sheet(isPresented: model.isPresent(\.renaming)) {
+      if let id = model.renaming {
+        RenameSheet(id: id) { model.renaming = nil }.environmentObject(model)
       }
     }
     .sheet(isPresented: model.isPresent(\.loopEditor)) {

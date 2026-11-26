@@ -169,7 +169,7 @@ extension Service {
   /// Without a chat, it runs under the account that new sessions use, in
   /// the state folder.
   func planTurnAccount(_ plan: PlanDocument) -> (account: String, env: [String: String], folder: String) {
-    if let group = plan.group, let chat = chatID(group) {
+    if let group = plan.group, let chat = mostRecentChat(of: group) {
       let folder = home.chatFolder(group)
       let account = headlessAccount(of: chat)
       return (

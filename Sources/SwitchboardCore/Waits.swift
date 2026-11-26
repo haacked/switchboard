@@ -42,10 +42,11 @@ public struct CICheck: Codable, Equatable, Sendable {
 }
 
 /// Something a session waits on, and what happens when it resolves. sbd
-/// resolves the `date`, `session`, and `manual` kinds on each tick. A poller
-/// resolves the others through `Service.resolveWait`. A wait that passes its
-/// `recheck` time stays open, and its session moves to Needs you until the
-/// wait resolves or the user clears it.
+/// resolves the `date`, `session`, and `manual` kinds on each tick, and the
+/// `reply` kind on each tick from the Slack thread rows that its poll stores.
+/// A poller resolves the others through `Service.resolveWait`. A wait that
+/// passes its `recheck` time stays open, and its session moves to Needs you
+/// until the wait resolves or the user clears it.
 public struct Wait: Codable, Equatable, Sendable {
   public enum Kind: String, Codable, CaseIterable, Sendable {
     case ci
@@ -58,11 +59,12 @@ public struct Wait: Codable, Equatable, Sendable {
     case session
     case date
     case manual
+    case reply
 
     /// The `wait` request's fields that this kind reads.
     var fields: Set<String> {
       switch self {
-      case .ci, .merge: ["target"]
+      case .ci, .merge, .reply: ["target"]
       case .queue: ["target", "since"]
       case .review, .botReview: ["target", "who", "since"]
       case .approval: ["target", "who"]
@@ -188,6 +190,17 @@ public struct Wait: Codable, Equatable, Sendable {
   public var subject: SessionTarget?
   /// What sbd's CI reader did about the failed checks of a merge action's subject at one head.
   public var ciCheck: CICheck?
+  /// A `reply` wait's Slack message link, as `ExternalLink.cleanURL` cleaned it.
+  public var url: String?
+  /// The status of a `reply` wait's thread. Only a session summary sets it, so a stored wait and an event's wait
+  /// have none.
+  public var threadStatus: SlackThreadStatus?
+
+  /// The Slack thread that `url` names, or nil when the URL doesn't parse to a Slack thread.
+  public var replyThread: LinkTarget? {
+    guard let target = url.flatMap(LinkTarget.parse), SlackThreadRef(target: target) != nil else { return nil }
+    return target
+  }
 
   /// The session that the action acts on: the subject, or else the session that the wait watches.
   public var actionSubject: SessionTarget? { subject ?? session }
@@ -196,7 +209,7 @@ public struct Wait: Codable, Equatable, Sendable {
   /// that session's own repository. A `ci` wait on it reads the session's checked-out branch.
   var readsWaiter: Bool {
     switch kind {
-    case .session, .date, .manual: false
+    case .session, .date, .manual, .reply: false
     case .ci, .review, .botReview, .approval, .queue, .merge, .deploy: pr?.repository == nil
     }
   }
@@ -246,6 +259,7 @@ public struct Wait: Codable, Equatable, Sendable {
     case .session: return (session?.name ?? "another session") + sessionGoal
     case .date: return "until " + (until.map { Wait.formatTime($0) } ?? "a date")
     case .manual: return note ?? "a manual wait"
+    case .reply: return replyThread.map { "a reply in \($0.title)" } ?? "a reply in a Slack thread"
     }
   }
 
@@ -489,9 +503,23 @@ public struct Wait: Codable, Equatable, Sendable {
       case .merged?: return Settlement("Trunk merged it", changedAt: at, met: true)
       default: return nil
       }
-    case .deploy, .session, .date, .manual:
+    case .deploy, .session, .date, .manual, .reply:
       return nil
     }
+  }
+
+  /// What happened, when this `reply` wait resolves from its thread's row, or nil while it stays open. `thread`
+  /// gives the row of a thread key, or nil when sbd has none. It resolves when the newest reply that isn't yours came
+  /// after `countsAfter`, compared in whole ms. The outcome names the reply's author on one line, escaped and cut to
+  /// 80 characters, and links the reply with the wait URL's workspace and the row's channel, root, and reply ts,
+  /// which sbd checked when it parsed them.
+  public func settlement(thread: (String) -> SlackThread?) -> Settlement? {
+    guard kind == .reply, let target = replyThread, let workspace = target.workspace, let row = thread(target.key),
+      let other = row.lastOther, let at = SlackPoll.tsValue(other.ts).map({ $0 / 1000 }), at > countsAfter
+    else { return nil }
+    let name = SlackThreadStatus.clipped(other.name ?? other.user, max: 80)
+    let link = LinkTarget.slackReplyURL(workspace: workspace, channel: row.channel, thread: row.thread, ts: other.ts)
+    return Settlement("\(name) replied: \(link)", changedAt: at, met: true)
   }
 
   /// Whether the PR merged or closed before `countsAfter`, or at a time that

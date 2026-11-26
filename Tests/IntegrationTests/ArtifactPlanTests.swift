@@ -188,6 +188,26 @@ extension Instance {
     #expect(sessions.filter { $0.chat == flags.id }.count == 1)
   }
 
+  /// The artifact task is sbd's message, so it leaves an untitled chat untitled, and the user's first prompt names
+  /// the chat.
+  @Test func anArtifactTaskLeavesAnUntitledChatUntitledAndTheUsersFirstPromptNamesIt() throws {
+    let sbd = try Instance()
+    let flags = try sbd.addGroup("Flags")
+    let chat = try JSONCoding.decode(SessionSummary.self, from: try sbd.sb("chat", "Flags", "--new", "--json"))
+    try #require(chat.name == Manager.untitled)
+    try sbd.waitFor(chat.id, "the stub") { $0.live }
+
+    _ = try sbd.attachArtifact(group: "Flags")
+
+    try sbd.waitForChatReply(flags, "Artifact read")
+    #expect(try sbd.get(chat.id).name == Manager.untitled)
+    #expect(try !sbd.events(chat.id).contains { $0.kind == "renamed" })
+
+    try sbd.sb("send", chat.id, "Fix the cache")
+
+    try sbd.waitFor(chat.id, "the name from the user's first prompt", timeout: 30) { $0.name == "Fix the cache" }
+  }
+
   @Test func readTurnNamesThePlanTheArtifactAndTheTask() throws {
     let sbd = try Instance()
     try sbd.addGroup("Flags")

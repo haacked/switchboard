@@ -154,7 +154,7 @@ final class BoardModel: ObservableObject {
   var presentingSheet: Bool {
     newSession != nil || showingImport || showingSearch || showingDoneRemoval || quickAsk != nil
       || pickingSnoozeTime != nil || pickingPauseTime != nil || editingNotes != nil || loopEditor != nil
-      || shortcutsOverlay != nil || loopOutput != nil
+      || renaming != nil || shortcutsOverlay != nil || loopOutput != nil
   }
   func openNewSession(group: String? = nil, parent: String? = nil) {
     newSession = NewSessionRequest(group: group, parent: parent)
@@ -182,6 +182,11 @@ final class BoardModel: ObservableObject {
   @Published var terminalFocus: String?
   /// The session whose empty Message Claude field shows under its terminal. A field with a draft always shows.
   @Published var revealedMessageField: String?
+  /// The session whose session view shows, in the detail column or beside the Inbox. The toolbar leaves out Import
+  /// Sessions while one shows, so that the session's own items fit at 1024 pt.
+  @Published var shownSession: String?
+  /// The session view that set `shownSession`. Two views of one session can overlap while one replaces the other.
+  var shownSessionOwner: ObjectIdentifier?
   /// The session whose Message Claude field takes keyboard focus when it shows. The field clears it.
   @Published var messageFieldFocus: String?
   /// The Board's open cards as it last drew them. BoardView keeps it current. The Go menu's ⌘T state and
@@ -233,6 +238,8 @@ final class BoardModel: ObservableObject {
   @Published var pickingPauseTime: String?
   /// The session whose notes the Notes… sheet of a session row's context menu shows.
   @Published var editingNotes: String?
+  /// The id of the conversation whose Rename sheet shows.
+  @Published var renaming: String?
   /// Follow-ups whose start is on its way to sbd. Their Start buttons stay
   /// disabled until sbd replies, because making a worktree can take seconds.
   @Published var starting: Set<String> = []
@@ -277,6 +284,8 @@ final class BoardModel: ObservableObject {
   @Published var draftErrors: [String: String] = [:]
   /// Whether the sidebar shows the archived Manager conversations.
   @Published var showingArchive = false
+  /// The groups whose conversations column shows its Archive.
+  @Published var shownChatArchives: Set<String> = []
   /// The sidebar sections that the user collapsed. Follow-ups that haven't
   /// started can number in the hundreds, so their section starts collapsed.
   @Published var collapsed: Set<AttentionState> = [.notStarted]
@@ -346,6 +355,8 @@ final class BoardModel: ObservableObject {
   @Published var liveCap: Int?
   /// Whether new sessions start in auto mode, as sbd last answered it, or nil before the Settings window reads it.
   @Published var defaultAutoMode: Bool?
+  /// Whether new sessions open a shell, as sbd last answered it, or nil before the Settings window reads it.
+  @Published var openShellByDefault: Bool?
   /// sbd's refusal of the last change in Settings ▸ General. The tab shows it instead of the main window's banner.
   @Published var settingsError: String?
   /// The Settings ▸ General writes that sbd hasn't answered yet, by op. A reply applies only when no newer write of
@@ -651,10 +662,25 @@ final class BoardModel: ObservableObject {
   /// group. The Manager has its own sidebar row. A group's Board row opens its chat.
   var workBoard: [SessionSummary] { board.filter { $0.kind == .work } }
 
-  /// The group's chat, or nil before its first start.
-  /// It reads every listed session, because the group filter can hide the chat.
-  func chat(of group: String) -> SessionSummary? {
-    allSessions.first { !$0.isBeingRemoved && $0.kind == .chat && $0.chat == group }
+  /// The group's most recent conversation, or nil before its first start.
+  func chat(of group: String) -> SessionSummary? { Self.chat(of: group, in: allSessions) }
+
+  /// The group's conversations in sbd's order. It reads every listed session, because the group filter can hide a
+  /// chat.
+  func chats(of group: String) -> [SessionSummary] { Self.chats(of: group, in: allSessions) }
+
+  /// The group's chats in `sessions` in `Chat.Order`, as sbd orders them. It leaves out a chat that sbd is removing.
+  static func chats(of group: String, in sessions: [SessionSummary]) -> [SessionSummary] {
+    sessions.filter { isChat($0, of: group) }.sorted { Chat.Order($0) < Chat.Order($1) }
+  }
+
+  /// The first chat of `chats(of:in:)`.
+  static func chat(of group: String, in sessions: [SessionSummary]) -> SessionSummary? {
+    sessions.lazy.filter { isChat($0, of: group) }.min { Chat.Order($0) < Chat.Order($1) }
+  }
+
+  private static func isChat(_ s: SessionSummary, of group: String) -> Bool {
+    !s.isBeingRemoved && s.kind == .chat && s.chat == group
   }
 
   /// The current name of the group that the chat manages, or nil for any other session.
@@ -789,15 +815,16 @@ final class BoardModel: ObservableObject {
     return (Result { try sessions() }, more)
   }
 
-  /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event. Publishing for it would redraw every view each second. The
-  /// hover card shows `lastActivity`, so its "active" time can lag until
-  /// another shown field changes.
+  /// Whether two lists differ only in the `lastActivity` of sessions other than Manager conversations and group
+  /// chats. sbd bumps `lastActivity` on every hook event, and publishing for it would redraw every view each second.
+  /// The hover card shows `lastActivity`, so a work session's "active" time can lag until another shown field
+  /// changes. A conversation's `lastActivity` orders its group's chats and the Manager sidebar, so a change to it
+  /// counts.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
         var old = old
-        old.lastActivity = new.lastActivity
+        if !new.kind.isUserConversation { old.lastActivity = new.lastActivity }
         return old == new
       }
   }
@@ -831,6 +858,8 @@ final class BoardModel: ObservableObject {
       // A hidden session keeps its drafts.
       let open = Set(list.flatMap { $0.cards.map(\.id) })
       drafts = drafts.filter { open.contains($0.key) }
+      // Before the prune, which drops the group keys.
+      messageDrafts.moveGroupDrafts { BoardModel.chat(of: $0, in: list)?.id }
       messageDrafts.prune(
         keeping: Set(list.map(MessageDrafts.key)).union(MessageDrafts.decisionKeys(list))
           .union(MessageDrafts.replyKeys(list)).union(MessageDrafts.operatorAnswerKeys(list)))
@@ -1018,28 +1047,35 @@ final class BoardModel: ObservableObject {
   /// Opens the most recent Manager conversation, or starts the first one, and
   /// selects it. With `new`, it starts a conversation, which its first prompt names.
   func openManager(new: Bool = false) {
-    perform("manager", new ? ["new": true] : [:]) { value in
-      if let id = value["id"]?.string { self.selectUnlisted(id) }
-    }
+    performAndSelect("manager", new ? ["new": true] : [:])
   }
 
   /// Selects the operator. sbd creates it when none exists, and resumes a stopped one.
   func openOperator() {
-    perform("operator", [:]) { value in
-      if let id = value["id"]?.string { self.selectUnlisted(id) }
-    }
+    performAndSelect("operator", [:])
   }
 
-  /// Selects the group's chat. The first time, it starts the chat. A chat
+  /// Starts another conversation in the group and selects it.
+  func newChat(_ group: String) {
+    performAndSelect("chat", ["group": .string(group), "new": true])
+  }
+
+  /// Renames the session. sbd refuses an empty name, so a name of only white space sends nothing.
+  func rename(_ id: String, to name: String) {
+    let name = name.trimmed
+    guard !name.isEmpty else { return }
+    perform("rename", ["session": .string(id), "name": .string(name)])
+  }
+
+  /// Selects the group's most recent conversation. The first time, it starts the chat. A chat
   /// that exists resumes only when the user sends it a message or shows its terminal.
   func openChat(_ group: String) {
     if let chat = chat(of: group) {
+      openArchive(of: chat)
       selection = chat.id
       return
     }
-    perform("chat", ["group": .string(group)]) { value in
-      if let id = value["id"]?.string { self.selectUnlisted(id) }
-    }
+    performAndSelect("chat", ["group": .string(group)])
   }
 
   /// Selects a session that sbd just made, which the next refresh lists.
@@ -1047,6 +1083,13 @@ final class BoardModel: ObservableObject {
     navigate {
       pendingSelection = id
       selection = id
+    }
+  }
+
+  /// Sends `op` and selects the session whose id its answer holds.
+  func performAndSelect(_ op: String, _ args: [String: JSON]) {
+    perform(op, args) { value in
+      if let id = value["id"]?.string { self.selectUnlisted(id) }
     }
   }
 
@@ -1731,11 +1774,26 @@ final class BoardModel: ObservableObject {
   func clearWait(_ session: String, wait: String) {
     let key = Self.clearingWaitKey(session, wait)
     guard clearingWaits.insert(key).inserted else { return }
-    perform(
-      "clear-wait", ["session": .string(session), "wait": .string(wait)],
-      then: { _ in self.waitErrors[session] = nil },
-      failed: { self.waitErrors[session] = "\($0)" },
+    performWaitRequest(
+      "clear-wait", ["session": .string(session), "wait": .string(wait)], session: session,
       finally: { self.clearingWaits.remove(key) })
+  }
+
+  /// Asks sbd to read a reply wait's thread first at its next Slack poll. A refusal shows in the wait panel, not in
+  /// the error banner.
+  func checkWait(session: String, wait: String) {
+    performWaitRequest(
+      "wait-check", ["session": .string(session), "wait": .string(wait), "by": .string(Author.you.rawValue)],
+      session: session)
+  }
+
+  /// Sends a request about one of the session's waits. Its refusal goes to the session's wait panel.
+  private func performWaitRequest(
+    _ op: String, _ args: [String: JSON], session: String, finally: (() -> Void)? = nil
+  ) {
+    perform(
+      op, args, then: { _ in self.waitErrors[session] = nil }, failed: { self.waitErrors[session] = "\($0)" },
+      finally: finally)
   }
 
   /// Whether sbd has not yet answered the Clear wait of this wait.

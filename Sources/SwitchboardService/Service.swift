@@ -345,6 +345,8 @@ public final class Service {
   var liveCap: Int
   /// Whether new sessions start in auto mode. `sb auto-mode` changes it.
   var defaultAutoMode: Bool
+  /// Whether new work sessions open their shell pane. `sb open-shell` changes it.
+  var openShellByDefault: Bool
   /// The `operator` settings that the tick last read, with config.json's modification time then.
   var cachedOperatorSettings: (modified: Date?, settings: OperatorSettings)?
   /// The model of a Manager conversation or a group chat without its own. `sb manager model` changes it.
@@ -408,6 +410,7 @@ public final class Service {
     self.keeper = SnapshotKeeper(path: home.database, every: config.snapshotEvery)
     self.liveCap = config.liveCap
     self.defaultAutoMode = config.autoMode
+    self.openShellByDefault = config.openShell
     self.managerModel = config.manager.model
     self.issueSettings = config.issues
     let links = Service.makeHostLinks(config: config, home: home)
@@ -665,6 +668,12 @@ public final class Service {
       if request.args["stats"]?.bool == true { return .success(github?.usageReport() ?? [:]) }
       // A poll waits on GitHub, so it runs off the state queue.
       return .success(github?.poll(all: request.args["all"]?.bool ?? false) ?? [:])
+    case "sources":
+      // The report waits for the poller's queue. A poll holds that queue while it waits for the state queue, so the
+      // report runs off the state queue.
+      return .success(
+        try JSON(encoding: github?.sources(recheck: request.args["recheck"]?.bool ?? false) ?? PRSources(providers: []))
+      )
     case "ref-details":
       // A fetch waits on GitHub, so it runs off the state queue.
       return .success(try JSON(encoding: referenceDetails(request.args)))
@@ -811,37 +820,7 @@ public final class Service {
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id, for: origin))
     case "send":
-      let id = try lookup(args)
-      guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
-      let runHere = args["runHere"]?.bool == true
-      if runHere { try refuseRunHere(id, args) }
-      // The `sent` event names a session that messages itself as the sender. Its launch trigger stays `send`.
-      // A sender that sbd no longer knows goes unrecorded.
-      let sender = try? lookup(["session": args["from"] ?? .null])
-      let author = Service.author(args)
-      // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
-      let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      // A message from a Claude Code, such as the Manager's, doesn't hold the session for the user.
-      let request = author == .claude ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
-      let trigger: LaunchTrigger = sender == nil || sender == id ? .send : .session
-      // Only the user's message closes the operator's reports, so `reports` from a Claude Code is dropped.
-      var extra: [String: JSON] = [:]
-      if let reports = args["reports"] {
-        // A dropped `reports` would make the `sent` event close every open report.
-        guard let list = reports.array, list.allSatisfy({ $0.int != nil }) else {
-          throw APIError("send's reports must be an array of integer report ids")
-        }
-        if author == .you, id == operatorID() { extra["reports"] = .array(list) }
-      }
-      let delivery = try send(id, text, by: author, trigger: trigger, from: sender, runHere: runHere, extra: extra)
-      if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
-      var reply: [String: JSON] = ["delivery": .string(delivery.rawValue)]
-      if let session = entries[id]?.session, let pause = session.pause {
-        reply["held"] = .string(pause.line)
-        reply["name"] = .string(session.name)
-      }
-      return .object(reply)
+      return try sendRequest(args, by: Service.author(args))
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "pause":
@@ -876,12 +855,16 @@ public final class Service {
       return try sessionLinkRequest(op, args, origin: origin)
     case "link-open":
       return try linkOpenRequest(args, origin: origin)
+    case "wait-check":
+      return try waitCheckRequest(args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "rm-retry", "rm-keep", "rm-cancel", "removal-notices", "removal-notice-dismiss":
       return try removalRequest(op, args)
     case "manager-ls":
       return try JSON(encoding: managerList())
+    case "chat-ls":
+      return try JSON(encoding: chatList(args))
     case "manager-mcp":
       return try managerMCP(args)
     case "manager-mcp-request":
@@ -900,6 +883,8 @@ public final class Service {
       return try operatorModelRequest(args)
     case "auto-mode":
       return try autoModeRequest(args)
+    case "open-shell":
+      return try openShellRequest(args)
     case "rename":
       let id = try lookup(args)
       guard let name = args["name"]?.string, !name.isEmpty else { throw APIError("rename needs a name") }
@@ -1083,7 +1068,11 @@ public final class Service {
         answer = block
         break
       }
-      try nameConversation(id, prompt: payload["prompt"]?.string)
+      // The facts count only the user's prompts. A message that sbd sent on its own, such as a wait's outcome, names
+      // no conversation.
+      if let after = entries[id]?.facts, after.prompts > before.prompts {
+        try nameConversation(id, prompt: payload["prompt"]?.string)
+      }
       // A host's hook answer never reaches claude, so a host session keeps its digest, its replies, and its group's
       // changes unheard.
       let digestText = stamp == nil ? digest(id, now: event.t) : nil
@@ -1490,6 +1479,7 @@ public final class Service {
     configure(&session)
     // A conversation shows Claude's terminal alone. The user opens its shell on demand.
     if session.kind.isConversation { session.shellClosed = true }
+    applyOpenShellSetting(to: &session)
     session.model = SessionModel.stored(kind: session.kind, requested: session.model, workModel: config.model)
     if session.kind != .operator { try refuseOperatorName(session.name) }
     if let host = session.host {
@@ -1740,6 +1730,42 @@ public final class Service {
   }
 
   private var pasteSettleMs: Int64 { Int64(config.pasteSettleSeconds * 1000) }
+
+  /// Handles the `send` request with `author` as the writer of the text. `Service.author` derives the author of a
+  /// request from its `from` and `insideClaude`. sbd's own callers pass `sbd`, which no request field can set. It runs
+  /// on the state queue.
+  func sendRequest(_ args: JSON, by author: MessageAuthor) throws -> JSON {
+    let id = try lookup(args)
+    guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
+    let runHere = args["runHere"]?.bool == true
+    if runHere { try refuseRunHere(id, args) }
+    // The `sent` event names a session that messages itself as the sender. Its launch trigger stays `send`.
+    // A sender that sbd no longer knows goes unrecorded.
+    let sender = try? lookup(["session": args["from"] ?? .null])
+    // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
+    let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    // A message from a Claude Code, such as the Manager's, doesn't hold the session for the user.
+    let request = author == .claude ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
+    let trigger: LaunchTrigger = sender == nil || sender == id ? .send : .session
+    // Only the user's message closes the operator's reports, so `reports` from a Claude Code is dropped.
+    var extra: [String: JSON] = [:]
+    if let reports = args["reports"] {
+      // A dropped `reports` would make the `sent` event close every open report.
+      guard let list = reports.array, list.allSatisfy({ $0.int != nil }) else {
+        throw APIError("send's reports must be an array of integer report ids")
+      }
+      if author == .you, id == operatorID() { extra["reports"] = .array(list) }
+    }
+    let delivery = try send(id, text, by: author, trigger: trigger, from: sender, runHere: runHere, extra: extra)
+    if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
+    var reply: [String: JSON] = ["delivery": .string(delivery.rawValue)]
+    if let session = entries[id]?.session, let pause = session.pause {
+      reply["held"] = .string(pause.line)
+      reply["name"] = .string(session.name)
+    }
+    return .object(reply)
+  }
 
   /// `by` is who wrote the message, which the `sent` event records. With `launchesWithPrompt` false, a stopped
   /// claude starts without a prompt and gets the message as a paste, which
@@ -2972,8 +2998,8 @@ public final class Service {
 
   /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
   /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil
-  /// and the session lists a Slack link. A caller that builds many summaries computes the set once and passes it to
-  /// each call.
+  /// and the session lists a Slack link or has a reply wait. A caller that builds many summaries computes the set once
+  /// and passes it to each call. Each reply wait gets its thread's status, which no stored wait has.
   func summary(
     _ id: String, rowFollowups: PlanRowFollowups? = nil, watchedSlack: Set<String>? = nil,
     for origin: RequestOrigin = .mac
@@ -2993,6 +3019,7 @@ public final class Service {
       openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)
     out.url = SessionLink.url(for: id).absoluteString
+    if let pr = facts.pr { out.pr?.source = github?.hub.source(of: PRRef(repo: pr.repo, number: pr.number)) }
     // `prNumbers` keeps no repo, so a host could read the number of an earlier PR in a repo that it may not read.
     // `shownFacts` keeps every number, because `seedParentMarks` reads them to skip PRs that a parent already heard about.
     if origin == .mac {
@@ -3036,9 +3063,11 @@ public final class Service {
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     if !facts.artifacts.isEmpty { out.artifacts = facts.artifacts }
     let listed = s.links(found: facts.links)
-    let watched = watchedSlack ?? (listed.contains { $0.kind == .slack } ? watchedSlackKeys(now: now) : [])
+    let readsSlack = listed.contains { $0.kind == .slack } || out.waits.contains { $0.kind == .reply }
+    let watched = watchedSlack ?? (readsSlack ? watchedSlackKeys(now: now) : [])
     let links = listed.map { withSlackStatus($0, facts: facts, watched: watched) }
     if !links.isEmpty { out.links = links }
+    out.waits = out.waits.map { withThreadStatus($0, watched: watched) }
     out.conversationStarted = facts.conversationStarted
     out.docket = s.docket.map { DocketSummary($0, facts.docket) }
     out.mergeError = facts.mergeError
@@ -3078,7 +3107,7 @@ public final class Service {
         facts: facts, created: s.created, pause: s.pause)
       if s.runsClaude { out.issues = Issues.shown(set: s.issue, pr: facts.pr, branch: e.branch) }
     }
-    if s.kind == .manager { addConversationFields(to: &out, e, facts) }
+    if s.kind.isUserConversation { addConversationFields(to: &out, e, facts) }
     return out
   }
 

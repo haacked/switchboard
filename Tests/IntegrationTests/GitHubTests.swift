@@ -5,14 +5,16 @@ import Testing
 extension Instance {
   /// A private sbd whose poller asks `github`, with the stub gh. Polls run
   /// only when a test asks, unless `pollSeconds` starts the poller's timer.
-  /// `extra` adds other config keys.
+  /// `events` is the Event Streams mode. In the default shadow mode, sbd
+  /// asks `github` for event subscriptions, which it refuses with 403 unless
+  /// the test sets `eventsEnabled`. `extra` adds other config keys.
   static func withGitHub(
-    _ github: FakeGitHub, pollSeconds: Double = 0, config extra: [String: JSON] = [:]
+    _ github: FakeGitHub, pollSeconds: Double = 0, events: String = "shadow", config extra: [String: JSON] = [:]
   ) throws -> Instance {
     let config: [String: JSON] = [
       "github": [
         "gh": .string("\(FakeGitHub.fixtures)/gh-stub"), "url": .string(github.url),
-        "pollSeconds": .number(pollSeconds),
+        "pollSeconds": .number(pollSeconds), "events": ["mode": .string(events)],
       ]
     ]
     return try Instance(config: config.merging(extra) { $1 })
@@ -129,7 +131,7 @@ extension FakeGitHub {
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
     #expect(
       try sbd.sb("get", s.id).contains(
-        "pr:      #18303 Approved, checks success  https://github.com/PostHog/charts/pull/18303"))
+        "pr:      #18303 Approved, checks success (polling)  https://github.com/PostHog/charts/pull/18303"))
     try sbd.poll(all: true)
     #expect(try sbd.events(s.id).filter { $0.kind == "pr" }.count == 1)
   }

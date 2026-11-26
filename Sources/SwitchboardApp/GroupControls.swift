@@ -17,9 +17,9 @@ struct NewGroupRow: View {
         .focused($focused)
         .onAppear { focused = true }
         .onDisappear { name = "" }
-        .onSubmit { if isBlank { close() } else { model.createGroup(name) } }
+        .onSubmit { if name.isBlank { close() } else { model.createGroup(name) } }
         .onExitCommand(perform: close)
-        .onChange(of: focused) { _, now in if !now && isBlank { close() } }
+        .onChange(of: focused) { _, now in if !now && name.isBlank { close() } }
         .accessibilityLabel("New group name")
         .accessibilityIdentifier("new-group-field")
     } else {
@@ -34,9 +34,15 @@ struct NewGroupRow: View {
     }
   }
 
-  private var isBlank: Bool { name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-
   private func close() { model.namingGroup = false }
+}
+
+extension String {
+  /// The text without white space and newlines at either end.
+  var trimmed: String { trimmingCharacters(in: .whitespacesAndNewlines) }
+
+  /// Whether the text holds only white space and newlines, or nothing.
+  var isBlank: Bool { trimmed.isEmpty }
 }
 
 extension View {

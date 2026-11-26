@@ -48,6 +48,23 @@ extension PauseCoreTests {
       #expect(pauseOf(by: .claude, from: flagsChatPauser).byText == "the Flags chat")
     }
 
+    /// A conversation with its own name reads as `Triage.inboxName` names it.
+    @Test func claudeInAGroupChatWithItsOwnNameIsTheGroupsChatAndThatName() {
+      let billing = Pause.Pauser(id: "c2", name: "Flags", kind: .chat, conversation: "Billing")
+
+      #expect(pauseOf(by: .claude, from: billing).byText == "the Flags chat: Billing")
+    }
+
+    /// A pause that an sbd from before several conversations per group stored has no `conversation` key.
+    @Test func aStoredChatPauserWithNoConversationIsTheGroupsChat() throws {
+      let stored: JSON = ["by": "claude", "from": ["id": "c1", "name": "Flags", "kind": "chat"], "since": 42]
+
+      let pause = try JSONCoding.convert(stored, to: Pause.self)
+
+      #expect(pause.from?.conversation == nil)
+      #expect(pause.byText == "the Flags chat")
+    }
+
     @Test func claudeInAWorkSessionIsThatSessionsName() {
       #expect(pauseOf(by: .claude, from: workPauser).byText == "flag-cache")
     }

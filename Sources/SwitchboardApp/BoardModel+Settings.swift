@@ -7,16 +7,18 @@ enum SettingsTab: String, CaseIterable {
 }
 
 extension BoardModel {
-  /// Reads this Mac's live cap and the auto mode setting from sbd for Settings ▸ General. The reads change nothing,
+  /// Reads this Mac's live cap and the auto mode and shell settings from sbd for Settings ▸ General. The reads change nothing,
   /// so they skip the refresh that `perform` runs after each request.
   func loadSettings() {
     let send = send
     worker.async {
       let live = try? send("live", [:])
       let autoMode = try? send("auto-mode", [:])
+      let openShell = try? send("open-shell", [:])
       Task { @MainActor in
         if self.pendingSettingWrites["live", default: 0] == 0 { live.map(self.applyLive) }
         if self.pendingSettingWrites["auto-mode", default: 0] == 0 { autoMode.map(self.applyAutoMode) }
+        if self.pendingSettingWrites["open-shell", default: 0] == 0 { openShell.map(self.applyOpenShell) }
       }
     }
   }
@@ -32,6 +34,12 @@ extension BoardModel {
   func setAutoMode(_ on: Bool) {
     defaultAutoMode = on
     changeSetting("auto-mode", ["autoMode": .bool(on)], apply: applyAutoMode)
+  }
+
+  /// Sets whether new sessions open a shell.
+  func setOpenShell(_ on: Bool) {
+    openShellByDefault = on
+    changeSetting("open-shell", ["openShell": .bool(on)], apply: applyOpenShell)
   }
 
   /// Makes new sessions run under the account. Unlike the toolbar's account menu, it never offers to move
@@ -74,5 +82,9 @@ extension BoardModel {
 
   private func applyAutoMode(_ reply: JSON) {
     if let on = reply["autoMode"]?.bool { defaultAutoMode = on }
+  }
+
+  private func applyOpenShell(_ reply: JSON) {
+    if let on = reply["openShell"]?.bool { openShellByDefault = on }
   }
 }

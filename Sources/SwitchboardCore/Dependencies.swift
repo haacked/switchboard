@@ -1,7 +1,7 @@
 import Foundation
 
 /// A PR that a `Depends on` line in a PR body names.
-public struct PRRef: Codable, Equatable, Hashable, Sendable {
+public struct DependencyRef: Codable, Equatable, Hashable, Sendable {
   /// owner/name.
   public var repo: String
   public var number: Int
@@ -81,7 +81,7 @@ public struct Dependency: Codable, Equatable, Sendable {
   }
 
   /// The edge that a body ref makes.
-  public init(ref: PRRef, session: String? = nil) {
+  public init(ref: DependencyRef, session: String? = nil) {
     self.init(
       via: .body, repo: ref.repo, number: ref.number, deploy: ref.deploy, session: session, service: ref.service,
       environments: ref.environments)
@@ -155,9 +155,9 @@ public enum Dependencies {
   /// to` environments. A repeat keeps the first ref and its first service,
   /// takes the union of the environments, and becomes a deploy ref when any
   /// of its lines is one.
-  public static func refs(inBody body: String, repo: String) -> [PRRef] {
+  public static func refs(inBody body: String, repo: String) -> [DependencyRef] {
     guard body.range(of: "depends on", options: .caseInsensitive) != nil else { return [] }
-    var refs: [PRRef] = []
+    var refs: [DependencyRef] = []
     for raw in body.split(whereSeparator: \.isNewline) {
       let text = String(raw)
       let whole = NSRange(text.startIndex..., in: text)
@@ -169,7 +169,7 @@ public enum Dependencies {
         guard let range = Range(match.range, in: text), let pr = Wait.PullRequest(parsing: String(text[range])) else {
           continue
         }
-        let found = PRRef(
+        let found = DependencyRef(
           repo: pr.repository ?? repo, number: pr.number, deploy: deploy, service: service, environments: environments)
         if let i = refs.firstIndex(where: { $0.same(repo: found.repo, number: found.number) }) {
           if deploy {

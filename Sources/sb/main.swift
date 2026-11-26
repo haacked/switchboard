@@ -81,8 +81,9 @@ let usage = """
     manager ls                    list the conversations, newest activity first
     manager <conv> --log          the conversation's last messages
     manager <conv> --read         mark the conversation's replies read
-    manager pin|unpin <conv>      pin the conversation to the top of the
-                                  app's Conversations list, or unpin it
+    manager pin|unpin <conv>      pin the conversation, or a group chat's
+                                  conversation, to the top of its list in the
+                                  app, or unpin it
     manager end <conv> [--drop <id>]… [--new [--name N]]
                                   end the conversation: stop its claude and remove
                                   it. Its transcript stays on disk. Its own waits
@@ -204,8 +205,9 @@ let usage = """
     wait [<session>] --kind K [--target T] [--who W] [--env E] [--service S]
          [--state S] [--until WHEN] [--since WHEN] [--note N]
          [--then resume|notify|merge|rm-worktree|rm|report] [--needs-you] [--here]
-                                  wait on a PR, a deploy, another session, or a
-                                  time. Inside a session, the session is optional.
+                                  wait on a PR, a deploy, another session, a
+                                  Slack reply, or a time. Inside a session, the
+                                  session is optional.
                                   A wait that Claude sets in a Manager
                                   conversation and that resumes goes to the
                                   operator, unless it reads the conversation's
@@ -507,11 +509,28 @@ let usage = """
                                   --declined lists the declined ids, and
                                   --undecline lets one be suggested again
     chat <group> [<text> | --send <text>]
-                                  open the group's chat, a session that manages
-                                  the group's sessions, starting it the first
-                                  time. With text, send it a message
-    chat <group> --log            the chat's last messages
-    chat <group> --read           mark the chat's replies read
+                                  open the group's most recent chat
+                                  conversation, a session that manages the
+                                  group's sessions, starting it the first time.
+                                  With text, send it a message
+    chat <group> --new [--name N] [<text>]
+                                  start another conversation in the group chat,
+                                  named N, or for the first line of the text,
+                                  or "New conversation" until its first prompt
+                                  names it
+    chat <group> --session <conv> [<text>]
+                                  open that conversation of the group, or send
+                                  it the text
+    chat <group> --ls             list the group's conversations, newest first
+    chat <group> --end <conv> [--drop <id>]… [--new [--name N]]
+                                  remove a conversation of the group, as sb
+                                  manager end does, and with --new start
+                                  another in its place
+    chat <group> --log [--session <conv>]
+                                  the last messages of that conversation, or of
+                                  the most recent one
+    chat <group> --read [--session <conv>]
+                                  mark its replies read
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]
@@ -584,6 +603,10 @@ let usage = """
     poll --stats                  show the GitHub requests and points since sbd
                                   started, by why each PR was read, without
                                   polling
+    sources [--json] [--recheck]  list the sources of PR changes that sbd reads
+                                  besides polling, with their state and counts.
+                                  --recheck first asks each unavailable source
+                                  to try GitHub again
     snapshots [--write]           show how the last start built each session,
                                   from a snapshot or a full replay; --write
                                   first saves a snapshot of every session
@@ -602,6 +625,8 @@ let usage = """
                                   worktree adds its main checkout
     auto-mode [on|off]            show or set whether new sessions start in
                                   auto mode. Sessions that exist keep theirs
+    open-shell [on|off]           show or set whether new sessions open a shell
+                                  beside Claude. Sessions that exist keep theirs
     autocontinue [on|off|status]  send "Claude can continue" sessions their
                                   next step on their own, or show what holds
                                   each one back. Off by default
@@ -640,16 +665,21 @@ let usage = """
   on the session's own PR. session takes another session as --target and a
   --state (default done). date needs --until (2h, 2026-10-26, or
   2026-10-26T09:00). manual takes an optional --until that returns it to Needs
-  you, a day later without one. --then notify moves the session to Needs you
-  instead of resuming it. --then merge (a session wait for ready_to_merge),
-  rm-worktree (a session wait for done, or a merge wait on owner/name#N), rm
-  (a session wait for done), and report (any kind but manual, with --note, and
-  --needs-you for an Inbox item) arm an action that sbd runs when the wait is
-  met. Only a Manager conversation, the Operator, or you in a terminal can arm
-  one, and merge needs the PR's repository in operator.mergeRepos in
-  config.json. review, bot-review, and queue take --since WHEN, a past time
-  after which a review or a change in Trunk's queue counts, instead of the
-  time the wait was set. A wait still open past its recheck time
+  you, a day later without one. reply takes a Slack message link as --target.
+  Leave --target out only when the session has exactly one Slack thread among
+  its links, because sb wait fails when it has none or several. It resolves when
+  someone other than you replies in the thread after the wait was set. A message
+  from a bot id, one that starts with B, doesn't resolve it. It needs
+  slack.pollSeconds above 0 in config.json. --then notify moves the session to
+  Needs you instead of resuming it. --then merge (a session wait for
+  ready_to_merge), rm-worktree (a session wait for done, or a merge wait on
+  owner/name#N), rm (a session wait for done), and report (any kind but manual,
+  with --note, and --needs-you for an Inbox item) arm an action that sbd runs
+  when the wait is met. Only a Manager conversation, the Operator, or you in a
+  terminal can arm one, and merge needs the PR's repository in
+  operator.mergeRepos in config.json. review, bot-review, and queue take --since
+  WHEN, a past time after which a review or a change in Trunk's queue counts,
+  instead of the time the wait was set. A wait still open past its recheck time
   (recheckSeconds in config.json) moves the session to Needs you.
   """
 
@@ -673,7 +703,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent", "--run",
+      "--reason", "--message", "--drop", "--end", "--template-file", "--rubric-file", "--input", "--agent", "--run",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -798,7 +828,7 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let note = s.branchSwitchNote { print("  warning: \(note)".printable) }
-  if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let pr = s.pr { print("  pr:      \(pr.line)\(pr.source.map { " (\($0))" } ?? "")  \(pr.url)") }
   if let earlier = s.earlierPRs { print("  earlier PRs: " + earlier.map { "#\($0)" }.joined(separator: ", ")) }
   for issue in s.issues ?? [] {
     print(
@@ -1010,10 +1040,21 @@ func service(_ a: Args) {
       let output = (bootstrap.stderr + bootstrap.stdout).trimmingCharacters(in: .whitespacesAndNewlines)
       die("launchctl bootstrap failed" + (output.isEmpty ? "" : ": \(output)"))
     }
-    for _ in 0..<50 {
+    // sbd opens its socket only after it loads every session. A rebuild makes every snapshot unusable, so the
+    // first start after an update replays every event. That took about 10 s for 57,000 events.
+    // SB_SERVICE_WAIT lets a test shorten the wait.
+    let wait = ProcessInfo.processInfo.environment["SB_SERVICE_WAIT"].flatMap(TimeInterval.init) ?? 60
+    let start = Date()
+    var told = false
+    while case let elapsed = Date().timeIntervalSince(start), elapsed < wait {
       if (try? client.call("ping", timeout: 1)) != nil {
         print("sbd runs as a launchd agent (\(label)), with state in \(client.home.path)")
         return
+      }
+      if !told && elapsed >= 2 {
+        print("waiting for sbd to load its sessions…")
+        fflush(stdout)
+        told = true
       }
       usleep(100_000)
     }
@@ -1301,6 +1342,8 @@ case "autocontinue":
   autoContinue(a)
 case "auto-mode":
   autoMode(a)
+case "open-shell":
+  openShell(a)
 case "activity":
   activity(a)
 case "live":
@@ -1319,6 +1362,13 @@ case "issues":
   issues(a)
 case "ref":
   refCommand(a)
+case "sources":
+  let result = call("sources", ["recheck": .bool(a.switches.contains("--recheck"))])
+  if a.json {
+    printJSON(result)
+  } else {
+    for line in decode(result, as: PRSources.self).lines(now: nowMs()) { print(line) }
+  }
 case "poll" where a.switches.contains("--stats"):
   let result = call("poll", ["stats": true])
   if a.json { printJSON(result) } else { printPollStats(result) }
