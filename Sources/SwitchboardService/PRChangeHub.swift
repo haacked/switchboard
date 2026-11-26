@@ -81,19 +81,17 @@ final class PRChangeHub {
   /// What shadow mode measured for each provider, by provider id.
   private var tallies: [String: ShadowTally] = [:]
 
-  /// A read that the next poll's tally takes.
+  /// A read that the next poll's tally takes, with the PR's read before it and the time that read's poll started.
   private struct HeldRead {
     var id: String
     var ref: PRRef
     var snapshot: ShadowTally.Snapshot
-    /// When the poll that read the PR started and ended, in ms.
-    var polled: Int64
-    var ended: Int64
+    var previous: (snapshot: ShadowTally.Snapshot, polled: Int64)?
   }
 
   private var heldReads: [HeldRead] = []
-  /// Each PR's last read that a tally took, with the time its poll started, by node id.
-  private var tallied: [String: (snapshot: ShadowTally.Snapshot, polled: Int64)] = [:]
+  /// When the poll that made `heldReads` ended, in ms.
+  private var heldAt: Int64 = 0
   private var pendingReads = 0
   private var reviewOnlyReads = 0
 
@@ -179,10 +177,12 @@ final class PRChangeHub {
   /// provider sends during a poll waits on the poller's queue until the poll ends, so the tally runs once those
   /// signals are in. Must run before `known` takes the new reads.
   private func holdForTally(_ reads: [String: KnownPR]) {
-    let ended = now()
+    heldAt = now()
     heldReads = reads.compactMap { id, pr in
-      guard let snapshot = pr.snapshot, known[id].map({ pr.polled > $0.polled }) ?? true else { return nil }
-      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, polled: pr.polled, ended: ended)
+      let old = known[id]
+      guard let snapshot = pr.snapshot, old.map({ pr.polled > $0.polled }) ?? true else { return nil }
+      let previous = old.flatMap { o in o.snapshot.map { (snapshot: $0, polled: o.polled) } }
+      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, previous: previous)
     }.sorted { $0.id < $1.id }
   }
 
@@ -195,7 +195,7 @@ final class PRChangeHub {
       var t = tallies.removeValue(forKey: p.id) ?? ShadowTally()
       for read in heldReads {
         let missed = t.read(
-          read.id, previous: tallied[read.id], now: read.snapshot, polled: read.ended,
+          read.id, previous: read.previous, now: read.snapshot, polled: heldAt,
           liveSince: live(p.id, for: read.ref)?.since)
         if !missed.isEmpty {
           logLine(
@@ -206,8 +206,6 @@ final class PRChangeHub {
       t.prune(now: now)
       tallies[p.id] = t
     }
-    for read in heldReads { tallied[read.id] = (read.snapshot, read.polled) }
-    tallied = tallied.filter { known[$0.key] != nil }
     heldReads = []
   }
 

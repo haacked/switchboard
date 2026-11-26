@@ -323,9 +323,11 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     if nowMs() - since >= Self.steadyMs { streams[ref]?.backoff.failures = 0 }
   }
 
-  /// Drops the stream and tries again after the backoff of its failures.
-  private func failed(_ ref: PRRef, reason: String) {
+  /// Drops the stream and tries again after the backoff of its failures. With `resubscribe`, the subscription is
+  /// gone, so the next attempt creates a new one.
+  private func failed(_ ref: PRRef, reason: String, resubscribe: Bool = false) {
     drop(ref, reason: reason)
+    if resubscribe { subscriptions[ref] = nil }
     guard let at = streams[ref]?.backoff.fail(now: nowMs()) else { return }
     retry(at: at)
   }
@@ -347,8 +349,9 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     case .ignored: break
     case .end(let outcome, let reason):
       // A stream that GitHub ends again as soon as it opens backs off like any other failure.
-      failed(ref, reason: "GitHub ended the stream: \(outcome)" + (reason.map { " (\($0))" } ?? ""))
-      if outcome != "reconnect" { subscriptions[ref] = nil }
+      failed(
+        ref, reason: "GitHub ended the stream: \(outcome)" + (reason.map { " (\($0))" } ?? ""),
+        resubscribe: outcome != "reconnect")
     }
   }
 
@@ -406,8 +409,7 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
         refuse(GitHub.message(json))
       case 404:
         // The subscription expired or someone deleted it, so the next update creates a new one.
-        failed(ref, reason: "the subscription is gone")
-        subscriptions[ref] = nil
+        failed(ref, reason: "the subscription is gone", resubscribe: true)
       default:
         failed(ref, reason: "GitHub answered \(status) \(GitHub.message(json))")
       }
