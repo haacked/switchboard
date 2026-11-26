@@ -68,7 +68,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
         card.deferred = true
         input.facts.cards = [card]
       case .sessionCard:
-        input.facts.sessionSummary = sessionCard
+        input.facts.sessionSummary = Box(sessionCard)
       case .permission:
         input.facts.openPermission = ToolCall(tool: "Bash", summary: "`rm -rf build`", since: now - hourMs)
       case .question:
@@ -84,7 +84,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
 
     let reason = blocker { input in
       input.verdict.source = .reply
-      input.facts.triage = summary
+      input.facts.triage = Box(summary)
     }
 
     #expect(reason != nil)
@@ -98,7 +98,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
 
     let reason = blocker { input in
       input.verdict.source = .reply
-      input.facts.triage = summary
+      input.facts.triage = Box(summary)
     }
 
     #expect(reason == nil)
@@ -281,7 +281,7 @@ private func blocker(_ change: (inout AutoContinueInput) -> Void) -> String? {
     input.session.manager = true
     input.session.chat = "g1"
     input.facts.cards = [Card(event("PermissionRequest", now - hourMs, tool("Bash", ["command": "ls"])))]
-    input.facts.sessionSummary = sessionCard
+    input.facts.sessionSummary = Box(sessionCard)
     input.facts.turnRunning = true
     input.busy = true
     input.facts.live = false
@@ -328,7 +328,7 @@ extension AutoContinueGuardTests.OpenPrompt {
       card.deferred = true
       f.cards = [card]
     case .sessionCard:
-      f.sessionSummary = SwitchboardCoreTests.sessionCard
+      f.sessionSummary = Box(SwitchboardCoreTests.sessionCard)
     case .permission:
       f.openPermission = ToolCall(tool: "Bash", summary: "`rm -rf build`", since: since)
     case .question:
@@ -384,7 +384,7 @@ extension AutoContinueGuardTests.OpenPrompt {
 
     let reason = blocker {
       $0.verdict.source = .reply
-      $0.facts.triage = summary
+      $0.facts.triage = Box(summary)
       $0.facts.turnRunning = true
     }
 

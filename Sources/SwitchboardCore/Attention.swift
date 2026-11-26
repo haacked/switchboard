@@ -156,11 +156,12 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// The id of the last Stop event, which keys the turn's triage summary.
   public var lastStop: Int64 = 0
   /// The summary of the turn that ended at `lastStop`, once a `triage` event
-  /// recorded it.
-  public var triage: TriageSummary?
+  /// recorded it. The box keeps `SessionFacts` small enough for the server threads' stacks.
+  public var triage: Box<TriageSummary>?
   /// The card that the session wrote with `sb summary set` during its
-  /// current turn, and the id of its event.
-  public var sessionSummary: TriageSummary?
+  /// current turn, and the id of its event. The box keeps `SessionFacts` small enough for the server threads'
+  /// stacks.
+  public var sessionSummary: Box<TriageSummary>?
   public var sessionSummaryId: Int64 = 0
   /// Whether the turn of `sessionSummary` has ended at a main Stop. The next main Stop drops the card.
   public var sessionSummaryStopped = false
