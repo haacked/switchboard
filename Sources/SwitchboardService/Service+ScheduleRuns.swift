@@ -34,23 +34,20 @@ extension Service {
       recordRun(id, ran, run: Schedule.Run(t: now, outcome: .failed, skipped: skipped, error: "\(error)"), check: nil)
       return
     }
-    let (next, skipped) = schedule.fired(at: now)
     let folder = runLogFolder(id, schedule.id)
     do {
       // A removal deletes the folder on the state queue, so the run can't make it again after that.
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-      try changeSchedule(id, schedule.id) {
-        $0.next = next
-        $0.running = now
-      }
     } catch {
       logLine("can't run schedule \(schedule.id) of \(id): \(error)")
       return
     }
+    var ran = schedule
+    guard let skipped = saveNextRun(id, &ran, now: now, running: true) else { return }
     let (argv, env) = command
     let timeout = schedule.runTimeout
     let scheduleId = schedule.id
-    let headless = schedule.runner == .headless
+    let headless = schedule.runsAs == .headless
     let log = "\(folder)/\(now).log"
     runsInFlight[scheduleId] = RunInFlight(session: id, pid: 0, start: 0)
     scheduleRunQueue.async { [self] in
@@ -69,10 +66,7 @@ extension Service {
       queue.sync {
         finishRun(id, scheduleId, run: run)
         guard let reply = call else { return }
-        let row = HeadlessCall(
-          t: nowMs(), kind: HeadlessKind.schedule.rawValue, session: id, model: reply.model, usage: reply.usage,
-          error: run.error)
-        do { try store.append(headlessCall: row) } catch { logLine("can't store the schedule call: \(error)") }
+        storeHeadlessCall(.schedule, session: id, reply: reply, error: run.error)
       }
     }
   }
@@ -80,30 +74,22 @@ extension Service {
   /// The argv, with the program first, and the environment of the schedule's run. The run has the session's pane
   /// environment, so `sb` in it claims the session as its caller, and `marker` names the run. A headless run takes
   /// the session's permission mode and MCP arguments, as `ScheduleRun.headlessArguments` says, and runs under the
-  /// schedule's account, else the account of the session's pane. It throws, so no process starts, for a session on a
-  /// host, for an account that is a Codex account or has no quota left, and when sbd can't find claude. It runs on
-  /// the state queue.
+  /// schedule's account, else the account of the session's pane. A script runs in the shell of the pane's `SHELL`,
+  /// else in the shell that panes start. It throws, so no process starts, for a session on a host, for an account
+  /// that is a Codex account or has no quota left, and when sbd can't find claude. It runs on the state queue.
   private func runCommand(_ id: String, _ session: Session, _ schedule: Schedule, marker: String) throws
     -> (argv: [String], env: [String: String])
   {
     guard session.host == nil else { throw APIError("--headless and --script run only for a session on this Mac") }
-    guard schedule.runner == .headless else {
-      var env = headlessEnv(session: id, account: nil)
-      env["SB_SESSION_ID"] = id
-      env[ScheduleRun.marker] = marker
-      return (ScheduleRun.scriptArguments(command: schedule.prompt, shell: env["SHELL"]), env)
-    }
-    // `headlessEnv` runs a Codex folder's turn under a stand-in account, so the check comes before it.
-    let folder = schedule.account ?? paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
-    if let name = codexName(folder) { throw APIError(Self.codexRefusal(name)) }
-    guard quota.hasBudget(account: folder) else {
-      throw APIError("no quota is left for \(Account.name(ofFolder: folder))")
-    }
-    let command = claudeCommand(for: session)
-    guard let claude = findExecutable(command) else { throw APIError("can't find \(command)") }
+    let claude = schedule.runsAs == .headless ? try headlessClaude(id, session, schedule) : nil
     var env = headlessEnv(session: id, account: schedule.account.map(ClaudeAccount.init(folder:)))
     env["SB_SESSION_ID"] = id
     env[ScheduleRun.marker] = marker
+    guard let claude else {
+      let shell = ScheduleRun.scriptArguments(
+        command: schedule.prompt, shell: env["SHELL"], fallback: config.shell ?? TerminalHost.loginShell())
+      return (shell, env)
+    }
     let model =
       schedule.model
       ?? SessionModel.launch(
@@ -116,31 +102,44 @@ extension Service {
     return (argv, env)
   }
 
+  /// The path of the claude that a headless run starts. It refuses an account that is a Codex account or has no
+  /// quota left, before `headlessEnv` would swap a Codex account for a stand-in account. It runs on the state queue.
+  private func headlessClaude(_ id: String, _ session: Session, _ schedule: Schedule) throws -> String {
+    if let folder = schedule.account {
+      if let name = codexName(folder) { throw APIError(Self.codexRefusal(name)) }
+    } else if let refusal = codexLaunchRefusal(id) {
+      throw APIError(refusal)
+    }
+    let folder = schedule.account ?? paneAccountFolder(id)
+    guard quota.hasBudget(account: folder) else {
+      throw APIError("no quota is left for \(Account.name(ofFolder: folder))")
+    }
+    let command = claudeCommand(for: session)
+    guard let claude = findExecutable(command) else { throw APIError("can't find \(command)") }
+    return claude
+  }
+
   /// Reads a headless run's log, which holds claude's envelope, and returns the model and tokens that it reports.
   /// It sets `run`'s tail to the first line of the envelope's result, and it fails a run whose envelope is an error
-  /// or that printed none. A timeout or a cancel keeps its own error. It rewrites the log as the result's text, then
-  /// what claude printed. It runs off the state queue.
+  /// or that printed none, with the words of `Headless.answer`. A timeout or a cancel keeps its own error. It rewrites
+  /// the log as the result's text, then what claude printed. It runs off the state queue.
   private static func readHeadlessLog(_ log: String, ended: DetachedRun.Result, run: inout Schedule.Run)
     -> HeadlessReply
   {
     let output = String(decoding: FileManager.default.contents(atPath: log) ?? Data(), as: UTF8.self)
-    let reply = Headless.reply(output)
-    let stopped = ended.timedOut || ended.cancelled
-    guard let envelope = Headless.envelope(output), let result = envelope["result"]?.string else {
-      if !stopped {
-        run.outcome = .failed
-        run.error = run.error ?? "claude printed no result: \(oneLine(output, max: 200))"
-      }
-      return reply
+    let envelope = Headless.envelope(output)
+    let result = envelope?["result"]?.string
+    if let result {
+      FileManager.default.createFile(
+        atPath: log, contents: Data((result + "\n\n" + output).utf8), attributes: [.posixPermissions: 0o600])
+      run.tail = DetachedRun.firstLine(result)
     }
-    FileManager.default.createFile(
-      atPath: log, contents: Data((result + "\n\n" + output).utf8), attributes: [.posixPermissions: 0o600])
-    run.tail = DetachedRun.firstLine(result)
-    if envelope["is_error"]?.bool == true, !stopped {
+    if ended.reason == nil, let problem = Headless.problem(envelope: result == nil ? nil : envelope, output: output) {
       run.outcome = .failed
-      run.error = "claude failed: \(oneLine(result, max: 200))"
+      // A run that printed no result keeps the error of its exit.
+      run.error = result == nil ? run.error ?? problem : problem
     }
-    return reply
+    return Headless.reply(envelope: envelope, output: output)
   }
 
   /// The run's result. Only an exit with status 0 is `ran`.
@@ -153,14 +152,11 @@ extension Service {
     case .success(let result): ended = result
     }
     let error: String? =
-      if ended.timedOut {
-        "timed out after \(Schedule.intervalText(timeout))"
-      } else if ended.cancelled {
-        "cancelled"
-      } else if let exit = ended.exit {
-        exit == 0 ? nil : "exited with status \(exit)"
-      } else {
-        "ended on a signal"
+      switch ended.reason {
+      case .timedOut: "timed out after \(Schedule.intervalText(timeout))"
+      case .cancelled: "cancelled"
+      case nil:
+        if let exit = ended.exit { exit == 0 ? nil : "exited with status \(exit)" } else { "ended on a signal" }
       }
     var run = Schedule.Run(t: t, outcome: error == nil ? .ran : .failed, skipped: skipped, error: error)
     run.exit = ended.exit
@@ -222,7 +218,7 @@ extension Service {
   private func stopOrphanedRuns(_ markers: [String: Session]) {
     let table = ProcessTable.readLocal()
     var found: [String: (session: Session, orphans: [Int: Int64])] = [:]
-    for row in table.all where row.ppid == 1 && !row.isZombie && row.startTime > 0 {
+    for row in table.all where Self.isOrphan(row) {
       guard let session = ProcessTable.environment(of: pid_t(row.pid)).lazy.compactMap({ markers[$0] }).first else {
         continue
       }

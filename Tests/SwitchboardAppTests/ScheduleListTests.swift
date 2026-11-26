@@ -505,7 +505,7 @@ enum SessionShape: CaseIterable, CustomTestStringConvertible {
   }
 }
 
-// MARK: - Runners (Stage 5)
+// MARK: - Runners
 
 /// A script loop that runs `command`, last run `last`.
 private func scriptRow(_ command: String = "git fetch", last: Schedule.Run? = nil) -> Schedule {

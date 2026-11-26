@@ -295,7 +295,7 @@ struct LoopOutputSheet: View {
       }
       .help("The loop keeps the logs of its newest runs")
       .clickAnchor("loop-output-run")
-      log
+      LoopOutputLog(output: output)
         .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 420, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
         .clickAnchor("loop-output-text")
@@ -314,16 +314,38 @@ struct LoopOutputSheet: View {
     .announcesRefusal(output.error)
   }
 
-  @ViewBuilder private var log: some View {
+}
+
+/// The log of one run in the Output… sheet. It reads only the output, so a change elsewhere in the model doesn't draw
+/// the log again.
+struct LoopOutputLog: View {
+  let output: LoopOutput
+  /// A log with more lines draws only the lines that scroll into view, and each line is selected on its own.
+  static let wholeTextLines = 500
+
+  var body: some View {
     if let error = output.error {
       Text(error).foregroundStyle(.red).textSelection(.enabled).padding(8)
     } else if let text = output.text {
       ScrollView {
-        Text(verbatim: text.isEmpty ? "The run printed nothing." : text.printableLines)
-          .font(.body.monospaced())
-          .textSelection(.enabled)
-          .frame(maxWidth: .infinity, alignment: .leading)
-          .padding(8)
+        Group {
+          if text.isEmpty {
+            Text("The run printed nothing.")
+          } else if output.lines.count <= Self.wholeTextLines {
+            Text(verbatim: output.lines.joined(separator: "\n"))
+          } else {
+            LazyVStack(alignment: .leading, spacing: 0) {
+              ForEach(output.lines.indices, id: \.self) { i in
+                // An empty Text has no height, so a blank line holds a space.
+                Text(verbatim: output.lines[i].isEmpty ? " " : output.lines[i])
+              }
+            }
+          }
+        }
+        .font(.body.monospaced())
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
       }
     } else {
       ProgressView().padding(8).accessibilityLabel("Reading the log")

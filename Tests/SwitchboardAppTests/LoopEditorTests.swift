@@ -272,7 +272,7 @@ private let loop = scheduleFixture("r1")
   }
 }
 
-// MARK: - Runners (Stage 5)
+// MARK: - Runners
 
 private let workFolder = "/Users/me/.claude-work"
 private let personalFolder = "/Users/me/.claude-personal"

@@ -81,7 +81,18 @@ extension BoardModel {
   /// The loop that an Edit… request names, from every listed session, or nil for New Loop… or a loop that is gone.
   func editedSchedule(_ request: LoopEditorRequest) -> Schedule? {
     guard case .edit(let id) = request else { return nil }
-    return allSessions.lazy.flatMap(\.allSchedules).first { $0.id == id }
+    return schedule(id)
+  }
+
+  /// The loop with the id, from every listed session, or nil when it is gone.
+  func schedule(_ id: String) -> Schedule? { owner(ofSchedule: id)?.schedule }
+
+  /// The listed session that has the loop with the id, with the loop, or nil when it is gone.
+  func owner(ofSchedule id: String) -> (session: SessionSummary, schedule: Schedule)? {
+    for session in allSessions {
+      if let schedule = session.allSchedules.first(where: { $0.id == id }) { return (session, schedule) }
+    }
+    return nil
   }
 
   /// The focused loop while the list shows it, else the first row.

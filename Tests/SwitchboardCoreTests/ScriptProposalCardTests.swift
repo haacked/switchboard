@@ -18,7 +18,7 @@ func scriptProposalData(
   if let timeout { data["timeout"] = .number(Double(timeout)) }
   if let schedule { data["schedule"] = .string(schedule) }
   if let before {
-    var old: [String: JSON] = ["command": .string(before.command)]
+    var old: [String: JSON] = ["command": .string(before.command), "every": .number(Double(every))]
     if let t = before.timeout { old["timeout"] = .number(Double(t)) }
     data["before"] = .object(old)
   }
@@ -55,7 +55,7 @@ let scriptCommands = [
 /// The events that end a turn, plus sbd's own `idle`. None of them closes a `script` card.
 let scriptCardSurvivors = turnEnds + [event("idle", 4)]
 
-/// Stage 5 of the schedule plan: a `script` card holds a script schedule that a session proposed, which the user
+/// A `script` card holds a script schedule that a session proposed, which the user
 /// approves or denies. It opens with `script_proposed` and closes only with `script_decided`.
 @Suite struct ScriptProposalCardTests {
   // MARK: Opening the card
@@ -297,7 +297,7 @@ let scriptCardSurvivors = turnEnds + [event("idle", 4)]
   }
 }
 
-/// Step 5: the MCP tools tell Claude that a script from a session other than a Manager conversation waits for the
+/// The MCP tools tell Claude that a script from a session other than a Manager conversation waits for the
 /// user, and that the turn ends after the call.
 @Suite struct ScriptProposalCardTestsMCPTools {
   func tool(_ name: String) throws -> MCPToolServer.Tool {

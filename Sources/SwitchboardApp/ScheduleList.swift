@@ -32,7 +32,7 @@ struct ScheduleCaption {
   init(_ schedule: Schedule, status: ScheduleStatus, hold: String?, now: Int64) {
     prompt = schedule.prompt
     what = schedule.whatText
-    showsOutput = (schedule.runner ?? .session) != .session
+    showsOutput = schedule.isDetached
     self.status = status
     timing = schedule.timingText(status.text)
     result = [schedule.lastText(now: now), schedule.gate?.checkText(now: now).map { "top-up \($0)" }]

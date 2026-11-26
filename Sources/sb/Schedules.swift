@@ -16,7 +16,7 @@ let topupFlags = ["--group", "--repo", "--target", "--template-file", "--rubric-
 /// and `resume <id>` pause and resume one, `edit <id> [--every <interval>]
 /// [--timeout <duration>] [--account A] [--model M] [<prompt>]` changes one, `run <id>` makes one due now,
 /// and `log <id> [--run N]` prints a run's output. A script from a session that may only propose it opens a card,
-/// and `--pending <card> [--wait]` reads the user's decision on it.
+/// and `--pending <card> [--timeout S]` waits for the user's decision on it.
 func scheduleCommand(_ a: Args) {
   if let card = a.values["--pending"] { return scriptProposalCommand(a, card: card) }
   let first = a.session("schedule")
@@ -60,38 +60,31 @@ func scheduleCommand(_ a: Args) {
     // An empty prompt argument still goes to sbd, which refuses it and keeps the interval too.
     if a.positional.count > 2 { args["prompt"] = .string(a.positional.dropFirst(2).joined(separator: " ")) }
     if let every = a.values["--every"] { args["every"] = .string(every) }
-    if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
-    // An empty account or model goes to sbd, which resets it to the session's.
-    if let account = a.values["--account"] { args["account"] = .string(account) }
-    if let model = a.values["--model"] { args["model"] = .string(model) }
+    args.merge(runOptions(a)) { $1 }
     guard args.count > 1 else { die("schedule edit needs --every, --timeout, --account, --model, or a prompt") }
-    if let reason = a.values["--reason"] { args["reason"] = .string(reason) }
-    args.merge(callerArg) { $1 }
-    result = call("edit-schedule", args)
+    result = call("edit-schedule", proposalArgs(a, args))
   default:
     let prompt = a.positional.dropFirst().joined(separator: " ")
     var args: [String: JSON] = ["session": .string(first), "by": .string(author.rawValue)]
     // A top-up's prompt is optional, and sbd stores a default for an empty one.
     if !(a.switches.contains("--topup") && prompt.isEmpty) { args["prompt"] = .string(prompt) }
     if let every = a.values["--every"] { args["every"] = .string(every) }
-    if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
-    if a.switches.contains("--script") { args["runner"] = "script" }
-    if a.switches.contains("--headless") {
-      if a.switches.contains("--script") { die("pass --headless or --script, not both") }
-      args["runner"] = "headless"
+    do {
+      let runner = try ScheduleRequest.runner(
+        headless: a.switches.contains("--headless"), script: a.switches.contains("--script"), prompt: false,
+        name: { "--\($0)" })
+      if let runner { args["runner"] = .string(runner.rawValue) }
+    } catch {
+      die("\(error)")
     }
-    // sbd refuses an account or a model without --headless, with the reason.
-    if let account = a.values["--account"] { args["account"] = .string(account) }
-    if let model = a.values["--model"] { args["model"] = .string(model) }
+    args.merge(runOptions(a)) { $1 }
     if let gate = topupGate(a) { args["gate"] = gate }
-    if let reason = a.values["--reason"] { args["reason"] = .string(reason) }
-    args.merge(callerArg) { $1 }
-    result = call("schedule", args)
+    result = call("schedule", proposalArgs(a, args))
   }
   if a.json { return printJSON(result) }
   if let card = result["pending"]?.int {
     return print(
-      "waiting for your approval: card \(card). Nothing runs until the user allows it. End your turn, and read the decision later with: sb schedule --pending \(card)"
+      "waiting for your approval: card \(card). Nothing runs until the user allows it. End your turn, and read the decision later with: sb schedule --pending \(card) --timeout 0"
     )
   }
   let row = decode(result, as: ScheduleRow.self)
@@ -99,12 +92,33 @@ func scheduleCommand(_ a: Args) {
   print("\(first == "rm" ? "removed " : "")\(row.schedule.id)  \(scheduleText(row, groupNames: names))".printable)
 }
 
-/// Prints the decision on the script proposal whose card is `text`. With `--wait`, it waits up to 60 s for one.
+/// The `timeout`, `account`, and `model` of an add or an edit. sbd refuses an account or a model without
+/// `--headless`, with the reason. An empty account or model goes to sbd, which refuses it on an add and resets it to
+/// the session's on an edit.
+func runOptions(_ a: Args) -> [String: JSON] {
+  var args: [String: JSON] = [:]
+  for (flag, key) in [("--timeout", "timeout"), ("--account", "account"), ("--model", "model")] {
+    if let value = a.values[flag] { args[key] = .string(value) }
+  }
+  return args
+}
+
+/// `args` with `--reason` and the caller, which sbd reads when the request proposes a script.
+func proposalArgs(_ a: Args, _ args: [String: JSON]) -> [String: JSON] {
+  var args = args
+  if let reason = a.values["--reason"] { args["reason"] = .string(reason) }
+  return args.merging(callerArg) { $1 }
+}
+
+/// Waits up to `--timeout` seconds, 60 by default, for the decision on the script proposal whose card is `text`, and
+/// prints it.
 func scriptProposalCommand(_ a: Args, card text: String) {
   guard let id = Int64(text) else { die("--pending needs the card number that sb schedule printed") }
+  let timeout = a.values["--timeout"].map { Double($0) ?? -1 } ?? 60
+  guard timeout >= 0 else { die("--timeout needs a number of seconds") }
   let status: ScriptProposalStatus
   do {
-    status = try client.awaitScriptProposal(id, timeout: a.switches.contains("--wait") ? 60 : 0)
+    status = try client.awaitScriptProposal(id, timeout: timeout)
   } catch {
     die("\(error)")
   }

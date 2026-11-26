@@ -7,10 +7,19 @@ struct LoopOutput: Equatable {
   let run: Int
   /// The log, or nil until sbd answers.
   var text: String?
+  /// The lines of `text`, each control character shown as an escape. The app escapes sbd's answer once, off the main
+  /// thread. A newline at the end starts no line.
+  var lines: [String] = []
   /// The run's output passed the log's cap.
   var truncated = false
   /// sbd's refusal, such as a loop that has not run yet.
   var error: String?
+
+  static func printableLines(_ text: String) -> [String] {
+    var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    if lines.last?.isEmpty == true { lines.removeLast() }
+    return lines.map(\.printable)
+  }
 }
 
 extension BoardModel {
@@ -35,9 +44,7 @@ extension BoardModel {
       "by": .string(Author.you.rawValue),
     ]
     if runner != .session { args["runner"] = .string(runner.rawValue) }
-    if let account { args["account"] = .string(account) }
-    if let model { args["model"] = .string(model) }
-    if let timeout { args["timeout"] = .string(timeout) }
+    args.merge(Self.runOptions(account: account, model: model, timeout: timeout)) { $1 }
     saveLoop("schedule", args)
   }
 
@@ -50,10 +57,17 @@ extension BoardModel {
     var args: [String: JSON] = ["schedule": .string(id)]
     if let every { args["every"] = .string(every) }
     if let prompt { args["prompt"] = .string(prompt) }
+    args.merge(Self.runOptions(account: account, model: model, timeout: timeout)) { $1 }
+    saveLoop("edit-schedule", args)
+  }
+
+  /// The account, the model, and the timeout that are not nil, as an add and an edit send them.
+  private static func runOptions(account: String?, model: String?, timeout: String?) -> [String: JSON] {
+    var args: [String: JSON] = [:]
     if let account { args["account"] = .string(account) }
     if let model { args["model"] = .string(model) }
     if let timeout { args["timeout"] = .string(timeout) }
-    saveLoop("edit-schedule", args)
+    return args
   }
 
   private func saveLoop(_ op: String, _ args: [String: JSON]) {
@@ -83,8 +97,14 @@ extension BoardModel {
       "schedule-log", args,
       then: { answer in
         guard self.loopOutput == shown else { return }
-        self.loopOutput?.text = answer["text"]?.string ?? ""
-        self.loopOutput?.truncated = answer["truncated"]?.bool == true
+        let text = answer["text"]?.string ?? ""
+        Task {
+          let lines = await Task.detached { LoopOutput.printableLines(text) }.value
+          guard self.loopOutput == shown else { return }
+          self.loopOutput?.lines = lines
+          self.loopOutput?.text = text
+          self.loopOutput?.truncated = answer["truncated"]?.bool == true
+        }
       },
       failed: { error in if self.loopOutput == shown { self.loopOutput?.error = "\(error)" } })
   }

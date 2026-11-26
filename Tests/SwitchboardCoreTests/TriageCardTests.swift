@@ -1276,7 +1276,7 @@ let staleCardShapes: [StaleCardShape] = [
   }
 }
 
-/// Stage 5 of the schedule plan: the Inbox item of a `script` card. Allow stores the schedule only after sbd checks
+/// The Inbox item of a `script` card. Allow stores the schedule only after sbd checks
 /// that the user sent it, so the item recommends neither option.
 @Suite struct ScriptProposalTriageCardTests {
   /// A work session whose turn ended after it proposed `command`.

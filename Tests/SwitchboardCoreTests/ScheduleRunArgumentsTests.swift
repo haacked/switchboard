@@ -240,19 +240,22 @@ private let shapes = kinds.flatMap { kind in StartMode.allCases.map { ScheduleRu
   // MARK: Script
 
   @Test func aScriptRunsInTheLoginShellWithTheCommandAsOneArgument() {
-    let args = ScheduleRun.scriptArguments(command: "git fetch --prune", shell: "/bin/bash")
+    let args = ScheduleRun.scriptArguments(command: "git fetch --prune", shell: "/bin/bash", fallback: "/bin/sh")
 
     #expect(args == ["/bin/bash", "-l", "-c", "git fetch --prune"])
   }
 
+  /// sbd passes the shell that panes start as the fallback.
   @Test(arguments: [nil, ""] as [String?])
-  func aScriptWithoutAShellFallsBackToZsh(_ shell: String?) {
-    #expect(ScheduleRun.scriptArguments(command: "make sync", shell: shell) == ["/bin/zsh", "-l", "-c", "make sync"])
+  func aScriptWithoutAShellFallsBackToThePanesShell(_ shell: String?) {
+    #expect(
+      ScheduleRun.scriptArguments(command: "make sync", shell: shell, fallback: "/bin/ksh")
+        == ["/bin/ksh", "-l", "-c", "make sync"])
   }
 
   /// An interactive shell without a terminal prints job-control warnings into the log.
   @Test func aScriptShellIsNotInteractive() {
-    let args = ScheduleRun.scriptArguments(command: "true", shell: "/bin/zsh")
+    let args = ScheduleRun.scriptArguments(command: "true", shell: "/bin/zsh", fallback: "/bin/sh")
 
     #expect(!args.contains("-i"))
     #expect(!args.contains("-li"))
@@ -263,10 +266,13 @@ private let shapes = kinds.flatMap { kind in StartMode.allCases.map { ScheduleRu
   @Test func aCommandWithPipesQuotesAndNewlinesIsPassedUnchanged() {
     let command = "git status --short | wc -l && echo \"done: $(date)\"\necho 'second line'"
 
-    #expect(ScheduleRun.scriptArguments(command: command, shell: "/bin/zsh").last == command)
+    #expect(ScheduleRun.scriptArguments(command: command, shell: "/bin/zsh", fallback: "/bin/sh").last == command)
   }
 
   @Test func aCommandThatStartsWithADashIsTheArgumentOfDashC() {
-    #expect(ScheduleRun.scriptArguments(command: "-x", shell: "/bin/zsh") == ["/bin/zsh", "-l", "-c", "-x"])
+    #expect(
+      ScheduleRun.scriptArguments(command: "-x", shell: "/bin/zsh", fallback: "/bin/sh") == [
+        "/bin/zsh", "-l", "-c", "-x",
+      ])
   }
 }

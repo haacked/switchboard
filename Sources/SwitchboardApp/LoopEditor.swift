@@ -24,8 +24,13 @@ struct LoopEditor: View {
     let original: Schedule?
     /// The chosen session id. It is nil for an edit, which can't move a loop to another session.
     var session: String?
-    /// How a new loop runs. An edit runs as its loop does, whatever this holds.
-    var runner: Schedule.Runner
+    /// How the loop runs. An edit keeps its loop's runner, whatever is set here.
+    var runner: Schedule.Runner {
+      get { original?.runsAs ?? newRunner }
+      set { newRunner = newValue }
+    }
+    /// A new loop's choice of runner.
+    private var newRunner: Schedule.Runner
     var interval: String
     var prompt: String
     /// A script's command.
@@ -40,7 +45,7 @@ struct LoopEditor: View {
     init(new choices: [Choice]) {
       original = nil
       session = choices.first?.session
-      runner = .session
+      newRunner = .session
       interval = ""
       prompt = ""
       command = ""
@@ -52,23 +57,20 @@ struct LoopEditor: View {
     init(editing schedule: Schedule) {
       original = schedule
       session = nil
-      runner = schedule.runner ?? .session
+      newRunner = schedule.runsAs
       interval = Schedule.intervalText(schedule.every)
-      prompt = runner == .script ? "" : schedule.prompt
-      command = runner == .script ? schedule.prompt : ""
+      prompt = schedule.runsAs == .script ? "" : schedule.prompt
+      command = schedule.runsAs == .script ? schedule.prompt : ""
       account = schedule.account.map(Account.name(ofFolder:)) ?? ""
       model = schedule.model ?? ""
       timeout = schedule.timeout.map(Schedule.intervalText) ?? ""
     }
 
-    /// How the loop runs: the edited loop's runner, which never changes, or the new loop's choice.
-    var runs: Schedule.Runner { original.map { $0.runner ?? .session } ?? runner }
-
     private var trimmedInterval: String { interval.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var parsedInterval: Result<Int64, any Error> { Result { try Schedule.parseInterval(trimmedInterval) } }
     private var intervalMs: Int64? { try? parsedInterval.get() }
     /// The prompt or command that sbd stores, or nil when sbd refuses it.
-    private var cleanText: String? { try? Schedule.cleanPrompt(runs == .script ? command : prompt, runner: runs) }
+    private var cleanText: String? { try? Schedule.cleanPrompt(runner == .script ? command : prompt, runner: runner) }
     private var trimmedAccount: String { account.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedModel: String { model.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var trimmedTimeout: String { timeout.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -83,7 +85,7 @@ struct LoopEditor: View {
     /// Why sbd would refuse the timeout: it can't be read, it is out of range, or it is longer than the interval. An
     /// empty field keeps the edited loop's timeout, or the default. A loop that runs in the session has none.
     var timeoutError: String? {
-      guard runs != .session else { return nil }
+      guard runner != .session else { return nil }
       let ms: Int64?
       if trimmedTimeout.isEmpty {
         ms = original?.timeout
@@ -93,15 +95,19 @@ struct LoopEditor: View {
         case .failure(let error): return "\(error)"
         }
       }
-      guard let ms, let every = intervalMs, ms > every else { return nil }
-      return
-        "the timeout \(Schedule.intervalText(ms)) is longer than the interval \(Schedule.intervalText(every)). A run must end before the next one is due"
+      guard let ms, let every = intervalMs else { return nil }
+      return Schedule.timeoutProblem(ms, every: every)
     }
 
     /// Why sbd would refuse a headless loop's model, because the model lands in claude's argv.
     var modelError: String? {
-      guard runs == .headless, !trimmedModel.isEmpty else { return nil }
-      return Manager.modelProblem(trimmedModel).map { "model \(trimmedModel): \($0)" }
+      guard runner == .headless, !trimmedModel.isEmpty else { return nil }
+      do {
+        _ = try Schedule.cleanModel(trimmedModel)
+        return nil
+      } catch {
+        return "\(error)"
+      }
     }
 
     /// The trimmed interval to send, or nil when it doesn't parse or has the edited loop's length.
@@ -112,20 +118,20 @@ struct LoopEditor: View {
 
     /// The clean prompt to send, or nil for a script, when sbd refuses it, or when it is the edited loop's prompt.
     var changedPrompt: String? {
-      guard runs != .script, let text = cleanText, text != original?.prompt else { return nil }
+      guard runner != .script, let text = cleanText, text != original?.prompt else { return nil }
       return text
     }
 
     /// The clean command to send as the prompt, or nil for a loop that is not a script, when sbd refuses it, or when
     /// it is the edited loop's command.
     var changedCommand: String? {
-      guard runs == .script, let text = cleanText, text != original?.prompt else { return nil }
+      guard runner == .script, let text = cleanText, text != original?.prompt else { return nil }
       return text
     }
 
     /// A headless loop's trimmed timeout or script's, or nil when it is empty, unreadable, or the edited loop's.
     var changedTimeout: String? {
-      guard runs != .session, !trimmedTimeout.isEmpty, let ms = try? parsedTimeout.get(), ms != original?.timeout
+      guard runner != .session, !trimmedTimeout.isEmpty, let ms = try? parsedTimeout.get(), ms != original?.timeout
       else { return nil }
       return trimmedTimeout
     }
@@ -133,13 +139,13 @@ struct LoopEditor: View {
     /// A headless loop's account name to send, or nil when it is the edited loop's. An edit sends an empty name to
     /// reset the account to the session's, and a new loop sends nothing for it.
     var changedAccount: String? {
-      guard runs == .headless else { return nil }
+      guard runner == .headless else { return nil }
       return changed(trimmedAccount, from: original?.account.map(Account.name(ofFolder:)))
     }
 
     /// A headless loop's model to send, as `changedAccount` decides.
     var changedModel: String? {
-      guard runs == .headless else { return nil }
+      guard runner == .headless else { return nil }
       return changed(trimmedModel, from: original?.model)
     }
 
@@ -244,23 +250,23 @@ struct LoopEditor: View {
         .help("The session that the loop belongs to")
         runnerChoice
       } else {
-        LabeledContent("Runs", value: Self.runnerTitle(form.runs))
+        LabeledContent("Runs", value: Self.runnerTitle(form.runner))
       }
       VStack(alignment: .leading, spacing: 2) {
         TextField("Every", text: $form.interval, prompt: Text("30m"))
           .help("One number and one unit, such as 30m, 2h, or 1d. The shortest is 1m.")
         if let error = form.intervalError { errorText(error) }
       }
-      if form.runs == .headless { headlessFields }
-      if form.runs != .session {
+      if form.runner == .headless { headlessFields }
+      if form.runner != .session {
         VStack(alignment: .leading, spacing: 2) {
-          TextField("Timeout", text: $form.timeout, prompt: Text(form.runs == .headless ? "30m" : "10m"))
+          TextField("Timeout", text: $form.timeout, prompt: Text(Self.defaultTimeoutText(form.runner)))
             .help("How long one run may take, 10s to 2h and no longer than the interval. Empty uses the default.")
             .clickAnchor("loop-editor-timeout")
           if let error = form.timeoutError { errorText(error) }
         }
       }
-      if form.runs == .script {
+      if form.runner == .script {
         VStack(alignment: .leading) {
           Text("Command")
           TextEditor(text: $form.command)
@@ -279,7 +285,7 @@ struct LoopEditor: View {
           Text("Prompt")
           TextEditor(text: $form.prompt)
             .font(.body.monospaced())
-            .frame(minHeight: form.runs == .session ? 120 : 80)
+            .frame(minHeight: form.runner == .session ? 120 : 80)
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(.separator))
             .accessibilityLabel("Prompt")
         }
@@ -306,7 +312,10 @@ struct LoopEditor: View {
   }
 
   private var headlessFields: some View {
-    let folder = model.allSessions.first { $0.id == (form.session ?? form.original.flatMap(owner)) }?.account
+    let session =
+      form.original.flatMap { model.owner(ofSchedule: $0.id)?.session }
+      ?? model.allSessions.first { $0.id == form.session }
+    let folder = session?.account
     let accounts = Self.accountChoices(model.accounts, sessionFolder: folder)
     return Group {
       Picker("Account", selection: $form.account) {
@@ -334,9 +343,9 @@ struct LoopEditor: View {
     }
   }
 
-  /// The id of the session that owns `schedule`.
-  private func owner(_ schedule: Schedule) -> String? {
-    model.allSessions.first { $0.allSchedules.contains { $0.id == schedule.id } }?.id
+  /// The timeout that a loop of `runner` gets without one of its own, before the interval cuts it.
+  static func defaultTimeoutText(_ runner: Schedule.Runner) -> String {
+    Schedule.intervalText(Schedule.defaultTimeout(runner, every: .max))
   }
 
   private func errorText(_ error: String) -> some View {
@@ -369,7 +378,7 @@ struct LoopEditor: View {
       let text = form.changedPrompt ?? form.changedCommand
     {
       model.addSchedule(
-        session: session, every: every, prompt: text, runner: form.runs, account: form.changedAccount,
+        session: session, every: every, prompt: text, runner: form.runner, account: form.changedAccount,
         model: form.changedModel, timeout: form.changedTimeout)
     }
   }

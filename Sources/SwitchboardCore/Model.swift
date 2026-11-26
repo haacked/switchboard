@@ -493,6 +493,17 @@ public func oneLine(_ text: String, max: Int = 70) -> String {
   return truncated(line, max: max)
 }
 
+/// The text without terminal escape sequences and without control characters other than line breaks, with each tab as
+/// a space. A terminal would act on them where `sb` prints the text.
+func stripTerminalCodes(_ text: String) -> String {
+  let unescaped = text.replacingOccurrences(of: "\u{1B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+  var stripped = ""
+  stripped.unicodeScalars.append(
+    contentsOf: unescaped.unicodeScalars.lazy.map { $0 == "\t" ? " " : $0 }
+      .filter { $0.properties.generalCategory != .control || Character($0).isNewline })
+  return stripped
+}
+
 /// The text cut to `max` characters, the last of which is an ellipsis.
 public func truncated(_ text: String, max: Int) -> String {
   text.count <= max ? text : String(text.prefix(max - 1)) + "…"

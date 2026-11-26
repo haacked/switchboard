@@ -79,6 +79,21 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     permissionSuggestions = event.data["permission_suggestions"].flatMap { $0 == .null ? nil : $0 }
   }
 
+  /// The card that an sbd event opens for a request that waits for the user's decision. It has none of a permission
+  /// prompt's fields, and the caller sets the request.
+  init(decision event: Event, kind: Kind, tool: String, summary: String) {
+    id = event.id
+    session = event.session
+    self.kind = kind
+    self.tool = tool
+    self.summary = summary
+    input = [:]
+    questions = []
+    since = event.t
+    deferred = false
+    hookClosed = false
+  }
+
   /// Whether an allow can also apply the extra. Auto mode needs a permission
   /// card from manual or acceptEdits mode whose hook still waits. Always needs
   /// a permission card whose hook still waits and whose suggestions
@@ -507,9 +522,18 @@ extension StringProtocol {
   /// The text with each control character but tab shown as an escape, so
   /// that printed text can't move the cursor or erase what a terminal shows.
   public var printable: String {
-    unicodeScalars.map {
-      $0.properties.generalCategory == .control && $0 != "\t" ? "\\u{\(String($0.value, radix: 16))}" : String($0)
-    }.joined()
+    func escapes(_ scalar: Unicode.Scalar) -> Bool { scalar.properties.generalCategory == .control && scalar != "\t" }
+    guard unicodeScalars.contains(where: escapes) else { return String(self) }
+    var scalars = String.UnicodeScalarView()
+    scalars.reserveCapacity(utf8.count)
+    for scalar in unicodeScalars {
+      if escapes(scalar) {
+        scalars.append(contentsOf: "\\u{\(String(scalar.value, radix: 16))}".unicodeScalars)
+      } else {
+        scalars.append(scalar)
+      }
+    }
+    return String(scalars)
   }
 
   /// Each line of the text made `printable`, so newlines stay.

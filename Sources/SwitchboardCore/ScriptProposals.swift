@@ -9,10 +9,10 @@ public struct ScriptProposal: Codable, Equatable, Sendable {
   public struct Before: Codable, Equatable, Sendable {
     public var command: String
     public var timeout: Int64?
-    /// The interval, when the edit changes it. Without it, the schedule's interval was `every`.
-    public var every: Int64?
+    /// The interval in ms.
+    public var every: Int64
 
-    public init(command: String, timeout: Int64?, every: Int64? = nil) {
+    public init(command: String, timeout: Int64?, every: Int64) {
       self.command = command
       self.timeout = timeout
       self.every = every
@@ -67,6 +67,11 @@ public struct ScriptProposal: Codable, Equatable, Sendable {
     oneLine(command.replacingOccurrences(of: "\t", with: " ")).printable
   }
 
+  /// What the session asks for, such as `run a script` or `change schedule r1 to run a script`.
+  public var whatText: String {
+    schedule.map { "change schedule \($0) to run a script" } ?? "run a script"
+  }
+
   /// The interval and the timeout, such as `every 1h · timeout 10m (default)`.
   public var timingText: String {
     let limit =
@@ -105,16 +110,7 @@ extension Card {
   /// The card that a `script_proposed` event opens, or nil when its data isn't a proposal.
   public init?(scriptProposal event: Event) {
     guard let proposal = try? JSONCoding.convert(event.data, to: ScriptProposal.self) else { return nil }
-    id = event.id
-    session = event.session
-    kind = .script
-    tool = "propose_script"
-    summary = proposal.line
-    input = [:]
-    questions = []
-    since = event.t
-    deferred = false
-    hookClosed = false
+    self.init(decision: event, kind: .script, tool: "propose_script", summary: proposal.line)
     scriptProposal = Box(proposal)
   }
 }
@@ -123,11 +119,8 @@ extension Client {
   /// Asks sbd about the proposal every 0.5 s until the user decides or `timeout` seconds pass, and returns the last
   /// status.
   public func awaitScriptProposal(_ id: Int64, timeout: TimeInterval) throws -> ScriptProposalStatus {
-    let deadline = Date().addingTimeInterval(timeout)
-    while true {
-      let status = try call("schedule-pending", ["card": .number(Double(id))], as: ScriptProposalStatus.self)
-      if status.decision != .pending || Date() >= deadline { return status }
-      Thread.sleep(forTimeInterval: 0.5)
+    try awaitDecision("schedule-pending", card: id, timeout: timeout) { (status: ScriptProposalStatus) in
+      status.decision != .pending
     }
   }
 }

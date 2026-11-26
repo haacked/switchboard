@@ -267,11 +267,11 @@ let usage = """
                                   to allow or deny it, with --reason R as why.
                                   A command that runs a file in the worktree
                                   runs code that the session's Claude can edit
-    schedule --pending <card> [--wait]
-                                  print the decision on a proposed script:
-                                  pending, approved with the schedule's id,
-                                  denied, expired, or stale. --wait waits up
-                                  to 60s for it
+    schedule --pending <card> [--timeout S]
+                                  wait up to S seconds (default 60) for the
+                                  decision on a proposed script, and print
+                                  it: pending, approved with the schedule's
+                                  id, denied, expired, or stale
     schedule <session> --every <interval> [--timeout <duration>] --headless
       [--account A] [--model M] <prompt>
                                   run the prompt on the interval as its own
@@ -662,9 +662,8 @@ struct Args {
   var switches: Set<String> = []
 
   /// After `literalAfter` positional arguments, every argument is text, even
-  /// one that starts with --. Flags for those commands go before the session. `switches` names flags that this
-  /// command reads as switches although other commands give them a value.
-  init(_ argv: ArraySlice<String>, literalAfter: Int = .max, switchFlags: Set<String> = []) {
+  /// one that starts with --. Flags for those commands go before the session.
+  init(_ argv: ArraySlice<String>, literalAfter: Int = .max) {
     let valued = Set([
       "--branch", "--base", "--name", "--prompt", "--model", "--account", "--until", "--timeout", "--session",
       "--since", "--host", "--every",
@@ -675,7 +674,7 @@ struct Args {
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
       "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent", "--run",
-    ]).union(waitFlags.keys).subtracting(switchFlags)
+    ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
       if positional.count >= literalAfter {
@@ -1069,10 +1068,6 @@ if ["group", "groups"].contains(command), ["note", "describe"].contains(argv.fir
 if flagsAfterSession.contains(command), a.positional.count > 1, a.positional[1].hasPrefix("--") { a = Args(argv) }
 if ["schedule", "schedules"].contains(command), scheduleSubcommands.contains(a.positional.first ?? "") {
   a = Args(argv)
-}
-// `sb spawn --wait` takes a value, and `sb schedule --pending N --wait` is a switch.
-if ["schedule", "schedules"].contains(command), argv.contains("--pending") {
-  a = Args(argv, switchFlags: ["--wait"])
 }
 
 switch command {

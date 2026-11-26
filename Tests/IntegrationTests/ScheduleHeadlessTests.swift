@@ -205,7 +205,7 @@ extension Instance {
 
   // MARK: Arguments and environment
 
-  /// The first success criterion of Stage 4: print mode, the model, the other account, and no settings file.
+  /// A run uses print mode, the model, the other account, and no settings file.
   @Test func aRunRunsClaudeInPrintModeWithItsModelUnderTheOtherAccount() throws {
     let sbd = try Instance(accounts: ["A", "B"], inheriting: .unset)
     try sbd.sb("account", "use", "A")

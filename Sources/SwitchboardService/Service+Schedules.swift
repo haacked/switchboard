@@ -4,7 +4,7 @@ import SwitchboardCore
 /// Schedules: prompts that sbd sends to a session on an interval, and scripts that sbd runs in its folder.
 extension Service {
   /// The `schedule`, `schedules`, `remove-schedule`, `pause-schedule`,
-  /// `edit-schedule`, `run-schedule`, `schedule-log`, and `schedule-pending` requests. Each takes an optional
+  /// `edit-schedule`, `run-schedule`, and `schedule-pending` requests. Each takes an optional
   /// `group` and `caller`, which a scoped MCP server sends. With `group`, a
   /// request acts only on the group's sessions and on the caller. It runs on
   /// the state queue, so the scope check and the change happen in one step.
@@ -19,7 +19,6 @@ extension Service {
     case "pause-schedule": return try pauseSchedule(args)
     case "edit-schedule": return try editSchedule(args, origin: origin, caller: caller)
     case "run-schedule": return try runSchedule(args)
-    case "schedule-log": return try scheduleLog(args)
     case "schedule-pending": return try JSON(encoding: scriptProposalStatus(args))
     default: throw APIError("unknown request \(op)")
     }
@@ -120,22 +119,24 @@ extension Service {
   static let scriptRefusal = "only you or a Manager conversation can add a script schedule"
 
   /// Who sent a request that would store a script or change a script's command or timeout. `.inProcess` is sbd. A
-  /// client's ancestry decides the rest, as the other `scriptAuthority` says. A request from a host is refused. It
-  /// runs on the state queue, after `install` of a fresh snapshot.
+  /// client's ancestry decides the rest, as the other `scriptAuthority` says. It runs on the state queue, after
+  /// `install` of a fresh snapshot.
   func scriptAuthority(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> ScriptAuthority {
-    try refuseScriptFromHost(origin)
-    guard let ancestry = try caller.ancestry(command: "sb schedule --script") else { return .sbd }
-    return try scriptAuthority(args, origin: origin, ancestry: ancestry)
+    try scriptAuthority(args, origin: origin, ancestry: caller.ancestry(command: "sb schedule --script"))
   }
 
   /// Who sent a request from a client with `ancestry`, which must reach launchd, because a walk that stopped early
-  /// may have missed a pane. A client below no session's pane or run and outside sbd's tmux server is the user, when
+  /// may have missed a pane. A request from a host is refused before `ancestry` is read, and nil ancestry is sbd's
+  /// own code. A client below no session's pane or run and outside sbd's tmux server is the user, when
   /// the request claims no `caller` and has no `group` scope. A client below exactly one session is that session,
   /// when the request claims no other `caller`: a Manager conversation without a group scope stores, the Operator is
   /// refused, and any other session proposes. Every other shape is refused. It runs on the state queue, after
   /// `install` of a fresh snapshot.
-  func scriptAuthority(_ args: JSON, origin: RequestOrigin, ancestry: Set<Int>) throws -> ScriptAuthority {
+  func scriptAuthority(
+    _ args: JSON, origin: RequestOrigin, ancestry readAncestry: @autoclosure () throws -> Set<Int>?
+  ) throws -> ScriptAuthority {
     try refuseScriptFromHost(origin)
+    guard let ancestry = try readAncestry() else { return .sbd }
     guard ancestry.contains(1) else {
       throw APIError(
         "sbd can't follow the process that sent the request up to launchd, so it can't tell whether the request comes from a session. Run it again"
@@ -204,11 +205,11 @@ extension Service {
     return try JSON(encoding: rows.sorted { order($0) < order($1) })
   }
 
-  /// Removes the schedule. A headless or script schedule's run in flight is cancelled, and its logs go.
+  /// Removes the schedule. It cancels a headless or script schedule's run in flight and deletes its logs.
   private func removeSchedule(_ args: JSON) throws -> JSON {
     let (id, schedule) = try ownedSchedule(args)
     try update(id) { $0.removeSchedule(schedule.id) }
-    if (schedule.runner ?? .session) != .session {
+    if schedule.isDetached {
       cancelRun(schedule.id)
       try? FileManager.default.removeItem(atPath: runLogFolder(id, schedule.id))
     }
@@ -236,7 +237,7 @@ extension Service {
   /// caller check. It runs on the state queue.
   func editChecksCaller(_ args: JSON) -> Bool {
     guard let schedule = (try? ownedSchedule(args))?.schedule else { return false }
-    return schedule.gate != nil || (schedule.runner ?? .session) != .session
+    return schedule.gate != nil || schedule.isDetached
   }
 
   /// Changes the interval, the prompt or command, the timeout, a headless schedule's account or model, or several.
@@ -249,7 +250,7 @@ extension Service {
     let (id, found) = try ownedSchedule(args)
     if found.gate != nil { try checkTopupCaller(args, origin: origin, caller: caller) }
     var request = try JSONCoding.convert(args, to: ScheduleRequest.self)
-    let runner = found.runner ?? .session
+    let runner = found.runsAs
     if request.runner != nil, try Schedule.Runner(parsing: request.runner) != runner {
       throw APIError(
         "schedule \(found.id) runs as \(runner.rawValue), and a schedule's runner can't change. Add a new schedule instead"
@@ -281,11 +282,11 @@ extension Service {
     return try JSON(encoding: scheduleRow(id, schedule))
   }
 
-  /// The log of one of the schedule's runs, with whether the run's output passed the log's cap. `run` 1, or no
-  /// `run`, is the newest run.
-  private func scheduleLog(_ args: JSON) throws -> JSON {
+  /// The path of the log of one of the schedule's runs, with the run's number. `run` 1, or no `run`, is the newest
+  /// run. It runs on the state queue.
+  func scheduleLogPath(_ args: JSON) throws -> (path: String, run: Int, schedule: String) {
     let (id, schedule) = try ownedSchedule(args)
-    guard (schedule.runner ?? .session) != .session else {
+    guard schedule.isDetached else {
       throw APIError("schedule \(schedule.id) sends its prompt into the session, so it keeps no log")
     }
     let n = args["run"]?.int ?? 1
@@ -296,9 +297,14 @@ extension Service {
           ? "schedule \(schedule.id) has not run yet"
           : "schedule \(schedule.id) has \(history.count) runs, so it has no run \(n)")
     }
-    let path = "\(runLogFolder(id, schedule.id))/\(history[n - 1].t).log"
-    guard let data = FileManager.default.contents(atPath: path) else {
-      throw APIError("run \(n) of schedule \(schedule.id) has no log")
+    return ("\(runLogFolder(id, schedule.id))/\(history[n - 1].t).log", n, schedule.id)
+  }
+
+  /// The log at `scheduleLogPath`'s path, with whether the run's output passed the log's cap. It runs off the state
+  /// queue, because a log can hold a mebibyte.
+  static func scheduleLog(_ log: (path: String, run: Int, schedule: String)) throws -> JSON {
+    guard let data = FileManager.default.contents(atPath: log.path) else {
+      throw APIError("run \(log.run) of schedule \(log.schedule) has no log")
     }
     let text = String(decoding: data, as: UTF8.self)
     return ["text": .string(text), "truncated": .bool(text.hasSuffix("\(DetachedRun.cutMarker)\n"))]
@@ -377,13 +383,15 @@ extension Service {
         opened = (gate, status)
       }
     }
+    // A detached run waits for a free slot before the guard reads the session.
+    if schedule.isDetached, runsInFlight.count >= Schedule.maxRunning { return }
     // A run makes the session busy, so the guard runs again before each schedule.
     guard let e = entries[id],
       Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
         == nil
     else { return }
-    if (schedule.runner ?? .session) != .session {
-      if runsInFlight.count < Schedule.maxRunning { dispatchRun(id, schedule, now: now) }
+    if schedule.isDetached {
+      dispatchRun(id, schedule, now: now)
       return
     }
     let text = opened.map { $0.gate.fallbackMessage(status: $0.status, prompt: schedule.prompt) } ?? schedule.prompt
@@ -482,17 +490,21 @@ extension Service {
     return (merging, removing)
   }
 
-  /// Saves the schedule's next run, sets it on `schedule`, and returns how many due times the run skips. It returns
-  /// nil when the next run can't be saved.
-  func saveNextRun(_ id: String, _ schedule: inout Schedule, now: Int64) -> Int? {
+  /// Saves the schedule's next run, and with `running` the start of a headless or script run at `now`, sets them on
+  /// `schedule`, and returns how many due times the run skips. It returns nil when the save fails.
+  func saveNextRun(_ id: String, _ schedule: inout Schedule, now: Int64, running: Bool = false) -> Int? {
     let (next, skipped) = schedule.fired(at: now)
+    let mark = { (s: inout Schedule) in
+      s.next = next
+      if running { s.running = now }
+    }
     do {
-      try changeSchedule(id, schedule.id) { $0.next = next }
+      try changeSchedule(id, schedule.id, mark)
     } catch {
       logLine("can't run schedule \(schedule.id) of \(id), because its next run can't be saved: \(error)")
       return nil
     }
-    schedule.next = next
+    mark(&schedule)
     return skipped
   }
 

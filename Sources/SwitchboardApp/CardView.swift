@@ -131,8 +131,7 @@ struct CardView: View {
     if let proposal = card.scriptProposal?.value {
       VStack(alignment: .leading, spacing: 8) {
         let asker = model.allSessions.first { $0.id == card.session }?.name ?? card.session
-        let what = proposal.schedule.map { "change loop \($0) to run a script" } ?? "run a script on a loop"
-        Text(verbatim: "\(asker) wants to \(what)").font(.headline)
+        Text(verbatim: "\(asker) wants to \(proposal.whatText)").font(.headline)
         VStack(alignment: .leading, spacing: 2) {
           Text(verbatim: "In \(proposal.targetName) · \(proposal.folder)")
           Text(verbatim: proposal.timingText)
@@ -157,12 +156,7 @@ struct CardView: View {
             .clickAnchor("script-card-\(card.id)-allow")
           Button("Deny") { model.answer(card, behavior: "deny") }
           Spacer()
-          HStack(spacing: 4) {
-            Text("Expires in")
-            Text(Date(timeIntervalSince1970: Double(proposal.expires) / 1000), style: .relative)
-          }
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          ExpiryLabel(ms: proposal.expires)
         }
         Text("Nothing runs until you allow it. \(ScriptProposal.worktreeNote)")
           .font(.caption)
@@ -208,12 +202,7 @@ struct CardView: View {
             .buttonStyle(.borderedProminent)
           Button("Cancel") { model.answer(card, behavior: "deny") }
           Spacer()
-          HStack(spacing: 4) {
-            Text("Expires in")
-            Text(Date(timeIntervalSince1970: Double(message.expires) / 1000), style: .relative)
-          }
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          ExpiryLabel(ms: message.expires)
         }
         Text(
           "Nothing is sent until you send it. The text can quote PR comments or logs, so read it before you send it."
@@ -402,5 +391,19 @@ struct ToolInputBox: View {
         TextBox(text: text, maxHeight: maxHeight)
       }
     }
+  }
+}
+
+/// `Expires in` and the time left until `ms`, in milliseconds since the epoch, which counts down as it shows.
+struct ExpiryLabel: View {
+  let ms: Int64
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Text("Expires in")
+      Text(Date(timeIntervalSince1970: Double(ms) / 1000), style: .relative)
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
   }
 }

@@ -274,3 +274,24 @@ extension Service {
     record(card.session, "deferred", ["card": .number(Double(card.id))])
   }
 }
+
+/// A card that waits for the user's decision, while it is open or after a stored decision closed it.
+enum DecisionCard {
+  case open(Card)
+  /// The event that opened the card, and the event that closed it.
+  case decided(opened: Event, decision: Event)
+}
+
+extension Service {
+  /// The open card `id` of `kind`, else the `opened` event with that id and the `decided` event that closed its
+  /// card, or nil when sbd has neither. It runs on the state queue.
+  func decisionCard(_ id: Int64, kind: Card.Kind, opened: String, decided: String) throws -> DecisionCard? {
+    if let card = entries.values.lazy.flatMap(\.facts.cards).first(where: { $0.id == id && $0.kind == kind }) {
+      return .open(card)
+    }
+    guard let event = try store.event(id: id), event.kind == opened,
+      let decision = try store.decision(card: id, session: event.session, kind: decided)
+    else { return nil }
+    return .decided(opened: event, decision: decision)
+  }
+}

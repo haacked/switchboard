@@ -12,17 +12,18 @@ public enum DetachedRun {
     /// The last line of the output that isn't blank, without control characters, at most `tailMax` characters.
     /// Nil when the run printed nothing.
     public var tail: String?
-    public var timedOut: Bool
-    public var cancelled: Bool
+    /// Why sbd ended the run. Nil when the child exited on its own.
+    public var reason: Reason?
   }
+
+  /// Why sbd ended a run.
+  public enum Reason: Equatable, Sendable { case timedOut, cancelled }
 
   /// The most bytes of output that the log keeps.
   public static let logCap = 1 << 20
   /// The log's last line when the output passed `logCap`.
   public static let cutMarker = "[output cut at 1 MiB]"
   public static let tailMax = 200
-  /// How long the process group has between SIGTERM and SIGKILL, in seconds.
-  static let killGrace = 5.0
   /// How many of the output's last bytes `tail` reads.
   private static let tailBytes = 8192
 
@@ -42,12 +43,9 @@ public enum DetachedRun {
   /// opened, or a program or folder that can't be used.
   public static func run(
     executable: String, arguments: [String], env: [String: String], folder: String, log: String, timeout: Double,
-    cancelled: () -> Bool = { false }, onStart: (pid_t) -> Void = { _ in }
+    killGrace: Double = 5, cancelled: () -> Bool = { false }, onStart: (pid_t) -> Void = { _ in }
   ) throws -> Result {
-    if ([executable] + arguments + Array(env.keys) + Array(env.values)).contains(where: \.hasNul) {
-      throw APIError(
-        "\((executable as NSString).lastPathComponent) can't run with a NUL character in its arguments or environment")
-    }
+    try refuseNul(executable: executable, arguments: arguments, env: env)
     let logFd = open(log, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0o600)
     guard logFd >= 0 else { throw APIError("can't open the log \(log): \(String(cString: strerror(errno)))") }
     defer { close(logFd) }
@@ -67,15 +65,12 @@ public enum DetachedRun {
     onStart(pid)
     kill(pid, SIGCONT)
     var output = Output(logFd: logFd)
-    let ended = watch(pid, readFd: readFd, timeout: timeout, cancelled: cancelled, output: &output)
+    let ended = watch(
+      pid, readFd: readFd, timeout: timeout, killGrace: killGrace, cancelled: cancelled, output: &output)
     output.finish()
     let ms = Int64((DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1_000_000)
-    return Result(
-      exit: ended.status.flatMap(exitStatus), ms: ms, tail: output.tail, timedOut: ended.reason == .timedOut,
-      cancelled: ended.reason == .cancelled)
+    return Result(exit: ended.status.flatMap(exitStatus), ms: ms, tail: output.tail, reason: ended.reason)
   }
-
-  private enum Reason { case timedOut, cancelled }
 
   /// Starts the child as the leader of a new session, with every signal at its default action and none blocked,
   /// because sbd ignores SIGPIPE and an ignored signal stays ignored across exec. Only stdin, stdout, and stderr
@@ -118,7 +113,7 @@ public enum DetachedRun {
   /// cancel, or the child's exit. It returns the child's wait status, nil when it can't be read, and why sbd ended
   /// the run, nil when the child exited on its own.
   private static func watch(
-    _ pid: pid_t, readFd: Int32, timeout: Double, cancelled: () -> Bool, output: inout Output
+    _ pid: pid_t, readFd: Int32, timeout: Double, killGrace: Double, cancelled: () -> Bool, output: inout Output
   ) -> (status: Int32?, reason: Reason?) {
     let start = DispatchTime.now().uptimeNanoseconds
     func elapsed() -> Double { Double(DispatchTime.now().uptimeNanoseconds - start) / 1e9 }
@@ -252,10 +247,9 @@ public enum DetachedRun {
     }
 
     var tail: String? {
-      let text = String(decoding: last, as: UTF8.self)
       guard
-        let line = text.split(whereSeparator: \.isNewline).lazy.map(DetachedRun.printable)
-          .last(where: { !$0.isEmpty })
+        let line = stripTerminalCodes(String(decoding: last, as: UTF8.self)).split(whereSeparator: \.isNewline)
+          .lazy.map({ $0.trimmingCharacters(in: .whitespaces) }).last(where: { !$0.isEmpty })
       else { return nil }
       return truncated(line, max: DetachedRun.tailMax)
     }
@@ -263,20 +257,6 @@ public enum DetachedRun {
 
   /// The first line of the text that isn't blank, cleaned and cut as `Result.tail` is, or nil when every line is blank.
   public static func firstLine(_ text: String) -> String? {
-    text.split(whereSeparator: \.isNewline).lazy.map(printable).first { !$0.isEmpty }.map {
-      truncated($0, max: tailMax)
-    }
-  }
-
-  /// The line without terminal escape sequences and control characters, and without spaces at its ends. A terminal
-  /// would act on them where `sb` prints the tail.
-  static func printable(_ line: Substring) -> String {
-    let unescaped = String(line).replacingOccurrences(
-      of: "\u{1B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
-    let scalars = unescaped.unicodeScalars.map { $0 == "\t" ? " " : $0 }
-      .filter { $0.properties.generalCategory != .control }
-    var text = ""
-    text.unicodeScalars.append(contentsOf: scalars)
-    return text.trimmingCharacters(in: .whitespaces)
+    SwitchboardCore.firstLine(stripTerminalCodes(text)).map { truncated($0, max: tailMax) }
   }
 }

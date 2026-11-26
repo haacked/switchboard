@@ -149,7 +149,7 @@ private func classify(
     }
   }
 
-  // MARK: Shapes that propose (refused until the card ships)
+  // MARK: Shapes that propose
 
   @Test(arguments: [Pane.claude, .shell])
   func aWorkSessionsPaneProposesOnThatSession(_ pane: Pane) throws {
@@ -406,7 +406,7 @@ private func classify(
   }
 }
 
-// MARK: - Stage 5: who approves a script card
+// MARK: - Who approves a script card
 
 /// The `schedule` request that the app's loop editor sends for a new script, as `BoardModel.addSchedule` builds it:
 /// no `caller` and no `group`, with the user as the author.
@@ -677,7 +677,7 @@ extension ScheduleScriptCallerTests {
           .makeSchedule(id: "r1", now: created)
         var data = proposalData("git pull").object ?? [:]
         data["schedule"] = "r1"
-        data["before"] = ["command": "git fetch"]
+        data["before"] = ["command": "git fetch", "every": 3_600_000]
         let card = service.queue.sync { () -> Int64 in
           service.entries[work]?.session.addSchedule(prompt)
           return service.record(work, "script_proposed", .object(data)).id

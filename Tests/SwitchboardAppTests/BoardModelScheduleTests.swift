@@ -204,7 +204,7 @@ private func rowAnsweringModel() -> (BoardModel, SentRequests) {
   }
 }
 
-// MARK: - Runners and output (Stage 5)
+// MARK: - Runners and output
 
 /// A model whose `send` records every request and answers `schedule-log` with `text`.
 @MainActor

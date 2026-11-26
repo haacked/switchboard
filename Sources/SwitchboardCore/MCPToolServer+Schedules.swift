@@ -14,19 +14,14 @@ extension MCPToolServer {
     return try client.call(op, request)
   }
 
-  /// The arguments of `keys`, with `headless: true` sent as `runner` headless, and a `script` sent as the request's
-  /// `prompt` and `runner` script. sbd refuses `runner` on an edit of a schedule that runs otherwise. It throws for
-  /// arguments with both a prompt and a script, or with both `headless` and a script.
+  /// The arguments of `keys`, with the runner that `ScheduleRequest.runner` reads from `headless` and `script`, and a
+  /// `script` sent as the request's `prompt`. sbd refuses `runner` on an edit of a schedule that runs otherwise.
   func scheduleRequest(_ args: JSON, _ keys: [String]) throws -> [String: JSON] {
     var request = pick(args, keys)
-    if args["headless"]?.bool == true {
-      if args["script"] != nil { throw APIError("send script or headless, not both") }
-      request["runner"] = "headless"
-    }
-    guard let script = args["script"] else { return request }
-    if args["prompt"] != nil { throw APIError("send script or prompt, not both") }
-    request["prompt"] = script
-    request["runner"] = "script"
+    let runner = try ScheduleRequest.runner(
+      headless: args["headless"]?.bool == true, script: args["script"] != nil, prompt: args["prompt"] != nil)
+    if let runner { request["runner"] = .string(runner.rawValue) }
+    if let script = args["script"] { request["prompt"] = script }
     return request
   }
 }

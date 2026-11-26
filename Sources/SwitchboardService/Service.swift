@@ -595,7 +595,11 @@ public final class Service {
           install(fresh)
           return try approveWait(request.args, caller: caller)
         })
-    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log",
+    case "schedule-log":
+      // A log can hold a mebibyte, so sbd reads it after it leaves the state queue.
+      let log = try prepared(request, origin: origin) { try scheduleLogPath(request.args) }
+      return .success(try Self.scheduleLog(log))
+    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule",
       "schedule-pending":
       // The caller checks of a top-up, a script, and a coordinator's headless schedule read the client's panes, so
       // they take a new snapshot.
@@ -704,7 +708,7 @@ public final class Service {
 
   /// Takes the steps that `request` needs before it acts, then runs `body`
   /// on the state queue.
-  func prepared(_ request: Request, origin: RequestOrigin, _ body: () throws -> JSON) throws -> JSON {
+  func prepared<T>(_ request: Request, origin: RequestOrigin, _ body: () throws -> T) throws -> T {
     let hostRead = try readHost(for: request)
     if Service.settles.contains(request.op), let id = try? queue.sync(execute: { try messaged(request) }) {
       settle(id)
@@ -1621,26 +1625,17 @@ public final class Service {
     if local {
       try writeClaudeSettings(id, session)
       args += ["--settings", home.claudeSettings(id)]
-      args += launchMCPArgs(id, session)
-      // Claude in Chrome loads even under `--strict-mcp-config`. Nobody reads the operator's chat, so it has no use
-      // for a browser.
-      if session.kind == .operator { args.append("--no-chrome") }
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
     }
-    if let model = SessionModel.launch(
-      kind: session.kind, stored: session.model, coordinatorModel: managerModel,
-      operatorModel: operatorSettings.model)
-    {
-      args += ["--model", model]
-    }
-    if local { args += config.claudeArgs }
-    // After claudeArgs, so that the session's mode wins over a global one.
     let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
-    if let mode { args += ["--permission-mode", mode] }
-    if let system = appendedSystemPrompt(for: session) {
-      args += ["--append-system-prompt", system]
-    }
+    args += ClaudeLaunch.options(
+      mcpArgs: local ? launchMCPArgs(id, session) : [], noChrome: local && session.kind == .operator,
+      model: SessionModel.launch(
+        kind: session.kind, stored: session.model, coordinatorModel: managerModel,
+        operatorModel: operatorSettings.model),
+      claudeArgs: local ? config.claudeArgs : [], permissionMode: mode,
+      appendedPrompt: appendedSystemPrompt(for: session))
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
     let site = self.site(for: session)
@@ -2075,13 +2070,12 @@ public final class Service {
   ) throws -> [String] {
     var picked: [String] = []
     var panes: [String] = []
-    _ = try prepared(request, origin: origin) {
+    try prepared(request, origin: origin) {
       picked = try pick()
       for id in picked {
         try stop(id, reason: reason)
         if entries[id]?.session.host == nil { panes.append(paneName(id, .claude)) }
       }
-      return .null
     }
     if !panes.isEmpty {
       let terminals = mac.terminals()

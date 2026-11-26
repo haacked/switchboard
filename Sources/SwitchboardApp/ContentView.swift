@@ -190,10 +190,8 @@ struct ContentView: View {
     }
     .sheet(isPresented: model.isPresent(\.loopOutput)) {
       if let output = model.loopOutput {
-        LoopOutputSheet(
-          output: output, schedule: model.allSessions.lazy.flatMap(\.allSchedules).first { $0.id == output.schedule }
-        )
-        .environmentObject(model)
+        LoopOutputSheet(output: output, schedule: model.schedule(output.schedule))
+          .environmentObject(model)
       }
     }
     .inlineLinks(model)

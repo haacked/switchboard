@@ -204,9 +204,7 @@ extension Service {
   func transcriptFinder(_ id: String) -> () -> String? {
     let e = entries[id]!
     let session = e.session
-    let account =
-      session.host == nil
-      ? (paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder) : transcriptAccount(session)
+    let account = session.host == nil ? paneAccountFolder(id) : transcriptAccount(session)
     let known = e.facts.transcriptPath
     let machine = site(for: session).machine
     return {

@@ -50,7 +50,7 @@ func cards(_ a: Args) {
     case .script:
       // `allow` stores exactly this command for exactly this session, so both print in full.
       guard let p = card.scriptProposal?.value else { break }
-      out("\(head)  \(p.schedule.map { "change schedule \($0) to run a script" } ?? "run a script")")
+      out("\(head)  \(p.whatText)")
       out("      in \(p.targetName) (\(p.target))  \(p.folder)")
       out("      \(p.timingText)")
       for line in p.command.split(separator: "\n", omittingEmptySubsequences: false) { out("      $ \(line)") }

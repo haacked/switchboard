@@ -13,7 +13,7 @@ extension Service {
   ) throws -> JSON {
     if let open = entries[proposer]?.facts.cards.first(where: { $0.kind == .script }) {
       throw APIError(
-        "card \(open.id) already proposes a script that waits for the user. Read its decision with: sb schedule --pending \(open.id). End your turn."
+        "card \(open.id) already proposes a script that waits for the user. Read its decision with: sb schedule --pending \(open.id) --timeout 0. End your turn."
       )
     }
     let length = schedule.prompt.count
@@ -23,11 +23,10 @@ extension Service {
       )
     }
     let session = entries[target]!.session
-    let changed = before.flatMap { $0.every == schedule.every ? nil : $0.every }
     let proposal = ScriptProposal(
       target: target, targetName: session.name, folder: session.cwd, every: schedule.every, command: schedule.prompt,
       timeout: schedule.timeout, reason: oneLine(reason ?? "", max: TriageCard.lineLength), schedule: before?.id,
-      before: before.map { .init(command: $0.prompt, timeout: $0.timeout, every: changed) },
+      before: before.map { .init(command: $0.prompt, timeout: $0.timeout, every: $0.every) },
       expires: nowMs() + ScriptProposal.expirySeconds * 1000)
     let event = record(proposer, "script_proposed", try JSON(encoding: proposal))
     return try JSON(encoding: ScriptProposalStatus(pending: event.id, decision: .pending))
@@ -85,25 +84,28 @@ extension Service {
   private func holds(_ schedule: Schedule, _ proposal: ScriptProposal) -> Bool {
     guard let before = proposal.before, schedule.runner == .script else { return false }
     return schedule.prompt == before.command && schedule.timeout == before.timeout
-      && schedule.every == (before.every ?? proposal.every)
+      && schedule.every == before.every
   }
 
   /// The proposal that the card id names: pending while its card is open, else the decision that closed it.
   func scriptProposalStatus(_ args: JSON) throws -> ScriptProposalStatus {
     guard let id = args["card"]?.int.map(Int64.init) else { throw APIError("name a proposal by its card number") }
-    if entries.values.lazy.flatMap(\.facts.cards).contains(where: { $0.id == id && $0.kind == .script }) {
-      return ScriptProposalStatus(pending: id, decision: .pending)
+    switch try decisionCard(id, kind: .script, opened: "script_proposed", decided: "script_decided") {
+    case .open?: return ScriptProposalStatus(pending: id, decision: .pending)
+    case .decided(_, let decided)?:
+      if let decision = decided.data["decision"]?.string.flatMap(ScriptDecision.init(rawValue:)) {
+        return ScriptProposalStatus(pending: id, decision: decision, schedule: decided.data["schedule"]?.string)
+      }
+    case nil: break
     }
-    guard let opened = try store.event(id: id), opened.kind == "script_proposed",
-      let decided = try store.decision(card: id, session: opened.session, kind: "script_decided"),
-      let decision = decided.data["decision"]?.string.flatMap(ScriptDecision.init(rawValue:))
-    else { throw APIError("no script proposal \(id)") }
-    return ScriptProposalStatus(pending: id, decision: decision, schedule: decided.data["schedule"]?.string)
+    throw APIError("no script proposal \(id)")
   }
 
   /// Records `expired` for each proposal whose time ran out.
   func expireScriptProposals(now: Int64) {
-    let due = entries.values.flatMap(\.facts.cards).filter { $0.scriptProposal.map { now >= $0.expires } == true }
+    let due = entries.values.flatMap { e in
+      e.facts.cards.filter { $0.kind == .script && $0.scriptProposal.map { now >= $0.expires } == true }
+    }
     for card in due { _ = try? closeScriptProposal(card, .expired) }
   }
 

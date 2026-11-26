@@ -2,7 +2,7 @@ import Foundation
 import SwitchboardCore
 import Testing
 
-/// Stage 5 of the schedule plan: a session that may not add a script itself proposes it, which opens a `script` card
+/// A session that may not add a script itself proposes it, which opens a `script` card
 /// on the proposing session and stores nothing. The schedule exists only after the user allows the card from outside
 /// every session: the app's `answer` or `choose`, or `sb allow` in a terminal. Allow stores exactly the values that
 /// the card holds. Deny, expiry after a day, and a stale edit close the card and store nothing.
@@ -70,7 +70,7 @@ import Testing
   /// What `sb schedule --pending <card> --json` reports without waiting. A proposal that still waits may exit with an
   /// error, so this reads stdout whatever the status.
   func status(_ sbd: Instance, _ card: Int64) throws -> JSON {
-    let r = try sbd.run(["schedule", "--pending", String(card), "--json"])
+    let r = try sbd.run(["schedule", "--pending", String(card), "--timeout", "0", "--json"])
     return try #require(JSON.parse(r.stdout), Comment(rawValue: "stdout: \(r.stdout)\nstderr: \(r.stderr)"))
   }
 
@@ -402,7 +402,7 @@ import Testing
     let done = DispatchSemaphore(value: 0)
     nonisolated(unsafe) var waited: Result<CommandResult, Error>?
     DispatchQueue(label: "pendingWaitsForTheDecision").async {
-      waited = Result { try sbd.run(["schedule", "--pending", String(card), "--wait", "--json"]) }
+      waited = Result { try sbd.run(["schedule", "--pending", String(card), "--timeout", "30", "--json"]) }
       done.signal()
     }
     #expect(try status(sbd, card)["decision"]?.string == "pending")

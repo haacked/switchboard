@@ -713,9 +713,8 @@ public enum Triage {
 
   /// What a script proposal's item says it does: where and how often the command runs.
   static func scriptSummary(_ p: ScriptProposal) -> String {
-    let what = p.schedule.map { "change schedule \($0) to run this command" } ?? "run this command"
     return
-      "Claude asks to \(what) in \(p.targetName) (\(codeSpan(p.folder))), \(p.timingText). Nothing runs until you allow it."
+      "Claude asks to \(p.whatText) in \(p.targetName) (\(codeSpan(p.folder))), \(p.timingText). Nothing runs until you allow it."
   }
 
   /// The proposal's reason, the command that an edit replaces, and the note about code in the session's folder.

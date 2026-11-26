@@ -156,10 +156,16 @@ public struct Schedule: Codable, Equatable, Sendable {
     self.gate = gate
   }
 
+  /// The runner, with nil read as `session`.
+  public var runsAs: Runner { runner ?? .session }
+
+  /// Whether sbd runs the schedule itself, headless or as a script, instead of sending its prompt into the session.
+  public var isDetached: Bool { runsAs != .session }
+
   /// How long a run may take, in ms: the stored timeout, or else 30m for a headless run and 10m for a script, cut to
   /// the interval, so a run ends before the next one is due.
   public var runTimeout: Int64 {
-    timeout ?? Schedule.defaultTimeout(runner ?? .session, every: every)
+    timeout ?? Schedule.defaultTimeout(runsAs, every: every)
   }
 
   /// The timeout of a run that has none of its own: 30m for a headless run and 10m for a script, cut to `every`.
@@ -204,27 +210,43 @@ public struct Schedule: Codable, Equatable, Sendable {
     guard every != nil || prompt != nil || account != nil || model != nil || timeout != nil else {
       throw APIError("an edit needs every, an interval such as 30m, a prompt, an account, a model, or a timeout")
     }
-    let runner = self.runner ?? .session
-    if account != nil || model != nil, runner != .headless {
-      throw APIError(Schedule.accountRefusal(runner))
-    }
-    if timeout != nil, runner == .session { throw APIError(Schedule.timeoutRefusal) }
+    try Schedule.refuseRunOptions(runsAs, account: account, model: model, timeout: timeout)
     var edited = self
     if let every {
       let (ms, soonest) = try Schedule.interval(every, after: now)
       edited.every = ms
       if paused != true { edited.next = min(next, soonest) }
     }
-    if let prompt { edited.prompt = try Schedule.cleanPrompt(prompt, runner: runner) }
-    if let account { edited.account = account.isEmpty ? nil : try Schedule.cleanAccount(account) }
-    if let model { edited.model = model.isEmpty ? nil : try Schedule.cleanModel(model) }
-    if let timeout { edited.timeout = try Schedule.parseTimeout(timeout) }
-    if let stored = edited.timeout, stored > edited.every {
-      throw APIError(
-        "the timeout \(Schedule.intervalText(stored)) is longer than the interval \(Schedule.intervalText(edited.every)). A run must end before the next one is due, so shorten the timeout or lengthen the interval"
-      )
-    }
+    if let prompt { edited.prompt = try Schedule.cleanPrompt(prompt, runner: runsAs) }
+    try edited.setRunOptions(account: account, model: model, timeout: timeout, emptyResets: true)
     return edited
+  }
+
+  /// Refuses an account or a model for a schedule that doesn't run headless, and a timeout for one that sends its
+  /// prompt into the session.
+  static func refuseRunOptions(_ runner: Runner, account: String?, model: String?, timeout: String?) throws {
+    if account != nil || model != nil, runner != .headless { throw APIError(accountRefusal(runner)) }
+    if timeout != nil, runner == .session { throw APIError(timeoutRefusal) }
+  }
+
+  /// Sets the account, the model, and the timeout that are not nil, after `refuseRunOptions` passed them. An empty
+  /// account or model resets it to the session's when `emptyResets` is true, and is refused otherwise. It refuses a
+  /// stored timeout longer than the interval.
+  fileprivate mutating func setRunOptions(account: String?, model: String?, timeout: String?, emptyResets: Bool) throws
+  {
+    if let account { self.account = account.isEmpty && emptyResets ? nil : try Schedule.cleanAccount(account) }
+    if let model { self.model = model.isEmpty && emptyResets ? nil : try Schedule.cleanModel(model) }
+    if let timeout { self.timeout = try Schedule.parseTimeout(timeout) }
+    if let stored = self.timeout, let problem = Schedule.timeoutProblem(stored, every: every) {
+      throw APIError(problem)
+    }
+  }
+
+  /// Why sbd refuses a timeout of `ms` on a schedule that runs every `every` ms, or nil when it takes it.
+  public static func timeoutProblem(_ ms: Int64, every: Int64) -> String? {
+    guard ms > every else { return nil }
+    return
+      "the timeout \(intervalText(ms)) is longer than the interval \(intervalText(every)). A run must end before the next one is due, so shorten the timeout or lengthen the interval"
   }
 
   /// The prompt or command without the spaces and newlines at its ends. A script needs a command, and no run can
@@ -244,7 +266,7 @@ public struct Schedule: Codable, Equatable, Sendable {
   }
 
   /// The model lands in claude's argv, so `Manager.modelProblem` checks it.
-  static func cleanModel(_ model: String) throws -> String {
+  public static func cleanModel(_ model: String) throws -> String {
     if let problem = Manager.modelProblem(model) { throw APIError("model \(model): \(problem)") }
     if model.hasNul { throw APIError("the model name can't hold a NUL character") }
     return model
@@ -372,7 +394,7 @@ public struct Schedule: Codable, Equatable, Sendable {
   /// prompt. A headless schedule without its own model or account leaves that part out, because it runs on the
   /// session's. `sb schedule ls` and the app show it.
   public var whatText: String {
-    switch runner ?? .session {
+    switch runsAs {
     case .session: oneLine(prompt)
     case .script: "$ \(oneLine(prompt))"
     case .headless:
@@ -407,12 +429,12 @@ public struct Schedule: Codable, Equatable, Sendable {
   public static func duplicate(of schedule: Schedule, in existing: [Schedule]) -> String? {
     let prompt = schedule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     for other in existing where other.id != schedule.id {
-      if (other.runner ?? .session) == (schedule.runner ?? .session), other.account == schedule.account,
+      if other.runsAs == schedule.runsAs, other.account == schedule.account,
         other.model == schedule.model,
         other.prompt.trimmingCharacters(in: .whitespacesAndNewlines) == prompt
       {
         let does =
-          switch schedule.runner ?? .session {
+          switch schedule.runsAs {
           case .session: "sends this prompt to the session"
           case .headless: "runs this prompt headless on the same account and model"
           case .script: "runs this command"
@@ -442,12 +464,12 @@ extension Session {
   public var allSchedules: [Schedule] { (schedules ?? []) + (jobs ?? []) }
 
   public func schedule(_ id: String) -> Schedule? {
-    allSchedules.first { $0.id == id }
+    schedules?.first { $0.id == id } ?? jobs?.first { $0.id == id }
   }
 
   /// A schedule with a runner goes to `jobs`, because an older sbd would decode it in `schedules` as a prompt to send.
   public mutating func addSchedule(_ schedule: Schedule) {
-    if (schedule.runner ?? .session) == .session {
+    if !schedule.isDetached {
       schedules = (schedules ?? []) + [schedule]
     } else {
       jobs = (jobs ?? []) + [schedule]
@@ -563,45 +585,41 @@ public struct ScheduleRequest: Codable, Equatable, Sendable {
   /// that sends its prompt into the session takes a gate.
   public func makeSchedule(id: String, now: Int64, group: (id: String, name: String)? = nil) throws -> Schedule {
     let runner = try Schedule.Runner(parsing: runner)
-    if runner != .session {
-      return try makeDetached(id: id, runner: runner, now: now)
+    if runner != .session, gate != nil {
+      throw APIError("a top-up sends its prompt into the session, so it can't run headless or as a script")
     }
-    if account != nil || model != nil { throw APIError(Schedule.accountRefusal(runner)) }
-    if timeout != nil { throw APIError(Schedule.timeoutRefusal) }
+    try Schedule.refuseRunOptions(runner, account: account, model: model, timeout: timeout)
     if gate != nil && group == nil { throw APIError("a top-up needs a group") }
     guard let every else { throw APIError("a schedule needs every, an interval such as 30m") }
     let (ms, next) = try Schedule.interval(every, after: now)
-    guard let request = gate, let group else {
-      return Schedule(
-        id: id, prompt: try Schedule.cleanPrompt(prompt), every: ms, next: next, by: try Author(parsing: by),
-        created: now)
+    var schedule: Schedule
+    if let request = gate, let group {
+      let gate = try request.make(group: group.id)
+      let prompt =
+        (try? Schedule.cleanPrompt(prompt))
+        ?? Schedule.Gate.defaultPrompt(groupName: group.name, repo: gate.repo, target: gate.target)
+      schedule = Schedule(
+        id: id, prompt: prompt, every: ms, next: next, by: try Author(parsing: by), created: now, gate: gate)
+    } else {
+      schedule = Schedule(
+        id: id, prompt: try Schedule.cleanPrompt(prompt, runner: runner), every: ms, next: next,
+        by: try Author(parsing: by), created: now)
     }
-    let gate = try request.make(group: group.id)
-    let prompt =
-      (try? Schedule.cleanPrompt(prompt))
-      ?? Schedule.Gate.defaultPrompt(groupName: group.name, repo: gate.repo, target: gate.target)
-    return Schedule(
-      id: id, prompt: prompt, every: ms, next: next, by: try Author(parsing: by), created: now, gate: gate)
+    if runner != .session { schedule.runner = runner }
+    try schedule.setRunOptions(account: account, model: model, timeout: timeout, emptyResets: false)
+    return schedule
   }
 
-  /// A headless or script schedule. `edited` checks the timeout, so an add and an edit refuse the same timeouts.
-  private func makeDetached(id: String, runner: Schedule.Runner, now: Int64) throws -> Schedule {
-    if gate != nil {
-      throw APIError("a top-up sends its prompt into the session, so it can't run headless or as a script")
-    }
-    if runner == .script, account != nil || model != nil { throw APIError(Schedule.accountRefusal(runner)) }
-    guard let every else { throw APIError("a schedule needs every, an interval such as 30m") }
-    let (ms, next) = try Schedule.interval(every, after: now)
-    var schedule = Schedule(
-      id: id, prompt: try Schedule.cleanPrompt(prompt, runner: runner), every: ms, next: next,
-      by: try Author(parsing: by), created: now)
-    schedule.runner = runner
-    if let account { schedule.account = try Schedule.cleanAccount(account) }
-    if let model { schedule.model = try Schedule.cleanModel(model) }
-    if let timeout {
-      schedule = try schedule.edited(every: nil, prompt: nil, timeout: timeout, now: now)
-    }
-    return schedule
+  /// The runner that a request's `headless` and `script` options pick, or nil for neither, which sends the prompt
+  /// into the session. A script's command travels in the request's `prompt`, so a script can't come with a prompt
+  /// or with `headless`. `name` spells an option as the caller writes it, such as `--script`.
+  public static func runner(headless: Bool, script: Bool, prompt: Bool, name: (String) -> String = { $0 }) throws
+    -> Schedule.Runner?
+  {
+    guard script else { return headless ? .headless : nil }
+    if headless { throw APIError("send \(name("script")) or \(name("headless")), not both") }
+    if prompt { throw APIError("send \(name("script")) or \(name("prompt")), not both") }
+    return .script
   }
 }
 

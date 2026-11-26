@@ -14,12 +14,15 @@ private let cutMarker = "[output cut at 1 MiB]"
 /// Runs the script with `/bin/sh -c` through `DetachedRun.run`, in `folder`, with its log at `folder/run.log`.
 private func run(
   _ script: String, env: [String: String] = ProcessInfo.processInfo.environment, folder: String,
-  timeout: Double = 30, cancelled: @escaping @Sendable () -> Bool = { false }
+  timeout: Double = 30, killGrace: Double = 5, cancelled: @escaping @Sendable () -> Bool = { false }
 ) throws -> DetachedRun.Result {
   try DetachedRun.run(
     executable: "/bin/sh", arguments: ["-c", script], env: env, folder: folder, log: logPath(folder),
-    timeout: timeout, cancelled: cancelled)
+    timeout: timeout, killGrace: killGrace, cancelled: cancelled)
 }
+
+/// The grace between SIGTERM and SIGKILL in the tests that wait for SIGKILL.
+private let shortGrace = 0.3
 
 private func logPath(_ folder: String) -> String { "\(folder)/run.log" }
 
@@ -64,8 +67,8 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
     let result = try run("echo hello", folder: folder)
 
     #expect(result.exit == 0)
-    #expect(!result.timedOut)
-    #expect(!result.cancelled)
+    #expect(result.reason != .timedOut)
+    #expect(result.reason != .cancelled)
   }
 
   @Test func aRunThatExitsThreeReportsExitThree() throws {
@@ -74,7 +77,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
     let result = try run("echo partial; exit 3", folder: folder)
 
     #expect(result.exit == 3)
-    #expect(!result.timedOut)
+    #expect(result.reason != .timedOut)
   }
 
   @Test func theLogHoldsStdout() throws {
@@ -164,7 +167,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("cat; echo done", folder: folder, timeout: 10)
 
-    #expect(!result.timedOut)
+    #expect(result.reason != .timedOut)
     #expect(result.exit == 0)
     #expect(logText(folder) == "done\n")
   }
@@ -221,8 +224,8 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("exec sleep 30", folder: folder, timeout: 0.5)
 
-    #expect(result.timedOut)
-    #expect(!result.cancelled)
+    #expect(result.reason == .timedOut)
+    #expect(result.reason != .cancelled)
     #expect(since(start) < 0.5 + 2 * scale)
   }
 
@@ -233,22 +236,23 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("sleep 30 & echo $! > '\(pidFile)'; wait", folder: folder, timeout: 0.5)
 
-    #expect(result.timedOut)
+    #expect(result.reason == .timedOut)
     let pid = try #require(writtenPid(pidFile))
     #expect(gone(pid))
   }
 
-  /// An ignored signal stays ignored across exec, so only SIGKILL, 5 s after SIGTERM, ends this process.
+  /// An ignored signal stays ignored across exec, so only SIGKILL, the grace after SIGTERM, ends this process.
   @Test func aTimeoutEndsAProcessThatIgnoresSIGTERMWithSIGKILL() throws {
     let folder = try scratchFolder()
     let pidFile = "\(folder)/pid"
     let start = Date()
 
-    let result = try run("trap '' TERM; echo $$ > '\(pidFile)'; exec sleep 30", folder: folder, timeout: 0.5)
+    let result = try run(
+      "trap '' TERM; echo $$ > '\(pidFile)'; exec sleep 30", folder: folder, timeout: 0.5, killGrace: shortGrace)
 
-    #expect(result.timedOut)
-    #expect(since(start) >= 0.5 + 4.5)
-    #expect(since(start) < 0.5 + 5 + 3 * scale)
+    #expect(result.reason == .timedOut)
+    #expect(since(start) >= 0.5 + shortGrace - 0.05)
+    #expect(since(start) < 0.5 + shortGrace + 3 * scale)
     let pid = try #require(writtenPid(pidFile))
     #expect(gone(pid))
   }
@@ -272,7 +276,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("echo before; exec sleep 30", folder: folder, timeout: 0.5)
 
-    #expect(result.timedOut)
+    #expect(result.reason == .timedOut)
     #expect(logText(folder).contains("before"))
   }
 
@@ -283,10 +287,11 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
     let pidFile = "\(folder)/pid"
 
     let result = try run(
-      #"sh -c "trap '' TERM; exec sleep 30" > /dev/null 2>&1 & echo $! > '\#(pidFile)'; exit 0"#, folder: folder)
+      #"sh -c "trap '' TERM; exec sleep 30" > /dev/null 2>&1 & echo $! > '\#(pidFile)'; exit 0"#, folder: folder,
+      killGrace: shortGrace)
 
     #expect(result.exit == 0)
-    #expect(!result.timedOut)
+    #expect(result.reason != .timedOut)
     let pid = try #require(writtenPid(pidFile))
     #expect(gone(pid))
   }
@@ -314,7 +319,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
     let result = try run("kill -9 $$", folder: folder)
 
     #expect(result.exit == nil)
-    #expect(!result.timedOut)
+    #expect(result.reason != .timedOut)
   }
 
   /// The tail reaches a terminal through `sb schedule ls`, which would act on an escape sequence.
@@ -349,8 +354,8 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("exec sleep 30", folder: folder, cancelled: { since(start) > 0.3 })
 
-    #expect(result.cancelled)
-    #expect(!result.timedOut)
+    #expect(result.reason == .cancelled)
+    #expect(result.reason != .timedOut)
     #expect(since(start) < 0.3 + 2 * scale)
   }
 
@@ -370,7 +375,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("echo done", folder: folder, cancelled: { false })
 
-    #expect(!result.cancelled)
+    #expect(result.reason != .cancelled)
   }
 
   // MARK: The log cap
@@ -382,7 +387,7 @@ private func since(_ start: Date) -> Double { Date().timeIntervalSince(start) }
 
     let result = try run("head -c 52428800 /dev/zero | tr '\\0' 'x'; echo; echo end", folder: folder, timeout: 40)
 
-    #expect(!result.timedOut)
+    #expect(result.reason != .timedOut)
     #expect(result.exit == 0)
     #expect(logSize(folder) <= logCap + cutMarker.utf8.count + 2)
     #expect(logSize(folder) >= logCap)

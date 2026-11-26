@@ -175,12 +175,18 @@ extension Service {
     let marker = "SB_SESSION_ID=\(sessionId)"
     var found: [Int: Int64] = [:]
     for user in users where !sparing.contains(user.pid) {
-      guard let row = table.row(user.pid), row.ppid == 1, !row.isZombie, row.startTime > 0,
-        row.startTime >= since * 1000, environment(user.pid).contains(marker)
+      guard let row = table.row(user.pid), isOrphan(row), row.startTime >= since * 1000,
+        environment(user.pid).contains(marker)
       else { continue }
       found[user.pid] = row.startTime
     }
     return found
+  }
+
+  /// Whether launchd adopted the process: its parent is pid 1, it is not a zombie, and the table holds its start
+  /// time. A table parsed from `ps` holds start time 0, so it gives no orphan.
+  static func isOrphan(_ row: ProcessRow) -> Bool {
+    row.ppid == 1 && !row.isZombie && row.startTime > 0
   }
 
   /// Sends SIGTERM to each leftover on this Mac, waits up to `stopWaitSeconds` for them to exit, then sends

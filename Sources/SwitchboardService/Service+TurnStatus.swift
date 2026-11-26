@@ -107,7 +107,7 @@ extension Service {
       let projects = ((path as NSString).deletingLastPathComponent as NSString).deletingLastPathComponent as NSString
       if projects.lastPathComponent == "projects" { return projects.deletingLastPathComponent }
     }
-    return paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
+    return paneAccountFolder(id)
   }
 
   /// The conversations that `claude agents` lists with a running claude that sits idle.
