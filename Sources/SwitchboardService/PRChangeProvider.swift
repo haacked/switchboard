@@ -28,6 +28,8 @@ protocol PRChangeProvider: AnyObject {
   /// provider that covers whole repos ignores the list or uses it as a filter.
   func setInterest(_ prs: [PRRef])
   func stop()
+  /// Tries again at once what made the provider unavailable, as `sb sources --recheck` asks.
+  func recheck()
   var status: ProviderStatus { get }
 }
 

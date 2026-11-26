@@ -651,7 +651,9 @@ public final class Service {
     case "sources":
       // The report waits for the poller's queue. A poll holds that queue while it waits for the state queue, so the
       // report runs off the state queue.
-      return .success(try JSON(encoding: github?.sources() ?? PRSources(providers: [])))
+      return .success(
+        try JSON(encoding: github?.sources(recheck: request.args["recheck"]?.bool ?? false) ?? PRSources(providers: []))
+      )
     case "ref-details":
       // A fetch waits on GitHub, so it runs off the state queue.
       return .success(try JSON(encoding: referenceDetails(request.args)))

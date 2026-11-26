@@ -18,6 +18,8 @@ final class FakeProvider: PRChangeProvider {
   let signals: ChangeSignals
   private(set) var sink: (any PRChangeSink)?
   private(set) var starts = 0
+  /// How many times `recheck()` ran.
+  private(set) var rechecks = 0
   /// Each interest list that the hub gave the provider, oldest first.
   private(set) var interests: [[PRRef]] = []
   var availability: Availability = .available
@@ -40,6 +42,8 @@ final class FakeProvider: PRChangeProvider {
   func setInterest(_ prs: [PRRef]) { interests.append(prs) }
 
   func stop() {}
+
+  func recheck() { rechecks += 1 }
 
   var status: ProviderStatus { ProviderStatus(availability: availability, counts: counts) }
 

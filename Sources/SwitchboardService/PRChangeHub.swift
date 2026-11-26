@@ -11,6 +11,9 @@ final class PRChangeHub {
   private let byPreference: [any PRChangeProvider]
   let queue: DispatchQueue
   weak var reader: (any PRReader)?
+  /// In shadow mode a signal or a coverage change never asks for a read and never changes a poll rate. The hub only
+  /// counts what the providers report and measures it against the poller's reads.
+  let shadow: Bool
   /// The clock in ms. Tests replace it.
   var now: () -> Int64 = nowMs
 
@@ -35,6 +38,8 @@ final class PRChangeHub {
     var headSha: String
     /// When the poller last read the PR, in ms.
     var polled: Int64
+    /// The fields of the read that shadow mode compares between reads.
+    var snapshot: ShadowTally.Snapshot? = nil
   }
 
   /// The PRs of the last poll, by node id.
@@ -73,8 +78,31 @@ final class PRChangeHub {
   }
 
   private var counts: [String: Counts] = [:]
+  /// What shadow mode measured for each provider, by provider id.
+  private var tallies: [String: ShadowTally] = [:]
 
-  init(providers: [any PRChangeProvider], queue: DispatchQueue) {
+  /// A read that the next poll's tally takes, with the PR's read before it and the time that read's poll started.
+  private struct HeldRead {
+    var id: String
+    var ref: PRRef
+    var snapshot: ShadowTally.Snapshot
+    var previous: (snapshot: ShadowTally.Snapshot, polled: Int64)?
+    /// When each provider went live for the PR, by provider id, as the poll ended. A provider that drops the PR
+    /// after the poll, as after a merge, still counts its miss.
+    var liveSince: [String: Int64]
+  }
+
+  private var heldReads: [HeldRead] = []
+  /// When each provider's coverage of a scope went down in the last `dedupeMs`, by provider id. A down that a poll
+  /// held on the queue reaches the hub after the poll, so the tally checks these times.
+  private var downs: [String: [(scope: CoverageChange.Scope, at: Int64)]] = [:]
+  /// When the poll that made `heldReads` ended, in ms.
+  private var heldAt: Int64 = 0
+  private var pendingReads = 0
+  private var reviewOnlyReads = 0
+
+  init(providers: [any PRChangeProvider], queue: DispatchQueue, shadow: Bool = false) {
+    self.shadow = shadow
     self.providers = providers
     byPreference = providers.enumerated().sorted { a, b in
       let (ka, kb) = (a.element.signals.rawValue.nonzeroBitCount, b.element.signals.rawValue.nonzeroBitCount)
@@ -98,10 +126,21 @@ final class PRChangeHub {
       self.hub = hub
     }
 
-    func signal(_ s: PRSignal) { hub?.onQueue { $0.receive(s, from: self.provider) } }
-    func coverage(_ change: CoverageChange) { hub?.onQueue { $0.receive(change, from: self.provider) } }
+    /// Each report is stamped with its arrival here, because the poller's queue can hold it until a poll ends.
+    func signal(_ s: PRSignal) {
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(s, from: self.provider, at: at) }
+    }
+    func coverage(_ change: CoverageChange) {
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(change, from: self.provider, at: at) }
+    }
     func availability(_ provider: String, _ a: Availability) {
-      hub?.onQueue { $0.receive(a, from: self.provider) }
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(a, from: self.provider, at: at) }
     }
   }
 
@@ -116,10 +155,14 @@ final class PRChangeHub {
   /// that hasn't happened.
   func cycleEnded(known: [String: KnownPR], interest: [PRRef]) {
     dispatchPrecondition(condition: .onQueue(queue))
+    if shadow {
+      tallyLastPoll()
+      holdForTally(known)
+    }
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
-    settleNeededReads()
+    if !shadow { settleNeededReads() }
     signalReads = signalReads.filter { known[$0.key] != nil }
     for (provider, scopes) in coverage {
       coverage[provider] = scopes.filter { scope, _ in
@@ -132,12 +175,71 @@ final class PRChangeHub {
       counts[p.id, default: Counts()].wanted = wanted.count
       p.setInterest(wanted)
     }
-    requestCatchUps(fromPoll: true)
+    if !shadow { requestCatchUps(fromPoll: true) }
+  }
+
+  /// Adds the reads of PRs that polled at the pending rate in one poll, and how many of them only awaited a review.
+  func countPendingReads(total: Int, reviewOnly: Int) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    pendingReads += total
+    reviewOnlyReads += reviewOnly
+  }
+
+  /// Keeps the PRs that this poll read, with the time the poll ended, for the next poll's tally. A signal that a
+  /// provider sends during a poll waits on the poller's queue until the poll ends, so the tally runs once those
+  /// signals are in. Must run before `known` takes the new reads.
+  private func holdForTally(_ reads: [String: KnownPR]) {
+    heldAt = now()
+    heldReads = reads.compactMap { id, pr in
+      let old = known[id]
+      guard let snapshot = pr.snapshot, old.map({ pr.polled > $0.polled }) ?? true else { return nil }
+      let previous = old.flatMap { o in o.snapshot.map { (snapshot: $0, polled: o.polled) } }
+      let liveSince = Dictionary(providers.compactMap { p in live(p.id, for: pr.ref)?.since.map { (p.id, $0) } }) {
+        a, _ in a
+      }
+      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, previous: previous, liveSince: liveSince)
+    }.sorted { $0.id < $1.id }
+  }
+
+  /// Gives each provider's tally the reads that the last poll held, with each PR's read before them, and logs each
+  /// miss. A read shows its change at the time its poll ended. The read before it counts from when its poll started,
+  /// so a source that went live during that poll can't count a miss.
+  private func tallyLastPoll() {
+    let now = now()
+    for p in providers {
+      var t = tallies.removeValue(forKey: p.id) ?? ShadowTally()
+      for read in heldReads {
+        let missed = t.read(
+          read.id, previous: read.previous, now: read.snapshot, polled: heldAt,
+          liveSince: liveSince(read, of: p.id))
+        if !missed.isEmpty {
+          logLine(
+            "github: \(p.id) sent no signal for \(read.ref.repo)#\(read.ref.number) before a poll showed its "
+              + missed.joined(separator: ", ") + " change")
+        }
+      }
+      t.prune(now: now)
+      tallies[p.id] = t
+    }
+    heldReads = []
+    downs = downs.compactMapValues { d in
+      let kept = d.filter { now - $0.at < Self.dedupeMs }
+      return kept.isEmpty ? nil : kept
+    }
+  }
+
+  /// When the provider went live for the held read's PR, unless its coverage of the PR went down between then and
+  /// the end of the read's poll.
+  private func liveSince(_ read: HeldRead, of provider: String) -> Int64? {
+    guard let since = read.liveSince[provider] else { return nil }
+    let dropped = (downs[provider] ?? []).contains { $0.scope.contains(read.ref) && $0.at >= since && $0.at <= heldAt }
+    return dropped ? nil : since
   }
 
   /// The signals of the provider that covers each covered PR, by node id. The poll rates read it.
   func coveredSignals() -> [String: ChangeSignals] {
     dispatchPrecondition(condition: .onQueue(queue))
+    guard !shadow else { return [:] }
     return known.compactMapValues { coveringProvider(of: $0)?.signals }
   }
 
@@ -149,10 +251,12 @@ final class PRChangeHub {
       providers: providers.map { p in
         let c = counts[p.id] ?? Counts()
         let status = p.status
+        let t = tallies[p.id] ?? ShadowTally()
         var source = PRSources.Source(
           id: p.id, state: "live", changedAt: c.changedAt, wanted: c.wanted,
           covered: covering.filter { $0 == p.id }.count, signals: c.signals, reads: c.reads,
-          lastSignalAt: c.lastSignalAt, counts: status.counts)
+          lastSignalAt: c.lastSignalAt, counts: status.counts, shadow: shadow, matched: t.matched,
+          unmatched: t.unmatched, misses: t.misses, medianLeadMs: t.medianLeadMs)
         switch status.availability {
         case .available: break
         case .unavailable(let reason, let retryAt):
@@ -160,19 +264,25 @@ final class PRChangeHub {
         case .off: source.state = "off"
         }
         return source
-      })
+      }, pendingReads: pendingReads, reviewOnlyReads: reviewOnlyReads)
   }
 
   // MARK: The providers' side
 
-  private func receive(_ s: PRSignal, from provider: String) {
+  private func receive(_ s: PRSignal, from provider: String, at arrived: Int64) {
     let now = now()
     counts[provider, default: Counts()].signals += 1
     counts[provider]?.lastSignalAt = now
     let key = "\(provider) \(s.id)"
     if let at = seen[key], now - at < Self.dedupeMs { return }
     seen[key] = now
-    for id in targets(of: s.target).sorted() { requestSignalRead(id, s, provider: provider, now: now) }
+    for id in targets(of: s.target).sorted() {
+      if shadow {
+        tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: arrived)
+      } else {
+        requestSignalRead(id, s, provider: provider, now: now)
+      }
+    }
   }
 
   /// The node ids of the PRs that the poller tracks and that the target names.
@@ -232,16 +342,17 @@ final class PRChangeHub {
     }
   }
 
-  private func receive(_ change: CoverageChange, from provider: String) {
+  private func receive(_ change: CoverageChange, from provider: String, at arrived: Int64) {
     reports += 1
     switch change {
     case .live(let scope, let since, let gap):
       set(scope, Coverage(since: since, gap: gap, order: reports), for: provider)
-      if gap {
+      if gap && !shadow {
         counts[provider, default: Counts()].reads += requestCatchUps(fromPoll: false, in: scope, of: provider)
       }
     case .down(let scope, _):
       set(scope, Coverage(since: nil, gap: false, order: reports), for: provider)
+      if shadow { downs[provider, default: []].append((scope, arrived)) }
     }
   }
 
@@ -252,7 +363,7 @@ final class PRChangeHub {
     coverage[provider] = scopes
   }
 
-  private func receive(_ a: Availability, from provider: String) {
+  private func receive(_ a: Availability, from provider: String, at arrived: Int64) {
     guard counts[provider]?.reported != a else { return }
     counts[provider, default: Counts()].reported = a
     counts[provider]?.changedAt = now()
@@ -262,7 +373,10 @@ final class PRChangeHub {
     case .off: logLine("github: \(provider) is off")
     }
     // A provider that can't report covers nothing until it reports `live` again.
-    if a != .available { coverage[provider] = nil }
+    if a != .available {
+      coverage[provider] = nil
+      if shadow { downs[provider, default: []].append((.everything, arrived)) }
+    }
   }
 
   // MARK: Coverage

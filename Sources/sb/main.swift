@@ -548,8 +548,10 @@ let usage = """
     poll --stats                  show the GitHub requests and points since sbd
                                   started, by why each PR was read, without
                                   polling
-    sources [--json]              list the sources of PR changes that sbd reads
-                                  besides polling, with their state and counts
+    sources [--json] [--recheck]  list the sources of PR changes that sbd reads
+                                  besides polling, with their state and counts.
+                                  --recheck first asks each unavailable source
+                                  to try GitHub again
     snapshots [--write]           show how the last start built each session,
                                   from a snapshot or a full replay; --write
                                   first saves a snapshot of every session
@@ -1305,7 +1307,7 @@ case "issues":
 case "ref":
   refCommand(a)
 case "sources":
-  let result = call("sources")
+  let result = call("sources", ["recheck": .bool(a.switches.contains("--recheck"))])
   if a.json {
     printJSON(result)
   } else {

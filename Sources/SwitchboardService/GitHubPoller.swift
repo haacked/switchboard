@@ -210,10 +210,13 @@ final class GitHubPoller {
   ) {
     self.service = service
     self.settings = settings
-    self.client = GitHubClient(settings: settings)
+    let client = GitHubClient(settings: settings)
+    self.client = client
     self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
     self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
-    self.hub = PRChangeHub(providers: providers, queue: queue)
+    let events: [any PRChangeProvider] =
+      settings.events.mode == .off ? [] : [EventStreamsProvider(client: client, settings: settings.events)]
+    self.hub = PRChangeHub(providers: providers + events, queue: queue, shadow: settings.events.mode == .shadow)
     hub.reader = self
   }
 
@@ -292,9 +295,11 @@ final class GitHubPoller {
     queue.sync { cycle(all: all) }
   }
 
-  /// The sources of PR changes, for `sb sources`.
-  func sources() -> PRSources {
+  /// The sources of PR changes, for `sb sources`. With `recheck`, each provider first tries again what made it
+  /// unavailable.
+  func sources(recheck: Bool = false) -> PRSources {
     guard !hub.providers.isEmpty else { return PRSources(providers: []) }
+    if recheck { hub.providers.forEach { $0.recheck() } }
     return queue.sync { hub.report() }
   }
 
@@ -629,6 +634,12 @@ final class GitHubPoller {
     }
     let triggers = GitHub.dueReads(candidates, all: all, now: now, policy: pollPolicy())
     let ids = triggers.keys.sorted()
+    if !hub.providers.isEmpty {
+      let pending = ids.filter { triggers[$0] == .pending }
+      hub.countPendingReads(
+        total: pending.count,
+        reviewOnly: pending.count { GitHub.onlyAwaitsReview(prs[$0]?.pr, needs: candidates[$0]?.needs ?? []) })
+    }
     // A request's cost goes to its PRs after the request returns, because a PR's repo is known only after its first read.
     func count(_ prIds: [String], from before: Stats, to after: Stats, countsReads: Bool) {
       let served = prIds.map { id in

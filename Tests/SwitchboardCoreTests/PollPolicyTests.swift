@@ -101,3 +101,74 @@ import Testing
     #expect(GitHub.dueReads(candidates, all: false, now: Self.now, policy: .uniform(Self.rates)) == ["held": .pending])
   }
 }
+
+/// Which PRs poll at the pending rate only because they await a review, which stage 5's slower rates would serve.
+@Suite struct OnlyAwaitsReviewTests {
+  static let awaiting = samplePR(reviewDecision: .reviewRequired, reviewDecisionRead: true)
+  static let approved = samplePR(reviewDecision: .approved, checks: "SUCCESS", reviewDecisionRead: true)
+
+  @Test func anOpenPRThatAwaitsReviewOnlyAwaitsReview() {
+    #expect(GitHub.onlyAwaitsReview(Self.awaiting, needs: []))
+  }
+
+  @Test(arguments: [[.reviews], [.state], [.reviews, .state]] as [ChangeSignals])
+  func aWaitThatNeedsOnlyReviewsOrStateOnlyAwaitsReview(_ needs: ChangeSignals) {
+    #expect(GitHub.onlyAwaitsReview(Self.awaiting, needs: needs))
+  }
+
+  @Test(arguments: [nil, "SUCCESS", "FAILURE", "ERROR"] as [String?])
+  func aPRWhoseChecksAreNotRunningOnlyAwaitsReview(_ checks: String?) {
+    #expect(GitHub.onlyAwaitsReview(samplePR(reviewDecision: .reviewRequired, checks: checks), needs: []))
+  }
+
+  /// An approved PR that a `merge` or `review` wait reads at the pending rate only awaits that review or merge.
+  @Test(arguments: [[.state], [.reviews]] as [ChangeSignals])
+  func anApprovedPRWithAReviewOrMergeWaitOnlyAwaitsReview(_ needs: ChangeSignals) {
+    #expect(GitHub.onlyAwaitsReview(Self.approved, needs: needs))
+  }
+
+  @Test func anApprovedPRWithoutAWaitDoesNotPollAtThePendingRate() {
+    #expect(!GitHub.onlyAwaitsReview(Self.approved, needs: []))
+  }
+
+  @Test(arguments: ["PENDING", "EXPECTED"])
+  func aPRWithRunningChecksDoesNotOnlyAwaitReview(_ checks: String) {
+    #expect(!GitHub.onlyAwaitsReview(samplePR(reviewDecision: .reviewRequired, checks: checks), needs: [.reviews]))
+  }
+
+  @Test func aPRWhoseMergeabilityIsUnknownDoesNotOnlyAwaitReview() {
+    #expect(!GitHub.onlyAwaitsReview(samplePR(mergeable: .unknown, reviewDecision: .reviewRequired), needs: []))
+  }
+
+  @Test(arguments: [.merged, .closed] as [PRState])
+  func aPRThatIsNotOpenDoesNotOnlyAwaitReview(_ state: PRState) {
+    #expect(!GitHub.onlyAwaitsReview(samplePR(state: state, reviewDecision: .reviewRequired), needs: [.state]))
+  }
+
+  @Test(
+    arguments: [
+      Wait.Kind.ci.needs, Wait.Kind.queue.needs, Wait.Kind.deploy.needs, [.reviews, .comments], [.head], .all,
+    ] as [ChangeSignals])
+  func aWaitThatNeedsMoreThanReviewsAndStateDoesNotOnlyAwaitReview(_ needs: ChangeSignals) {
+    #expect(!GitHub.onlyAwaitsReview(Self.awaiting, needs: needs))
+  }
+
+  /// A draft doesn't await review, so only a wait can put it at the pending rate.
+  @Test func aDraftWithoutAWaitDoesNotOnlyAwaitReview() {
+    #expect(!GitHub.onlyAwaitsReview(samplePR(draft: true, reviewDecision: .reviewRequired), needs: []))
+  }
+
+  @Test func aDraftWithAReviewWaitOnlyAwaitsReview() {
+    #expect(GitHub.onlyAwaitsReview(samplePR(draft: true, reviewDecision: .reviewRequired), needs: [.reviews]))
+  }
+
+  /// Only UNKNOWN keeps a PR pending. A PR that GitHub gave no mergeability for is not pending.
+  @Test func aPRWithoutAMergeabilityOnlyAwaitsReview() {
+    #expect(GitHub.onlyAwaitsReview(samplePR(mergeable: nil, reviewDecision: .reviewRequired), needs: []))
+  }
+
+  @Test(arguments: [[], [.reviews], .all] as [ChangeSignals])
+  func aPRThatWasNeverReadDoesNotOnlyAwaitReview(_ needs: ChangeSignals) {
+    #expect(!GitHub.onlyAwaitsReview(nil, needs: needs))
+  }
+}
