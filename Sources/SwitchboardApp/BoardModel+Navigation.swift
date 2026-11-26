@@ -2,7 +2,7 @@ import AppKit
 import SwitchboardCore
 
 extension BoardModel {
-  /// The sessions in the order the sidebar lists them: the Manager conversations, then each section's rows. A
+  /// The sessions in the order the sidebar lists them: the conversations, then each section's rows. A
   /// collapsed section's rows are left out, because the sidebar hides them. So are the archived conversations
   /// while the archive is closed.
   var sidebarOrder: [String] {
@@ -44,15 +44,12 @@ extension BoardModel {
     if !presentingSheet { requestListFocus() }
   }
 
-  /// Opens the Archive group that lists the conversation when it is archived: the sidebar's for a Manager
-  /// conversation, the group column's for a group chat.
+  /// Opens the Archive groups that list the conversation when it is archived: the sidebar's, and the group column's
+  /// for a group chat.
   func openArchive(of session: SessionSummary) {
-    guard session.activity?.archived == true else { return }
-    if session.kind == .chat, let group = session.chat {
-      shownChatArchives.insert(group)
-    } else if session.kind == .manager {
-      showingArchive = true
-    }
+    guard session.activity?.archived == true, session.kind.isUserConversation else { return }
+    showingArchive = true
+    if session.kind == .chat, let group = session.chat { shownChatArchives.insert(group) }
   }
 
   /// The focused Board card while the Board still shows it, else the first card, as the Inbox falls back to

@@ -202,11 +202,13 @@ import Testing
 /// A chat of group `group` with `lastActivity`, which orders the group's conversations. `archived` is the flag that
 /// sbd sets from its clock.
 func groupConversation(
-  _ id: String, group: String = "g1", lastActivity: Int64, created: Int64? = nil, done: Bool = false,
-  archived: Bool? = nil, unread: Int = 0, state: AttentionState = .needsYou
+  _ id: String, group: String = "g1", lastActivity: Int64 = 10, created: Int64? = nil, done: Bool = false,
+  pinned: Bool? = nil, archived: Bool? = nil, unread: Int = 0, state: AttentionState = .needsYou, name: String? = nil
 ) -> SessionSummary {
   var s = chatItem(id, group: group, state: done ? .done : state)
   s.triage = nil
+  s.name = name ?? id
+  s.pinned = pinned
   s.lastActivity = lastActivity
   s.created = created ?? lastActivity
   s.markedDone = done
@@ -281,15 +283,15 @@ func groupConversation(
 
   // MARK: The archive
 
-  /// The group column has its own archive. Revealing an archived chat leaves the sidebar's Manager archive closed.
-  @Test func showingAnArchivedChatLeavesTheManagersArchiveClosed() {
+  /// The sidebar lists an archived chat in its archive too, so revealing the chat opens the sidebar's archive.
+  @Test func showingAnArchivedChatOpensTheSidebarsArchive() {
     let chat = groupConversation("z", lastActivity: 2, archived: true)
     let model = appliedModel([groupConversation("a", lastActivity: 30), chat, needsItem("w", state: .working)])
 
     model.showInSidebar(chat)
 
     #expect(model.selection == "z")
-    #expect(!model.showingArchive)
+    #expect(model.showingArchive)
   }
 
   // MARK: chats(of:)
@@ -492,15 +494,15 @@ func groupConversation(
     #expect(model.shownChatArchives == ["g1"])
   }
 
-  /// The Board's Chat button opens the group's most recent conversation even when it is archived, so its row shows.
-  @Test func openChatOnAnArchivedChatOpensItsGroupsColumnArchive() {
+  /// The Board's Chat button opens the group's most recent conversation even when it is archived, so its rows show.
+  @Test func openChatOnAnArchivedChatOpensBothArchives() {
     let model = appliedModel([groupConversation("z", lastActivity: 2, archived: true)])
 
     model.openChat("g1")
 
     #expect(model.selection == "z")
     #expect(model.shownChatArchives == ["g1"])
-    #expect(!model.showingArchive)
+    #expect(model.showingArchive)
   }
 
   @Test func showingAnActiveChatLeavesTheGroupColumnsArchiveClosed() {
@@ -537,7 +539,7 @@ func groupConversation(
     #expect(model.sidebarOrder == order)
   }
 
-  @Test func openingAnArchivedChatFromSearchLeavesTheManagersArchiveClosed() {
+  @Test func openingAnArchivedChatFromSearchOpensTheSidebarsArchive() {
     let model = appliedModel([
       groupConversation("a", lastActivity: 30), groupConversation("z", lastActivity: 2, archived: true),
       needsItem("w", state: .working),
@@ -546,7 +548,7 @@ func groupConversation(
     model.openFromSearch("z")
 
     #expect(model.selection == "z")
-    #expect(!model.showingArchive)
+    #expect(model.showingArchive)
   }
 
   @Test func theOpenRenameSheetCountsAsASheet() {

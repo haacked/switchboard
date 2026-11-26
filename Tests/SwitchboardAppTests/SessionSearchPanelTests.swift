@@ -66,6 +66,18 @@ import Testing
   func noResultsGiveNoHighlight(_ highlighted: String?) {
     #expect(SearchPanelKeys.current(highlighted, in: []) == nil)
   }
+
+  // MARK: Transcripts that arrive while the panel is open
+
+  @Test func currentGivesTheFirstResultThatOnlyATranscriptMatches() throws {
+    let sessions = [needsItem("a", state: .working), needsItem("t", state: .working)]
+    try #require(SessionSearch.rank(sessions, query: "lag").isEmpty)
+
+    let arrived = ["t": SessionSearch.Transcript(["The kafka lag doubled."])]
+    let after = SessionSearch.rank(sessions, query: "lag", transcripts: arrived).map(\.id)
+
+    #expect(SearchPanelKeys.current(nil, in: after) == "t")
+  }
 }
 
 /// A working session that has no Inbox item, as after the user answered it.
@@ -137,7 +149,7 @@ private func childSession(_ id: String, of parent: String) -> SessionSummary {
     #expect(model.collapsed == [.notStarted, .working])
   }
 
-  /// A group chat has no sidebar row, so search leaves the sections as they were.
+  /// A group chat's row is in Conversations, outside the sections, so search leaves the sections as they were.
   @Test func selectsAGroupChat() {
     let model = appliedModel([chatItem("chat", group: "g1", state: .working), workSession("a")])
     model.collapsed = [.notStarted, .working]

@@ -1,8 +1,8 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The sidebar's Manager conversations. The header shows with no
-/// conversations, because its button is the sidebar's way to start one.
+/// The sidebar's Manager conversations and group chats. The header shows with no conversations, because its button
+/// is the sidebar's way to start a Manager conversation.
 struct ConversationsSection: View {
   @EnvironmentObject var model: BoardModel
   let activeAccount: String
@@ -11,9 +11,9 @@ struct ConversationsSection: View {
 
   var body: some View {
     ConversationListSection(
-      title: "Conversations", sessions: model.managers, activeAccount: activeAccount,
+      title: "Conversations", sessions: model.sidebarConversations, activeAccount: activeAccount,
       newHelp: AppShortcut.newConversation.help("Start a Manager conversation"), newLabel: "New Manager conversation",
-      removableSelection: removableSelection, archive: $model.showingArchive
+      removableSelection: removableSelection, archive: $model.showingArchive, rowTitle: model.conversationTitle
     ) {
       model.openManager(new: true)
     }
@@ -36,6 +36,8 @@ struct ConversationListSection: View {
   let removableSelection: Int?
   /// Whether the Archive group is open.
   @Binding var archive: Bool
+  /// The title of a conversation's row.
+  var rowTitle: (SessionSummary) -> String = \.name
   let new: () -> Void
 
   var body: some View {
@@ -65,7 +67,7 @@ struct ConversationListSection: View {
   }
 
   private func row(_ s: SessionSummary) -> some View {
-    ConversationRow(session: s, activeAccount: activeAccount, hoverCard: model.hoverCard)
+    ConversationRow(session: s, title: rowTitle(s), activeAccount: activeAccount, hoverCard: model.hoverCard)
       .clickAnchor(s.id)
       .tag(s.id)
       .contextMenu {
@@ -81,6 +83,7 @@ struct ConversationListSection: View {
 struct ConversationRow: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  let title: String
   let activeAccount: String
   var hoverCard: HoverCard<String>? = nil
 
@@ -97,7 +100,7 @@ struct ConversationRow: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 4) {
-          Text(session.name).fontWeight(unread ? .semibold : .medium).lineLimit(1)
+          Text(title).fontWeight(unread ? .semibold : .medium).lineLimit(1)
             .accessibilityValue(ChatButtonText.value(mark))
           Spacer(minLength: 4)
           if let shown = ConversationRow.trailingMark(mark) { ChatMarkView(mark: shown) }
@@ -111,7 +114,7 @@ struct ConversationRow: View {
           .buttonStyle(.borderless)
           .foregroundStyle(pinned ? .primary : .tertiary)
           .help(pinned ? "Unpin this conversation" : "Pin this conversation to the top")
-          .accessibilityLabel(pinned ? "Unpin \(session.name)" : "Pin \(session.name)")
+          .accessibilityLabel(pinned ? "Unpin \(title)" : "Pin \(title)")
         }
         if let preview = session.lastReply.flatMap(firstLine) {
           Text(verbatim: preview).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)

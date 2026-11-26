@@ -210,6 +210,10 @@ final class BoardModel: ObservableObject {
   @Published var itemContexts: [String: ItemContext] = [:]
   /// Each Manager conversation's last messages, by session id, read while its status strip shows.
   @Published var chatLogs: [String: [ChatMessage]] = [:]
+  /// The transcripts that ⌘K read, by session id, with the `lastActivity` of the session when they were read.
+  private var searchTranscripts: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
+  /// The last ⌘K transcript read. The next read waits for it.
+  private var transcriptReads: Task<[String: SessionSearch.Transcript], Never>?
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
   /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
@@ -282,7 +286,7 @@ final class BoardModel: ObservableObject {
   @Published var checkingDrafts: Set<String> = []
   /// sbd's refusal of a draft's last post or check, by reply key.
   @Published var draftErrors: [String: String] = [:]
-  /// Whether the sidebar shows the archived Manager conversations.
+  /// Whether the sidebar shows its archived conversations.
   @Published var showingArchive = false
   /// The groups whose conversations column shows its Archive.
   @Published var shownChatArchives: Set<String> = []
@@ -637,6 +641,12 @@ final class BoardModel: ObservableObject {
     sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
   }
 
+  /// The Manager conversations and group chats that the sidebar's Conversations section lists, newest activity first.
+  /// The group filter hides the chats of a hidden group.
+  var sidebarConversations: [SessionSummary] {
+    sessions.filter(\.kind.isUserConversation).sorted(by: Manager.newestFirst)
+  }
+
   /// The Manager conversation that the toolbar's Manager icon names while one waits on the user.
   var waitingManager: SessionSummary? { managers.first { ChatMark($0).needsMeReason != nil } }
 
@@ -688,6 +698,10 @@ final class BoardModel: ObservableObject {
     guard let group = s.chat else { return nil }
     return groups.first { $0.id == group }?.name
   }
+
+  /// The title of the session's row in the sidebar's Conversations section: the chat's group and name for a group
+  /// chat, else the session's name.
+  func conversationTitle(_ s: SessionSummary) -> String { s.kind == .chat ? inboxName(s) : s.name }
 
   /// How the Inbox, the menu bar, and a notification name the session.
   func inboxName(_ s: SessionSummary) -> String { Triage.inboxName(s, groupName: groupName(of: s)) }
@@ -747,7 +761,7 @@ final class BoardModel: ObservableObject {
   /// still shows then. It is false when the filters or the search field hide
   /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
-    workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
+    workBoard.isEmpty && sidebarConversations.isEmpty && unreachable == nil && !filterHidesAllWork
   }
 
   /// The main view while no session is selected, else nil.
@@ -1689,8 +1703,7 @@ final class BoardModel: ObservableObject {
   func loadChatLog(_ session: String) {
     let send = send
     poller.async {
-      let messages = try? JSONCoding.convert(
-        send("chat-log", ["session": .string(session)]), to: [ChatMessage].self)
+      let messages = Self.chatMessages(send, ["session": .string(session)])
       Task { @MainActor in
         if let messages, self.chatLogs[session] != messages {
           self.chatLogs[session] = messages
@@ -1698,6 +1711,57 @@ final class BoardModel: ObservableObject {
       }
     }
   }
+
+  /// The recent messages of the archived Manager conversations among `sessions`, for ⌘K, by session id. It reads
+  /// the `searchedTranscriptCount` most recent ones. It reads a transcript again only when its session's
+  /// `lastActivity` changed. A failed or empty read leaves that conversation out. The reads run off the main thread and off
+  /// `poller`, so they never delay a refresh. Each call starts after the previous call finishes, so two opens never
+  /// read at once and the second one reuses what the first one read.
+  func archivedTranscripts(for sessions: [SessionSummary]) async -> [String: SessionSearch.Transcript] {
+    let previous = transcriptReads
+    let call = Task {
+      _ = await previous?.value
+      return await self.readArchivedTranscripts(for: sessions)
+    }
+    transcriptReads = call
+    return await call.value
+  }
+
+  private func readArchivedTranscripts(for sessions: [SessionSummary]) async -> [String: SessionSearch.Transcript] {
+    let archived = sessions.filter { $0.kind == .manager && $0.activity?.archived == true }
+      .sorted(by: Manager.newestFirst).prefix(Self.searchedTranscriptCount)
+    let current = Dictionary(uniqueKeysWithValues: archived.map { ($0.id, $0.lastActivity) })
+    searchTranscripts = searchTranscripts.filter { current[$0.key] == $0.value.lastActivity }
+    let stale = archived.filter { searchTranscripts[$0.id] == nil }.map { ($0.id, $0.lastActivity) }
+    if !stale.isEmpty {
+      let send = send
+      let read = await Task.detached {
+        var read: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
+        for (id, lastActivity) in stale {
+          let args: [String: JSON] = ["session": .string(id), "limit": .number(Double(Self.searchedMessageCount))]
+          // `chat-log` answers an empty list when it cannot read the transcript. An archived conversation always has
+          // messages, so an empty answer counts as a failed read and the next open tries again.
+          guard let messages = Self.chatMessages(send, args), !messages.isEmpty else { continue }
+          read[id] = (lastActivity, SessionSearch.Transcript(messages.map(\.text)))
+        }
+        return read
+      }.value
+      searchTranscripts.merge(read) { $1 }
+    }
+    return searchTranscripts.mapValues(\.transcript)
+  }
+
+  /// The messages that `chat-log` answers for `args`, or nil when the read fails.
+  nonisolated static func chatMessages(
+    _ send: @Sendable (String, [String: JSON]) throws -> JSON, _ args: [String: JSON]
+  ) -> [ChatMessage]? {
+    try? JSONCoding.convert(send("chat-log", args), to: [ChatMessage].self)
+  }
+
+  /// How many archived conversations ⌘K searches the transcripts of.
+  nonisolated static let searchedTranscriptCount = 100
+  /// How many of a conversation's last messages ⌘K searches. `chat-log` reads from the end of the transcript.
+  nonisolated static let searchedMessageCount = 50
 
   /// Reads the commands that the session's claude takes after `/`. A failed read keeps the stored rows, which the
   /// message field shows while sbd answers. `then` gets the rows that sbd answered, or nil when the read failed.
@@ -1808,14 +1872,12 @@ final class BoardModel: ObservableObject {
   func loadBlockSources(_ session: String, then done: @escaping @MainActor @Sendable (BlockSources) -> Void) {
     let send = send
     poller.async {
-      let messages = try? JSONCoding.convert(
-        send(
-          "chat-log",
-          [
-            "session": .string(session), "role": .string(ChatMessage.Role.assistant.rawValue),
-            "limit": .number(Double(Self.blockSourceMessageCount)),
-          ]),
-        to: [ChatMessage].self)
+      let messages = Self.chatMessages(
+        send,
+        [
+          "session": .string(session), "role": .string(ChatMessage.Role.assistant.rawValue),
+          "limit": .number(Double(Self.blockSourceMessageCount)),
+        ])
       let sources = BlockSources(messages: (messages ?? []).reversed().map(\.text))
       Task { @MainActor in done(sources) }
     }

@@ -74,10 +74,10 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.sidebarOrder == ["m"])
     }
 
-    @Test func aGroupChatIsLeftOut() {
+    @Test func aGroupChatComesBeforeTheWorkRows() {
       let model = appliedModel([chatItem("chat", group: "g1"), needsItem("a")])
 
-      #expect(model.sidebarOrder == ["a"])
+      #expect(model.sidebarOrder == ["chat", "a"])
     }
   }
 
@@ -140,21 +140,19 @@ private func child(_ id: String, of parent: String, state: AttentionState = .wor
       #expect(model.selection == order.last)
     }
 
-    /// A group chat has no sidebar row, and a row in a collapsed section is hidden.
-    @Test(arguments: ["chat", "f"])
-    func nextFromASelectionOutsideTheOrderGoesToTheFirstRow(_ selection: String) {
+    /// `f` is in a collapsed section, so its row is hidden.
+    @Test func nextFromASelectionOutsideTheOrderGoesToTheFirstRow() {
       let model = model()
-      model.selection = selection
+      model.selection = "f"
 
       model.selectAdjacentSession(by: 1)
 
       #expect(model.selection == model.sidebarOrder.first)
     }
 
-    @Test(arguments: ["chat", "f"])
-    func previousFromASelectionOutsideTheOrderGoesToTheLastRow(_ selection: String) {
+    @Test func previousFromASelectionOutsideTheOrderGoesToTheLastRow() {
       let model = model()
-      model.selection = selection
+      model.selection = "f"
 
       model.selectAdjacentSession(by: -1)
 

@@ -26,12 +26,15 @@ enum SearchPanelKeys {
   }
 }
 
-/// The ⌘K panel that finds a session by name, repo, branch, PR, issue, group, reason, or note.
+/// The ⌘K panel that finds a session by name, repo, branch, PR, issue, group, reason, or note, and an archived Manager
+/// conversation by its recent messages.
 struct SessionSearchView: View {
   final class Search: ObservableObject {
     /// The sessions as the panel opened, so the list does not reorder under the arrows while the model refreshes.
     @Published var sessions: [SessionSummary] = []
     @Published var query = ""
+    /// The archived Manager conversations' recent messages, which arrive after the panel opens.
+    @Published var transcripts: [String: SessionSearch.Transcript] = [:]
     /// The result that the arrows last moved to. `SearchPanelKeys.current` falls back to the first result.
     @Published var highlighted: String?
   }
@@ -41,7 +44,7 @@ struct SessionSearchView: View {
   @FocusState private var fieldFocused: Bool
 
   var body: some View {
-    let results = SessionSearch.rank(search.sessions, query: search.query)
+    let results = SessionSearch.rank(search.sessions, query: search.query, transcripts: search.transcripts)
     let ids = results.map(\.id)
     let current = SearchPanelKeys.current(search.highlighted, in: ids)
     VStack(spacing: 0) {
@@ -57,9 +60,16 @@ struct SessionSearchView: View {
     }
     .frame(width: 600)
     .onAppear {
-      search.sessions = model.board
+      let sessions = model.board
+      search.sessions = sessions
       search.query = Snapshot.searchQuery ?? ""
       fieldFocused = true
+      // The panel can close before the reads finish. The weak reference then drops the answer.
+      let panel = search
+      Task { [weak panel, model] in
+        let transcripts = await model.archivedTranscripts(for: sessions)
+        panel?.transcripts = transcripts
+      }
     }
     .onChange(of: search.query) { search.highlighted = nil }
     // Focus stays in the field, so VoiceOver does not read the highlighted row. A query edit resets `highlighted` to
