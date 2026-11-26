@@ -618,17 +618,14 @@ private func groupedModel(_ list: [SessionSummary]) -> BoardModel {
     ])
     let release = DispatchSemaphore(value: 0)
     let sent = SentRequests()
-    let held = Counter()
-    let log = try JSONCoding.convert([ChatMessage(role: .user, text: "kafka")], to: JSON.self)
+    let answer = answering(sent)
     model.send = { op, args in
-      guard op == "chat-log" else { return .null }
-      sent.append(op, args)
-      held.increment()
-      release.wait()
-      return log
+      let answered = try answer(op, args)
+      if op == "chat-log" { release.wait() }
+      return answered
     }
     let first = Task { await model.archivedTranscripts(for: model.board) }
-    await settle { held.value > 0 }
+    await settle { !readIDs(sent).isEmpty }
     let second = Task { await model.archivedTranscripts(for: model.board) }
     try await Task.sleep(for: .milliseconds(50))
     release.signal()
