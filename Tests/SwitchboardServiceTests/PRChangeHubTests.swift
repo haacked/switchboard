@@ -723,6 +723,16 @@ private final class HubPoller {
     #expect(p.provider.interest == [PRRef(forge: "github.com", repo: "acme/widgets", number: 7)])
   }
 
+  /// A poller with a provider reports it with the poll interval that the row shows.
+  @Test func thePollerWithAProviderReportsThePollInterval() throws {
+    let p = try HubPoller()
+
+    let sources = p.poller.sources()
+
+    #expect(sources.providers.map(\.id) == [p.provider.id])
+    #expect(sources.pollSeconds == p.h.service.config.github.pollSeconds)
+  }
+
   /// A signal for the PR asks the poller for an `event` read 2 s later.
   @Test func aSignalAsksThePollerForAnEventRead() throws {
     let p = try HubPoller()

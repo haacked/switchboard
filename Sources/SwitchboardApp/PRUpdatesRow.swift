@@ -82,3 +82,16 @@ enum PRUpdatesRow {
     return trimmed.isEmpty ? nil : Wait.sentence(trimmed)
   }
 }
+
+extension PRSources {
+  /// The fields that the row shows. The other fields change with each event. A publish of them redraws every view of
+  /// `BoardModel`.
+  var rowFields: PRSources {
+    PRSources(
+      providers: providers.map {
+        Source(
+          id: $0.id, state: $0.state, reason: $0.reason, retryAt: $0.retryAt, wanted: $0.wanted, covered: $0.covered,
+          shadow: $0.shadow)
+      }, pollSeconds: pollSeconds)
+  }
+}

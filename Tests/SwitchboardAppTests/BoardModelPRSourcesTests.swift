@@ -22,9 +22,6 @@ import Testing
     return (model, sent)
   }
 
-  /// Waits a moment for a change that should not come.
-  func pause() async { try? await Task.sleep(nanoseconds: 200_000_000) }
-
   @Test func theModelStartsLoading() {
     #expect(offlineModel().prSources == .loading)
   }
@@ -86,8 +83,7 @@ import Testing
     let (model, sent) = model { throw APIError("connection refused") }
 
     model.loadPRSources()
-    await sent.wait(for: "sources")
-    await pause()
+    await settle { !model.prSourcesLoading }
 
     #expect(model.prSources == .loading)
   }
@@ -97,8 +93,7 @@ import Testing
     model.prSources = .report(Self.sources)
 
     model.loadPRSources()
-    await sent.wait(for: "sources")
-    await pause()
+    await settle { !model.prSourcesLoading }
 
     #expect(model.prSources == .report(Self.sources))
   }
@@ -108,10 +103,35 @@ import Testing
     let (model, sent) = model { throw APIError("unknown request live") }
 
     model.loadPRSources()
-    await sent.wait(for: "sources")
-    await pause()
+    await settle { !model.prSourcesLoading }
 
     #expect(model.prSources == .loading)
+  }
+
+  /// A counter that the row doesn't show changes with each event. Storing it would republish the model and redraw every view.
+  @Test func aReportKeepsOnlyTheFieldsThatTheRowShows() async {
+    var counted = Self.sources
+    counted.providers[0].signals = 9
+    counted.providers[0].lastSignalAt = 1_000
+    let counters = counted
+    let (model, _) = model { try JSON(encoding: counters) }
+
+    model.loadPRSources()
+    await settle { model.prSources != .loading }
+
+    #expect(model.prSources == .report(Self.sources))
+  }
+
+  /// A failed read ends the read in flight, so the next call asks again.
+  @Test func aReadAfterAFailureAsksAgain() async {
+    let (model, sent) = model { throw Boom() }
+
+    model.loadPRSources()
+    await settle { !model.prSourcesLoading && sent.value.contains { $0.op == "sources" } }
+    model.loadPRSources()
+    await settle { sent.value.filter { $0.op == "sources" }.count == 2 }
+
+    #expect(sent.value.filter { $0.op == "sources" }.count == 2)
   }
 
   @Test func aNewerReportReplacesAnOlderOne() async {

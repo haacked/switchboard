@@ -37,7 +37,7 @@ extension BoardModel {
       let read: PRUpdatesRow.Read?
       do {
         let reply = try send("sources", [:])
-        read = (try? JSONCoding.convert(reply, to: PRSources.self)).map { .report($0) } ?? .olderSbd
+        read = (try? JSONCoding.convert(reply, to: PRSources.self)).map { .report($0.rowFields) } ?? .olderSbd
       } catch {
         read = "\(error)".contains("unknown request sources") ? .olderSbd : nil
       }
