@@ -61,6 +61,28 @@ import Testing
     try sbd.sb("ack", s.id)
     try sbd.poll(all: true)
     #expect(try sbd.get(s.id).state == .waiting)
+
+    // A fetch moves no activity, so the poller sees the new default branch at its next idle-interval count.
+    _ = try sbd.git(s.cwd, "update-ref", "refs/remotes/origin/main", "main")
+    _ = try sbd.git(s.cwd, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    try sbd.poll()
+    #expect(try sbd.get(s.id).state == .waiting)
+    try sbd.advanceClock(300_000)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).state == .done)
+  }
+
+  @Test func undoingTheAcknowledgmentTakesTheSessionOutOfDone() throws {
+    let github = try FakeGitHub()
+    let sbd = try Instance.withGitHub(github)
+    let s = try finishedSession(sbd)
+    try sbd.sb("ack", s.id)
+    try sbd.poll()
+    #expect(try sbd.get(s.id).state == .done)
+
+    try sbd.sb("ack", "--undo", s.id)
+
+    #expect(try sbd.get(s.id).state == .needsYou)
   }
 
   @Test func aNewPromptTakesTheSessionOutOfDone() throws {

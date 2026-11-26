@@ -867,11 +867,14 @@ final class GitHubPoller {
   /// A finished PR's folder is counted when the PR finishes, after the
   /// session's next activity, and once per idle interval while it is dirty.
   /// `git status` takes 0.1 to 0.3 s in a large repo, so a clean or missing
-  /// folder isn't counted again on its own. The same rules apply to the empty key of a work session without a PR.
+  /// folder isn't counted again on its own. The same rules apply to the empty key of a work session without a PR,
+  /// whose folder is also counted once per idle interval while HEAD is off the default branch. A fetch moves no
+  /// activity, so only that count sees a default branch that came to contain HEAD.
   private func shouldCount(_ t: Tracked, _ s: Watched, _ key: String, _ all: Bool, _ now: Int64) -> Bool {
     guard !all, let counted = t.counted, counted.key == key else { return true }
     if s.facts.lastActivity > counted.activity { return true }
-    return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
+    let unsettled = (s.facts.dirty ?? 0) > 0 || (key.isEmpty && !s.facts.headOnDefault)
+    return unsettled && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
   }
 
   /// With `activity`, it records nothing when the session had activity after it, as when a turn started after the

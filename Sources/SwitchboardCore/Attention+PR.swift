@@ -28,7 +28,7 @@ extension Attention {
   /// nothing and the poller found the folder clean with HEAD on a remote's default branch. A fresh worktree has the
   /// same folder state, so the acknowledgment is the signal that the session finished. The folder check makes sure
   /// that removing the worktree loses nothing. The wait rule and the first-prompt rule run before this one.
-  static func finishedWithoutPR(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict? {
+  public static func finishedWithoutPR(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict? {
     guard awaitsFolderCheck(kind: session.kind, facts, now: now), facts.dirty == 0, !facts.folderGone,
       facts.headOnDefault
     else { return nil }
