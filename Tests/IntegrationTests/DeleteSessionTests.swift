@@ -351,7 +351,8 @@ extension Instance {
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
     // A write lock that sbd's connection never releases outlasts the busy timeout, so this fails.
-    #expect(try sbd.sqlite("BEGIN IMMEDIATE; ROLLBACK;").status == 0)
+    let lock = try sbd.sqlite("BEGIN IMMEDIATE; ROLLBACK;")
+    #expect(lock.status == 0, Comment(rawValue: lock.stderr))
   }
 
   @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheSession() throws {

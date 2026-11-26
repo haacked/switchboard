@@ -353,6 +353,13 @@ final class Instance {
     try Repos.git(dir, args)
   }
 
+  /// Runs `sql` with sqlite3 on sbd's database. `options` go before the database path.
+  /// sqlite3 sets no busy timeout of its own. Without one, a statement that meets sbd's write lock fails at once with
+  /// SQLITE_BUSY.
+  func sqlite(_ sql: String, _ options: String...) throws -> CommandResult {
+    try runCommand("/usr/bin/sqlite3", ["-cmd", ".timeout 5000"] + options + [home.database, sql])
+  }
+
   func new(prompt: String? = nil, name: String = "t") throws -> SessionSummary {
     var args: [String: JSON] = ["path": .string(work), "name": .string(name)]
     if let prompt { args["prompt"] = .string(prompt) }
@@ -1384,13 +1391,6 @@ extension Instance {
     return BoxSession(
       id: id, claudeSessionId: s.claudeSessionId, cwd: s.cwd, pid: try #require(s.claudePid),
       repo: "\(boxHome)/\(folder)")
-  }
-
-  /// Runs `sql` with sqlite3 on sbd's database. `options` go before the database path.
-  /// sqlite3 sets no busy timeout of its own. Without one, a statement that meets sbd's write lock fails at once with
-  /// SQLITE_BUSY.
-  func sqlite(_ sql: String, _ options: String...) throws -> CommandResult {
-    try runCommand("/usr/bin/sqlite3", ["-cmd", ".timeout 5000"] + options + [home.database, sql])
   }
 
   /// The sessions of `host` that the store lists in `removed_host_sessions`.
