@@ -14,7 +14,8 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// Whether the last reply's user is the user's own Slack id. sbd decides it when it reads the reply, so the mark
   /// never needs the id later.
   public var lastReplyYou: Bool
-  /// The newest reply whose user is not the user's own Slack id, as sbd parsed it from a read's message headers.
+  /// The newest reply whose author is neither the user's own Slack id nor a bot id, as sbd parsed it from a read's
+  /// message headers.
   /// sbd decides "not you" when it reads the reply, as for `lastReplyYou`. The last reply can be yours while this
   /// one is someone else's.
   public var lastOther: SlackPoll.Header?

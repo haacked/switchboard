@@ -1402,13 +1402,24 @@ extension SlackPollTests {
     }
 
     /// The id is in the result text, so only the id's form refuses it.
-    @Test(arguments: ["B0BOT", "u0other", "U1", "U0 OTHER", "C0EXAMPLE02"])
-    func aUserIdThatIsNotASlackUserIdFails(_ id: String) throws {
+    @Test(arguments: ["b0bot", "B1", "u0other", "U1", "U0 OTHER", "C0EXAMPLE02"])
+    func aUserIdThatIsNotASlackAuthorIdFails(_ id: String) throws {
       var b = PollFx.goodB()
       b.resultText = PollFx.threadText(count: 1, user: id, name: "Alice")
       b.setAnswer("last_reply_user_id", .string(id))
 
       #expect(try PollFx.outcomeOfB(b).failed)
+    }
+
+    /// A bot's message can be the last reply. Its id starts with B.
+    @Test func aBotIdAsTheLastReplyUserIsAccepted() throws {
+      var b = PollFx.goodB()
+      b.resultText = PollFx.threadText(count: 1, user: "B0BOT", name: "Deploy Bot")
+      b.setAnswer("last_reply_user_id", "B0BOT")
+      b.setAnswer("last_reply_user_name", "Deploy Bot")
+
+      #expect(
+        try PollFx.outcomeOfB(b) == .read(PollFx.Read(count: 1, ts: PollFx.reply1, user: "B0BOT", name: "Deploy Bot")))
     }
 
     /// A ts that the model made up would mark a reply that no one wrote.
@@ -1894,13 +1905,19 @@ extension SlackPollTests {
         ])
     }
 
+    @Test func aBotIdClosesAHeader() {
+      let text = "From: Deploy Bot (B0BOT1234)\nMessage TS: \(Self.reply1)\n"
+
+      #expect(SlackPoll.headers(in: text) == [SlackPoll.Header(user: "B0BOT1234", name: "Deploy Bot", ts: Self.reply1)])
+    }
+
     @Test func anEmptyTextHasNoHeaders() {
       #expect(SlackPoll.headers(in: "").isEmpty)
     }
   }
 
-  /// Risk 2a: `hasHeader` and `headers(in:)` agree with the old `hasHeader` body for every valid user id and well
-  /// formed ts in each text.
+  /// Risk 2a: `hasHeader` and `headers(in:)` agree with the old `hasHeader` body for every valid author id, a user
+  /// id or a bot id, and every well formed ts in each text.
   @Suite struct HeaderParity {
     static let parent = ParseThreadsHeaderPair.parent
     static let r1 = PollFx.reply1
@@ -1915,6 +1932,7 @@ extension SlackPollTests {
         text: "From: Alice (U0OTHER)\nTime: 02:57 PST\nTime: 10:57 UTC\nMessage TS: \(r1)\nHi.\n"),
       HeaderText(name: "an empty Time line", text: "From: Alice (U0OTHER)\nTime: \nMessage TS: \(r1)\n"),
       HeaderText(name: "a Time line without a space", text: "From: Alice (U0OTHER)\nTime:02:57\nMessage TS: \(r1)\n"),
+      HeaderText(name: "a bot id", text: "From: Deploy Bot (B0BOT1234)\nMessage TS: \(r1)\n"),
       HeaderText(name: "an email", text: "From: Alice <alice@example.com> (U0OTHER)\nMessage TS: \(r1)\n"),
       HeaderText(
         name: "an id inside the name", text: "From: Eve (U0OTHER) <eve@example.com> (U0EVE)\nMessage TS: \(r1)\n"),
@@ -1973,11 +1991,11 @@ extension SlackPollTests {
       HeaderText(name: "an empty text", text: ""),
     ]
 
-    /// The valid user ids and well formed ts values that a text holds, and the fixtures' own, so every row asks
+    /// The valid author ids and well formed ts values that a text holds, and the fixtures' own, so every row asks
     /// about the pairs it could match and some it can't.
     static func pairs(_ text: String) -> [(user: String, ts: String)] {
-      let users = Set(text.matches(of: #/[UW][A-Z0-9]{2,}/#).map { String($0.output) })
-        .union(["U0OTHER", "U0CAROL", "U0ROOT", "U0EVE"]).filter(SlackPoll.isUserId).sorted()
+      let users = Set(text.matches(of: #/[UWB][A-Z0-9]{2,}/#).map { String($0.output) })
+        .union(["U0OTHER", "U0CAROL", "U0ROOT", "U0EVE", "B0BOT1234"]).filter(SlackPoll.isAuthorId).sorted()
       let tss = Set(text.matches(of: #/[0-9]{10}\.[0-9]{6}/#).map { String($0.output) })
         .union([PollFx.rootB, r1, r2]).filter { SlackPoll.tsValue($0) != nil }.sorted()
       return users.flatMap { user in tss.map { (user: user, ts: $0) } }
@@ -2027,6 +2045,7 @@ struct LastOtherReply: Sendable {
   static func other(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0OTHER", name: "Alice", ts: ts) }
   static func carol(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0CAROL", name: "Carol", ts: ts) }
   static func you(_ ts: String) -> LastOtherReply { LastOtherReply(user: "U0EXAMPLESELF", name: "Me", ts: ts) }
+  static func bot(_ ts: String) -> LastOtherReply { LastOtherReply(user: "B0BOT1234", name: "Deploy Bot", ts: ts) }
 }
 
 /// A thread in the stub's layout and the `oldest` that the poll asks with.
@@ -2040,9 +2059,9 @@ struct LastOtherShape: Sendable, CustomTestStringConvertible {
 
 extension SlackPollTests {
   /// D2 and Risk 1: each accepted read gives `lastOther`, the header with the greatest ts among the headers whose
-  /// user is a valid id other than yours and whose ts is after the root, after the asked `oldest`, and at most an
-  /// hour past the scan. It comes only from the whole-thread results of the calls for exactly the asked thread, and
-  /// only when the answer's count is above 0.
+  /// author is a valid id that is neither yours nor a bot id and whose ts is after the root, after the asked
+  /// `oldest`, and at most an hour past the scan. It comes only from the whole-thread results of the calls for
+  /// exactly the asked thread, and only when the answer's count is above 0.
   @Suite struct ParseThreadsLastOther {
     static let reply3 = "1794965400.000400"
     /// An hour after `PollFx.now`, the latest ts that a read accepts.
@@ -2177,14 +2196,44 @@ extension SlackPollTests {
 
     // MARK: Users
 
-    /// A bot's id starts with B, so a bot's reply is never taken (D1).
-    @Test(arguments: ["u0other", "U0other", "U0", "B0BOT1234"])
-    func aReplyWhoseIdIsNotAUserIdIsNotTaken(_ id: String) throws {
+    @Test(arguments: ["u0other", "U0other", "U0", "b0bot1234", "B0"])
+    func aReplyWhoseIdIsNotAnAuthorIdIsNotTaken(_ id: String) throws {
       let got = try Self.lastOther(of: [
         LastOtherReply(user: id, name: "Alice", ts: PollFx.reply1), .you(PollFx.reply2),
       ])
 
       #expect(got == nil)
+    }
+
+    /// A bot id starts with B. The read lists the bot's header, but a bot's reply is never taken.
+    @Test func aBotsReplyIsListedButNotTaken() throws {
+      let bot = LastOtherReply.bot(PollFx.reply2)
+      let replies: [LastOtherReply] = [.other(PollFx.reply1), bot, .you(Self.reply3)]
+
+      #expect(SlackPoll.headers(in: Self.connectorThread(replies)).contains { $0.user == bot.user && $0.ts == bot.ts })
+      #expect(try Self.lastOther(of: replies) == Self.alice1)
+    }
+
+    /// The bot posts after Alice and before the poll. The read is accepted and still names Alice.
+    @Test func anOtherReplyThenABotsGivesTheOtherReply() throws {
+      let bot = LastOtherReply.bot(PollFx.reply2)
+
+      let read = try Self.read([Self.part([.other(PollFx.reply1), bot], last: bot)])
+
+      #expect(read.lastReplyUser == bot.user)
+      #expect(read.lastReplyTs == bot.ts)
+      #expect(read.lastReplyName == "Deploy Bot")
+      #expect(read.lastOther == Self.alice1)
+    }
+
+    @Test func onlyABotsReplyIsAcceptedWithNoLastOther() throws {
+      let bot = LastOtherReply.bot(PollFx.reply1)
+
+      let read = try Self.read([Self.part([bot], last: bot)])
+
+      #expect(read.count == 1)
+      #expect(read.lastReplyUser == bot.user)
+      #expect(read.lastOther == nil)
     }
 
     /// `U0EXAMPLESELF2` and `U0EXAMPLESEL` start or end like your id but are not it.

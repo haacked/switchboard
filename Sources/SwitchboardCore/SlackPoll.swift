@@ -250,7 +250,8 @@ public enum SlackPoll {
     public var lastReplyTs: String?
     public var lastReplyUser: String?
     public var lastReplyName: String?
-    /// The newest reply in the read whose user is not you, from sbd's own parse of the message headers.
+    /// The newest reply in the read whose author is neither you nor a bot id, from sbd's own parse of the message
+    /// headers.
     public var lastOther: Header? = nil
   }
 
@@ -339,15 +340,16 @@ public enum SlackPoll {
   /// The result of each asked thread, in the order of `asked`. An answer is accepted only when a `slack_read_thread`
   /// call for exactly the asked channel, ts, and oldest got a result that isn't an error, and the answer says `ok`
   /// with a whole count from 0 to 10000. A count of 0 needs a result that shows no replies. With replies, the last
-  /// reply's ts and user id must be well formed, the ts must come after the root and the oldest, and one message
+  /// reply's ts and author id must be well formed, the ts must come after the root and the oldest, and one message
   /// header in that call's result must hold both. An answer for a thread that wasn't asked is dropped. A last reply
   /// more than an hour after `now`, the scan's time, is refused, because a made-up ts would become the oldest of
   /// every later read. It throws when the call failed as a whole.
   ///
   /// An accepted read with replies also gives `lastOther`: among the message headers of the whole-thread results,
-  /// the one with the greatest ts whose user is not `you` and whose ts is after the root, after the oldest, and at
-  /// most an hour after `now`. sbd takes it from the headers, not from the answer, so the model can't leave a reply
-  /// out. A message's text can still hold a made-up header.
+  /// the one with the greatest ts whose author is neither `you` nor a bot id and whose ts is after the root, after
+  /// the oldest, and at most an hour after `now`. sbd takes it from the headers, not from the answer, so the model
+  /// can't leave a reply out. A message's text can still hold a made-up header. A bot whose id starts with U looks
+  /// like a person to sbd, so its reply can be `lastOther`.
   public static func parseThreads(_ output: String, asked: [Ask], you: String, now: Int64) throws
     -> [Result<ThreadRead, ReadError>]
   {
@@ -397,8 +399,8 @@ public enum SlackPoll {
       }
       floor = max(root, value)
     }
-    guard let user = answer["last_reply_user_id"]?.string, isUserId(user) else {
-      throw ReadError("claude's last reply user is not a Slack user id")
+    guard let user = answer["last_reply_user_id"]?.string, isAuthorId(user) else {
+      throw ReadError("claude's last reply user is not a Slack user or bot id")
     }
     let all = results.flatMap(headers(in:))
     guard hasHeader(all, user: user, ts: ts) else {
@@ -406,7 +408,9 @@ public enum SlackPoll {
     }
     let name = answer["last_reply_user_name"]?.string.flatMap(displayName)
     let others = all.compactMap { header -> (header: Header, ts: Int64)? in
-      guard header.user != you, let value = tsValue(header.ts), value > floor, value <= ceiling else { return nil }
+      guard header.user != you, !isBotId(header.user), let value = tsValue(header.ts), value > floor,
+        value <= ceiling
+      else { return nil }
       return (header, value)
     }
     return ThreadRead(
@@ -448,6 +452,11 @@ public enum SlackPoll {
 
   static func isUserId(_ text: String) -> Bool { text.wholeMatch(of: #/[UW][A-Z0-9]{2,}/#) != nil }
 
+  /// Whether the text is the id of a message's author: a user id, or a bot id, which starts with B.
+  static func isAuthorId(_ text: String) -> Bool { text.wholeMatch(of: #/[UWB][A-Z0-9]{2,}/#) != nil }
+
+  static func isBotId(_ text: String) -> Bool { text.first == "B" && isAuthorId(text) }
+
   /// A Slack ts of the form `1794965246.462679` in microseconds.
   static func tsValue(_ ts: String) -> Int64? {
     guard let m = ts.wholeMatch(of: #/([0-9]{10})\.([0-9]{6})/#), let s = Int64(m.1), let us = Int64(m.2) else {
@@ -474,7 +483,7 @@ public enum SlackPoll {
   }
 
   /// The message headers in the text, in its order. The connector writes a header as a `From: Name <email> (U0123)`
-  /// line, a `Time:` line, and a `Message TS:` line. So a valid user id must close a `From:` line, and the next
+  /// line, a `Time:` line, and a `Message TS:` line. So a valid author id must close a `From:` line, and the next
   /// line that isn't a `Time:` line must be a `Message TS:` line with a well formed ts. A mention of a user in a
   /// message's text doesn't count. A message's text can still hold a made-up header.
   static func headers(in text: String) -> [Header] {
@@ -482,10 +491,10 @@ public enum SlackPoll {
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
     var out: [Header] = []
     for (i, line) in lines.enumerated() where line.hasPrefix("From: ") {
-      // A user id holds no parenthesis, so the last one opens the only id that can close the line.
+      // An author id holds no parenthesis, so the last one opens the only id that can close the line.
       guard let paren = line.lastIndex(of: "("), line.hasSuffix(")") else { continue }
       let user = String(line[line.index(after: paren)..<line.index(before: line.endIndex)])
-      guard isUserId(user), line.hasSuffix(" (\(user))"),
+      guard isAuthorId(user), line.hasSuffix(" (\(user))"),
         let next = lines[(i + 1)...].first(where: { !$0.hasPrefix("Time: ") }), next.hasPrefix("Message TS: ")
       else { continue }
       let ts = String(next.dropFirst("Message TS: ".count))
