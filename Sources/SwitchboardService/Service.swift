@@ -595,7 +595,8 @@ public final class Service {
           install(fresh)
           return try approveWait(request.args, caller: caller)
         })
-    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log":
+    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log",
+      "schedule-pending":
       // The caller checks of a top-up, a script, and a coordinator's headless schedule read the client's panes, so
       // they take a new snapshot.
       let checksCaller =
@@ -637,7 +638,12 @@ public final class Service {
     case "import":
       return .success(try JSON(encoding: importSessions(request.args)))
     case "triage", "choose", "reply", "summary-set", "item-context":
-      return try triageRequest(request, origin: origin)
+      return try triageRequest(request, origin: origin, caller: caller)
+    case "answer":
+      // An allow of a `script` card checks who sent it. `prepared` takes a fresh snapshot for an answer, so the check
+      // reads the current panes.
+      return try .success(
+        prepared(request, origin: origin) { try answer(request.args, origin: origin, caller: caller) })
     case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard", "decision-ask":
       return try decisionRequest(request.op, request.args)
     case "plan-attach", "plan-update":
@@ -928,8 +934,6 @@ public final class Service {
         } ?? store.events(session: session, sessions: sessions, kinds: kinds, limit: limit, newest: true)
       if case .remote(let host) = origin { events = events.map { event($0, shownTo: host) } }
       return try JSON(encoding: args["full"]?.bool == true ? events : events.map(\.slimmed))
-    case "answer":
-      return try answer(args, origin: origin)
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
@@ -2932,6 +2936,7 @@ public final class Service {
       rotateOperatorIfDue(now: now)
       deferDueQuestions(now: now)
       expireGroupMessages(now: now)
+      expireScriptProposals(now: now)
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
       pollSlackThreadsIfDue(now: now)

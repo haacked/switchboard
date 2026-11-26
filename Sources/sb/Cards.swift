@@ -14,7 +14,9 @@ func cards(_ a: Args) {
     return
   }
   if cards.isEmpty {
-    print("No permission prompts, questions, group messages, folder trust prompts, or MCP server requests are open.")
+    print(
+      "No permission prompts, questions, group messages, folder trust prompts, MCP server requests, or script proposals are open."
+    )
     return
   }
   // Claude chose this text, so control characters print as escapes.
@@ -45,6 +47,21 @@ func cards(_ a: Args) {
       out("\(head)  \(card.summary)")
       out("      reason: \(card.mcpRequest?.reason ?? "")")
       out("      allow restarts claude with it, deny leaves the servers as they are")
+    case .script:
+      // `allow` stores exactly this command for exactly this session, so both print in full.
+      guard let p = card.scriptProposal?.value else { break }
+      out("\(head)  \(p.schedule.map { "change schedule \($0) to run a script" } ?? "run a script")")
+      out("      in \(p.targetName) (\(p.target))  \(p.folder)")
+      out("      \(p.timingText)")
+      for line in p.command.split(separator: "\n", omittingEmptySubsequences: false) { out("      $ \(line)") }
+      if let before = p.before {
+        for line in before.command.split(separator: "\n", omittingEmptySubsequences: false) {
+          out("      was: \(line)")
+        }
+      }
+      if !p.reason.isEmpty { out("      reason: \(p.reason)") }
+      out("      \(ScriptProposal.worktreeNote)")
+      out("      allow stores the schedule, deny drops it")
     case .question:
       out("\(head)  question")
       for q in card.questions {
@@ -89,6 +106,10 @@ func answer(_ command: String, _ a: Args) {
   if result["reason"] != nil {
     let status = decode(result, as: MCPServerRequestStatus.self)
     return print("\(status.decision.rawValue). \(status.name): \(Manager.serversText(status.loaded))".printable)
+  }
+  if result["pending"] != nil {
+    let status = decode(result, as: ScriptProposalStatus.self)
+    return print("\(status.decision.rawValue)\(status.schedule.map { ": schedule \($0)" } ?? "")")
   }
   print(result["delivery"]?.string ?? "answered")
 }

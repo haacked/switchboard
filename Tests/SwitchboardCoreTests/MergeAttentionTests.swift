@@ -543,7 +543,7 @@ extension MergeAttentionTests {
     @Test func mergeBriefEventWithTextSetsTheBrief() throws {
       let f = try summaryFacts(then: [briefEvent(4, text: briefText)])
 
-      #expect(f.mergeBrief == MergeBrief(pr: 42, head: samplePRHead, text: briefText))
+      #expect(f.mergeBrief?.value == MergeBrief(pr: 42, head: samplePRHead, text: briefText))
     }
 
     @Test func mergeBriefErrorKeepsTheLastBrief() throws {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// A permission prompt or a question that the main session waits on, or a
-/// group message or MCP servers that it asked for, which the user can answer
+/// group message, MCP servers, or a script schedule that it asked for, which the user can answer
 /// without opening the session.
 public struct Card: Codable, Equatable, Sendable, Identifiable {
   public enum Kind: String, Codable, Sendable {
@@ -14,6 +14,8 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case trust
     /// MCP servers that a Manager conversation asked for, which wait for the user to allow or deny them.
     case mcp
+    /// A script schedule that a session proposed, which waits for the user to allow or deny it.
+    case script
   }
 
   /// The id of the PermissionRequest event that opened the card.
@@ -38,6 +40,9 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   public var send: GroupMessage?
   /// The request of an `mcp` card. Other kinds have none.
   public var mcpRequest: MCPServerRequest?
+  /// The proposal of a `script` card. Other kinds have none. It lives on the heap, because sbd evaluates cards on
+  /// server threads with small stacks.
+  public var scriptProposal: Box<ScriptProposal>?
   /// The session's permission mode when the PermissionRequest arrived, such
   /// as `default` or `auto`.
   public var permissionMode: String?
@@ -128,12 +133,12 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
   }
 
   /// Whether the card stays when its turn ends or its hook goes away: a
-  /// deferred question, a group message, or an MCP server request, which only
+  /// deferred question, a group message, an MCP server request, or a script proposal, which only
   /// a decision closes. A trust card stays until claude starts or the trust
   /// is answered.
   public var outlivesTurn: Bool {
     switch kind {
-    case .send, .trust, .mcp: true
+    case .send, .trust, .mcp, .script: true
     case .permission, .question: deferred
     }
   }
@@ -146,6 +151,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case .send: "confirm \(summary)"
     case .trust: "trust the folder \((summary as NSString).abbreviatingWithTildeInPath)"
     case .mcp: summary
+    case .script: "approve a script: \(summary)"
     }
   }
 
@@ -158,7 +164,7 @@ public struct Card: Codable, Equatable, Sendable, Identifiable {
     case .permission:
       FileCall(self) != nil
         || tool == "Bash" && input["command"]?.string?.contains(where: { !$0.isWhitespace }) == true
-    case .send, .trust, .mcp: false
+    case .send, .trust, .mcp, .script: false
     }
   }
 
@@ -393,6 +399,11 @@ extension SessionFacts {
       cards.remove(at: card)
     case "mcp_request":
       if let card = Card(mcpRequest: event) { cards.append(card) }
+    case "script_proposed":
+      if let card = Card(scriptProposal: event) { cards.append(card) }
+    case "script_decided":
+      guard let card, cards[card].kind == .script else { return }
+      cards.remove(at: card)
     case "trust_closed":
       exitedAtTrust = true
       promptOnItsWaySince = nil
@@ -499,5 +510,10 @@ extension StringProtocol {
     unicodeScalars.map {
       $0.properties.generalCategory == .control && $0 != "\t" ? "\\u{\(String($0.value, radix: 16))}" : String($0)
     }.joined()
+  }
+
+  /// Each line of the text made `printable`, so newlines stay.
+  public var printableLines: String {
+    split(separator: "\n", omittingEmptySubsequences: false).map(\.printable).joined(separator: "\n")
   }
 }

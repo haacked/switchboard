@@ -1,8 +1,8 @@
 import SwiftUI
 import SwitchboardCore
 
-/// A permission prompt, a question, a group message, a folder trust prompt, or an MCP server request, answered
-/// without opening the session.
+/// A permission prompt, a question, a group message, a folder trust prompt, an MCP server request, or a script
+/// proposal, answered without opening the session.
 struct CardView: View {
   /// What the user picked or typed on the card and has not sent. BoardModel keeps one per card, so it outlives the view.
   final class Draft: ObservableObject {
@@ -47,6 +47,7 @@ struct CardView: View {
       case .send: groupMessage
       case .trust: trust
       case .mcp: mcpRequest
+      case .script: scriptProposal
       }
       RefusalLabel(refusal: model.cardErrors[card.id])
     }
@@ -120,6 +121,54 @@ struct CardView: View {
       Text(card.mcpRequest?.effect ?? "")
         .font(.caption)
         .foregroundStyle(.secondary)
+    }
+  }
+
+  /// Claude wrote the command and the reason. Allow stores the command as shown, so it shows in full, with each
+  /// control character as an escape, and never as Markdown.
+  @ViewBuilder
+  private var scriptProposal: some View {
+    if let proposal = card.scriptProposal?.value {
+      VStack(alignment: .leading, spacing: 8) {
+        let asker = model.allSessions.first { $0.id == card.session }?.name ?? card.session
+        let what = proposal.schedule.map { "change loop \($0) to run a script" } ?? "run a script on a loop"
+        Text(verbatim: "\(asker) wants to \(what)").font(.headline)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(verbatim: "In \(proposal.targetName) · \(proposal.folder)")
+          Text(verbatim: proposal.timingText)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        // The Inbox's Details shows the command verbatim, so even the compact card shows it with escapes.
+        Self.textBox(proposal.command.printableLines, maxHeight: 160)
+          .accessibilityLabel("Command: \(proposal.command.printable)")
+          .clickAnchor("script-card-\(card.id)-command")
+        if !compact {
+          if let before = proposal.before {
+            Text("Replaces").font(.caption).foregroundStyle(.secondary)
+            Self.textBox(before.command.printableLines, maxHeight: 80)
+              .accessibilityLabel("Replaces: \(before.command.printable)")
+          }
+          if !proposal.reason.isEmpty { Self.textBox(proposal.reason, maxHeight: 60) }
+        }
+        HStack {
+          Button("Allow") { model.answer(card, behavior: "allow") }
+            .help("Store the loop. Its command then runs on the interval with no permission prompt.")
+            .clickAnchor("script-card-\(card.id)-allow")
+          Button("Deny") { model.answer(card, behavior: "deny") }
+          Spacer()
+          HStack(spacing: 4) {
+            Text("Expires in")
+            Text(Date(timeIntervalSince1970: Double(proposal.expires) / 1000), style: .relative)
+          }
+          .font(.caption)
+          .foregroundStyle(.secondary)
+        }
+        Text("Nothing runs until you allow it. \(ScriptProposal.worktreeNote)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
     }
   }
 

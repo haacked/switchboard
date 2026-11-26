@@ -271,3 +271,330 @@ private let loop = scheduleFixture("r1")
     #expect(form.canSave)
   }
 }
+
+// MARK: - Runners (Stage 5)
+
+private let workFolder = "/Users/me/.claude-work"
+private let personalFolder = "/Users/me/.claude-personal"
+
+/// A 1h script loop that runs `command`.
+private func scriptLoop(_ command: String = "git fetch", every: Int64 = 60 * minuteMs, timeout: Int64? = nil)
+  -> Schedule
+{
+  var s = scheduleFixture("r2", command, every: every)
+  s.runner = .script
+  s.timeout = timeout
+  return s
+}
+
+/// A 1h headless loop on the work account and haiku, unless told otherwise.
+private func headlessLoop(account: String? = workFolder, model: String? = "haiku", timeout: Int64? = nil) -> Schedule {
+  var s = scheduleFixture("r3", "Summarize the open PRs", every: 60 * minuteMs)
+  s.runner = .headless
+  s.account = account
+  s.model = model
+  s.timeout = timeout
+  return s
+}
+
+/// A new loop of `runner` with an interval of 1h, and the prompt or command filled in.
+@MainActor
+private func newRunnerForm(_ runner: Schedule.Runner, text: String = "git fetch") -> LoopEditor.Form {
+  var form = LoopEditor.Form(new: LoopEditor.sessionChoices([], operatorID: nil))
+  form.runner = runner
+  form.interval = "1h"
+  if runner == .script { form.command = text } else { form.prompt = text }
+  return form
+}
+
+extension LoopEditorTests {
+  // MARK: A new loop's runner
+
+  @Test func aNewLoopRunsInTheSessionWithEmptyRunnerFields() {
+    let form = LoopEditor.Form(new: LoopEditor.sessionChoices([], operatorID: nil))
+
+    #expect(form.runner == .session)
+    #expect(form.account == "")
+    #expect(form.model == "")
+    #expect(form.timeout == "")
+    #expect(form.command == "")
+  }
+
+  @Test func aNewScriptWithACommandCanSaveAndSendsTheCommand() {
+    let form = newRunnerForm(.script)
+
+    #expect(form.canSave)
+    #expect(form.changedCommand == "git fetch")
+    #expect(form.changedPrompt == nil)
+  }
+
+  @Test(arguments: ["", "  \n "])
+  func aNewScriptWithoutACommandCantSave(_ command: String) {
+    var form = newRunnerForm(.script, text: command)
+    form.prompt = "a prompt typed before the runner changed"
+
+    #expect(!form.canSave)
+  }
+
+  @Test func aNewScriptsCommandIsSentTrimmed() {
+    #expect(newRunnerForm(.script, text: "  git fetch\n").changedCommand == "git fetch")
+  }
+
+  @Test func aNewHeadlessLoopWithAPromptCanSaveAndSendsThePrompt() {
+    let form = newRunnerForm(.headless, text: "Summarize the open PRs")
+
+    #expect(form.canSave)
+    #expect(form.changedPrompt == "Summarize the open PRs")
+    #expect(form.changedCommand == nil)
+  }
+
+  @Test func aNewHeadlessLoopWithoutAPromptCantSave() {
+    var form = newRunnerForm(.headless, text: "")
+    form.command = "git fetch"
+
+    #expect(!form.canSave)
+  }
+
+  /// An empty account or model runs on the session's, so nothing is sent for it.
+  @Test func aNewHeadlessLoopSendsAnAccountAndAModelOnlyWhenGiven() {
+    var form = newRunnerForm(.headless)
+    #expect(form.changedAccount == nil)
+    #expect(form.changedModel == nil)
+
+    form.account = "work"
+    form.model = "haiku"
+
+    #expect(form.changedAccount == "work")
+    #expect(form.changedModel == "haiku")
+    #expect(form.canSave)
+  }
+
+  /// sbd refuses a model that `Manager.modelProblem` refuses, because the value lands in claude's argv.
+  @Test(arguments: ["-p", "two words", "--model"])
+  func aHeadlessModelThatSbdRefusesShowsAnErrorAndDisablesSave(_ model: String) {
+    var form = newRunnerForm(.headless)
+    form.model = model
+
+    #expect(form.modelError != nil)
+    #expect(!form.canSave)
+  }
+
+  @Test func aScriptSendsNoAccountAndNoModel() {
+    var form = newRunnerForm(.script)
+    form.account = "work"
+    form.model = "haiku"
+
+    #expect(form.changedAccount == nil)
+    #expect(form.changedModel == nil)
+    #expect(form.canSave)
+  }
+
+  @Test func aLoopThatRunsInTheSessionSendsNoTimeoutNoAccountAndNoModel() {
+    var form = newRunnerForm(.session, text: "check the queue")
+    form.timeout = "5m"
+    form.account = "work"
+    form.model = "haiku"
+
+    #expect(form.changedTimeout == nil)
+    #expect(form.changedAccount == nil)
+    #expect(form.changedModel == nil)
+    #expect(form.timeoutError == nil)
+    #expect(form.canSave)
+  }
+
+  // MARK: The timeout
+
+  @Test(arguments: [Schedule.Runner.headless, .script])
+  func aReadableTimeoutWithinTheIntervalIsSent(_ runner: Schedule.Runner) {
+    var form = newRunnerForm(runner)
+    form.timeout = " 5m "
+
+    #expect(form.timeoutError == nil)
+    #expect(form.changedTimeout == "5m")
+    #expect(form.canSave)
+  }
+
+  @Test(arguments: [Schedule.Runner.headless, .script])
+  func anEmptyTimeoutUsesTheDefaultAndSendsNothing(_ runner: Schedule.Runner) {
+    let form = newRunnerForm(runner)
+
+    #expect(form.timeoutError == nil)
+    #expect(form.changedTimeout == nil)
+    #expect(form.canSave)
+  }
+
+  /// Too short, too long, unreadable, and longer than the 1h interval.
+  @Test(arguments: ["5s", "3h", "soon", "1h30m", "2h"])
+  func aTimeoutThatSbdRefusesShowsAnErrorAndDisablesSave(_ timeout: String) {
+    var form = newRunnerForm(.script)
+    form.timeout = timeout
+
+    #expect(form.timeoutError != nil, "\(timeout)")
+    #expect(!form.canSave)
+  }
+
+  @Test func aTimeoutEqualToTheIntervalIsAllowed() {
+    var form = newRunnerForm(.script)
+    form.timeout = "60m"
+
+    #expect(form.timeoutError == nil)
+    #expect(form.canSave)
+  }
+
+  // MARK: Editing a script or a headless loop
+
+  @Test func anEditOfAScriptOpensWithItsRunnerCommandAndTimeout() {
+    let form = LoopEditor.Form(editing: scriptLoop(timeout: 300_000))
+
+    #expect(form.runner == .script)
+    #expect(form.command == "git fetch")
+    #expect(form.timeout == "5m")
+    #expect(form.interval == "1h")
+  }
+
+  @Test func anEditOfAScriptWithTheDefaultTimeoutOpensWithAnEmptyTimeout() {
+    #expect(LoopEditor.Form(editing: scriptLoop()).timeout == "")
+  }
+
+  @Test func anEditOfAHeadlessLoopOpensWithItsAccountNameAndModel() {
+    let form = LoopEditor.Form(editing: headlessLoop())
+
+    #expect(form.runner == .headless)
+    #expect(form.account == "work")
+    #expect(form.model == "haiku")
+    #expect(form.prompt == "Summarize the open PRs")
+  }
+
+  @Test func anEditOfAHeadlessLoopOnTheSessionsAccountAndModelOpensWithBothEmpty() {
+    let form = LoopEditor.Form(editing: headlessLoop(account: nil, model: nil))
+
+    #expect(form.account == "")
+    #expect(form.model == "")
+  }
+
+  @Test(arguments: [scriptLoop(timeout: 300_000), headlessLoop(timeout: 300_000)])
+  func anUnchangedEditOfADetachedLoopChangesNothing(_ loop: Schedule) {
+    let form = LoopEditor.Form(editing: loop)
+
+    #expect(!form.canSave)
+    #expect(form.changedInterval == nil)
+    #expect(form.changedPrompt == nil)
+    #expect(form.changedCommand == nil)
+    #expect(form.changedTimeout == nil)
+    #expect(form.changedAccount == nil)
+    #expect(form.changedModel == nil)
+  }
+
+  @Test func aCommandOnlyEditChangesOnlyTheCommand() {
+    var form = LoopEditor.Form(editing: scriptLoop())
+    form.command = "git pull --rebase"
+
+    #expect(form.canSave)
+    #expect(form.changedCommand == "git pull --rebase")
+    #expect(form.changedInterval == nil)
+    #expect(form.changedTimeout == nil)
+  }
+
+  @Test func anEditThatEmptiesTheCommandCantSave() {
+    var form = LoopEditor.Form(editing: scriptLoop())
+    form.command = " "
+    form.interval = "2h"
+
+    #expect(!form.canSave)
+  }
+
+  @Test(arguments: [Schedule.Runner.headless, .script])
+  func aTimeoutOnlyEditChangesOnlyTheTimeout(_ runner: Schedule.Runner) {
+    var form = LoopEditor.Form(
+      editing: runner == .script ? scriptLoop(timeout: 300_000) : headlessLoop(timeout: 300_000))
+    form.timeout = "2m"
+
+    #expect(form.canSave)
+    #expect(form.changedTimeout == "2m")
+    #expect(form.changedCommand == nil)
+    #expect(form.changedPrompt == nil)
+  }
+
+  /// The timeout is compared by its length, as the interval is.
+  @Test func theSameTimeoutWrittenInAnotherUnitIsNoChange() {
+    var form = LoopEditor.Form(editing: scriptLoop(timeout: 120_000))
+    form.timeout = "120s"
+
+    #expect(form.changedTimeout == nil)
+    #expect(!form.canSave)
+  }
+
+  /// sbd refuses an edit that shortens the interval below a stored timeout, so the form does too.
+  @Test func anEditThatShortensTheIntervalBelowTheTimeoutCantSave() {
+    var form = LoopEditor.Form(editing: scriptLoop(timeout: 20 * minuteMs))
+    form.interval = "10m"
+
+    #expect(form.timeoutError != nil)
+    #expect(!form.canSave)
+  }
+
+  /// An empty account or model resets it to the session's, which sbd reads from an empty value.
+  @Test func clearingAHeadlessLoopsAccountAndModelSendsEmptyValues() {
+    var form = LoopEditor.Form(editing: headlessLoop())
+    form.account = ""
+    form.model = ""
+
+    #expect(form.canSave)
+    #expect(form.changedAccount == "")
+    #expect(form.changedModel == "")
+  }
+
+  @Test func changingAHeadlessLoopsAccountSendsTheNewName() {
+    var form = LoopEditor.Form(editing: headlessLoop())
+    form.account = "personal"
+
+    #expect(form.changedAccount == "personal")
+    #expect(form.changedModel == nil)
+    #expect(form.canSave)
+  }
+
+  @Test func anEmptyAccountOnALoopThatHasNoneIsNoChange() {
+    let form = LoopEditor.Form(editing: headlessLoop(account: nil, model: nil))
+
+    #expect(form.changedAccount == nil)
+    #expect(form.changedModel == nil)
+  }
+
+  /// A loop's runner is fixed when it is made, so an edit never turns a loop into a script.
+  @Test func anEditKeepsTheRunnerFixed() {
+    var form = LoopEditor.Form(editing: loop)
+    form.runner = .script
+    form.command = "touch pwned"
+
+    #expect(form.changedCommand == nil)
+    #expect(!form.canSave)
+  }
+
+  // MARK: Choices
+
+  /// Headless runs need a claude, so a Codex account is left out. The session's account comes first.
+  @Test func theAccountChoicesPutTheSessionsAccountFirstAndLeaveOutCodex() {
+    let accounts = [
+      AccountInfo(name: "personal", folder: personalFolder, active: true, sessions: 1),
+      AccountInfo(name: "codex", folder: "/Users/me/.codex", active: false, sessions: 0, agent: .codex),
+      AccountInfo(name: "work", folder: workFolder, active: false, sessions: 2),
+    ]
+
+    let choices = LoopEditor.accountChoices(accounts, sessionFolder: workFolder)
+
+    #expect(choices.map(\.name) == ["work", "personal"])
+  }
+
+  @Test func withNoSessionAccountTheChoicesKeepTheListsOrder() {
+    let accounts = [
+      AccountInfo(name: "personal", folder: personalFolder, active: true, sessions: 1),
+      AccountInfo(name: "work", folder: workFolder, active: false, sessions: 2),
+    ]
+
+    #expect(LoopEditor.accountChoices(accounts, sessionFolder: nil).map(\.name) == ["personal", "work"])
+  }
+
+  @Test func theModelSuggestionsAreSonnetOpusAndHaiku() {
+    #expect(LoopEditor.modelSuggestions == ["sonnet", "opus", "haiku"])
+  }
+}

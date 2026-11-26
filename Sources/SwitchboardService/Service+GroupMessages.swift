@@ -45,7 +45,7 @@ extension Service {
     }
     guard let opened = try store.event(id: id), opened.kind == "send_pending",
       let m = Card(groupMessage: opened)?.send,
-      let decided = try store.decision(card: id, session: opened.session),
+      let decided = try store.decision(card: id, session: opened.session, kind: "send_decided"),
       let decision = decided.data["decision"]?.string.flatMap(SendDecision.init(rawValue:))
     else { throw APIError("no group message \(id)") }
     let deliveries = try decided.data["deliveries"].map { try JSONCoding.convert($0, to: [GroupSend.Result].self) }

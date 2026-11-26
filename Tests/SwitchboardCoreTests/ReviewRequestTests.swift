@@ -48,7 +48,7 @@ extension ReviewRequestTests {
       let f = facts([reviewRequestEvent(1, "requested", reviewers: ["alice", "@copilot"])])
 
       #expect(
-        f.reviewRequest
+        f.reviewRequest?.value
           == ReviewRequestAttempt(head: samplePRHead, result: .requested, reviewers: ["alice", "@copilot"]))
     }
 

@@ -203,3 +203,135 @@ private func rowAnsweringModel() -> (BoardModel, SentRequests) {
     #expect(!model.savingLoop)
   }
 }
+
+// MARK: - Runners and output (Stage 5)
+
+/// A model whose `send` records every request and answers `schedule-log` with `text`.
+@MainActor
+private func logAnsweringModel(_ text: String = "Already up to date.\n", truncated: Bool = false) -> (
+  BoardModel, SentRequests
+) {
+  let model = offlineModel()
+  let sent = SentRequests()
+  model.send = { op, args in
+    sent.append(op, args)
+    return ["text": .string(text), "truncated": .bool(truncated)]
+  }
+  return (model, sent)
+}
+
+extension BoardModelScheduleTests {
+  @Test func addingAScriptLoopSendsTheRunnerTheCommandAsThePromptAndTheTimeout() async {
+    let sent = await firstRequest {
+      $0.addSchedule(session: "s1", every: "1h", prompt: "git fetch", runner: .script, timeout: "5m")
+    }
+
+    #expect(sent.op == "schedule")
+    #expect(
+      sent.args == [
+        "session": "s1", "every": "1h", "prompt": "git fetch", "by": "you", "runner": "script", "timeout": "5m",
+      ])
+  }
+
+  /// sbd stores a script only for the user. The app runs outside every session, so its request claims no caller and
+  /// no group, which `scriptAuthority` reads as the user.
+  @Test func theAppsScriptRequestClaimsNoCallerAndNoGroup() async {
+    let sent = await firstRequest { $0.addSchedule(session: "s1", every: "1h", prompt: "git fetch", runner: .script) }
+
+    #expect(sent.args["caller"] == nil)
+    #expect(sent.args["group"] == nil)
+    #expect(sent.args["by"] == "you")
+  }
+
+  @Test func addingAHeadlessLoopSendsTheRunnerTheAccountAndTheModel() async {
+    let sent = await firstRequest {
+      $0.addSchedule(
+        session: "s1", every: "1h", prompt: "Summarize the open PRs", runner: .headless, account: "work",
+        model: "haiku")
+    }
+
+    #expect(
+      sent.args == [
+        "session": "s1", "every": "1h", "prompt": "Summarize the open PRs", "by": "you", "runner": "headless",
+        "account": "work", "model": "haiku",
+      ])
+  }
+
+  @Test func addingAHeadlessLoopOnTheSessionsAccountAndModelSendsNeither() async {
+    let sent = await firstRequest {
+      $0.addSchedule(session: "s1", every: "1h", prompt: "Summarize the open PRs", runner: .headless)
+    }
+
+    #expect(sent.args["account"] == nil)
+    #expect(sent.args["model"] == nil)
+    #expect(sent.args["runner"] == "headless")
+  }
+
+  @Test func editingOnlyTheTimeoutSendsEditScheduleWithOnlyTheTimeout() async {
+    let sent = await firstRequest { $0.editSchedule("r1", every: nil, prompt: nil, timeout: "2m") }
+
+    #expect(sent.op == "edit-schedule")
+    #expect(sent.args == ["schedule": "r1", "timeout": "2m"])
+  }
+
+  /// An empty account or model resets it to the session's.
+  @Test func clearingAHeadlessLoopsAccountAndModelSendsEmptyValues() async {
+    let sent = await firstRequest { $0.editSchedule("r1", every: nil, prompt: nil, account: "", model: "") }
+
+    #expect(sent.args == ["schedule": "r1", "account": "", "model": ""])
+  }
+
+  /// A script's command travels in `prompt`. An edit never sends a runner, because sbd fixes it at creation.
+  @Test func editingAScriptsCommandSendsItAsThePromptAndNoRunner() async {
+    let sent = await firstRequest { $0.editSchedule("r1", every: nil, prompt: "git pull --rebase") }
+
+    #expect(sent.args == ["schedule": "r1", "prompt": "git pull --rebase"])
+  }
+
+  // MARK: Output…
+
+  @Test func loadingALoopsOutputSendsScheduleLogForTheNewestRun() async {
+    let sent = await firstRequest { $0.loadScheduleLog("r1") }
+
+    #expect(sent.op == "schedule-log")
+    #expect(sent.args == ["schedule": "r1"])
+  }
+
+  @Test func loadingAnOlderRunSendsItsNumber() async {
+    let sent = await firstRequest { $0.loadScheduleLog("r1", run: 3) }
+
+    #expect(sent.args == ["schedule": "r1", "run": 3])
+  }
+
+  @Test func theLogThatSbdReturnsShowsInTheOutputSheet() async {
+    let (model, _) = logAnsweringModel("Already up to date.\n", truncated: true)
+
+    model.loadScheduleLog("r1", run: 2)
+    await settle { model.loopOutput?.text != nil }
+
+    #expect(model.loopOutput?.schedule == "r1")
+    #expect(model.loopOutput?.run == 2)
+    #expect(model.loopOutput?.text == "Already up to date.\n")
+    #expect(model.loopOutput?.truncated == true)
+  }
+
+  @Test func aLogThatSbdRefusesShowsTheRefusalInTheSheet() async {
+    let (model, _) = recordingModel { op, _ in op == "schedule-log" ? "schedule r1 has not run yet" : nil }
+
+    model.loadScheduleLog("r1")
+    await settle { model.loopOutput?.error != nil }
+
+    #expect(model.loopOutput?.error?.contains("has not run yet") == true, "\(model.loopOutput?.error ?? "nil")")
+    #expect(model.actionError == nil)
+  }
+
+  @Test func theOpenOutputSheetCountsAsASheet() throws {
+    let model = offlineModel()
+    try #require(!model.presentingSheet)
+
+    model.loadScheduleLog("r1")
+    #expect(model.presentingSheet)
+    model.loopOutput = nil
+    #expect(!model.presentingSheet)
+  }
+}

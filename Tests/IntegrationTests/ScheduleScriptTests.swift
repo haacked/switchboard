@@ -5,7 +5,8 @@ import Testing
 /// Script schedules: `sb schedule <session> --every <interval> --script <command>` stores a shell command that sbd
 /// runs in the session's folder, outside the session's conversation, under the hold and blocker rules of a prompt
 /// schedule. Only the user, sbd, and a Manager conversation may store a script or change its command or timeout.
-/// Every other caller is refused until the proposal card ships.
+/// Claude in any other session except the Operator proposes the script through a card that stores nothing, which
+/// ScriptProposalTests covers. The Operator is refused.
 ///
 /// A command that the test runner starts runs outside every pane, which counts as the user. A test makes a script
 /// due with Run Now, or with a clock move where the interval is what it tests. Each script writes what it shows to
@@ -118,6 +119,20 @@ import Testing
   func gated(_ sbd: Instance, marks: String, gate: String, start: String = "start") -> String {
     let m = shellQuote(path(sbd, marks))
     return "echo \(start) >>\(m); while [ ! -f \(shellQuote(sbd.gate(gate))) ]; do sleep 0.1; done; echo end >>\(m)"
+  }
+
+  /// Expects that `r` proposed a script: sb printed `{pending: N, decision: "pending"}`, and N is the one `script`
+  /// card on the proposer.
+  func expectProposed(
+    _ r: CommandResult, _ sbd: Instance, on proposer: SessionSummary, sourceLocation: SourceLocation = #_sourceLocation
+  ) throws {
+    try #require(
+      r.status == 0, Comment(rawValue: "stdout: \(r.stdout)\nstderr: \(r.stderr)"), sourceLocation: sourceLocation)
+    let answer = try #require(JSON.parse(r.stdout), Comment(rawValue: r.stdout), sourceLocation: sourceLocation)
+    #expect(answer["decision"]?.string == "pending", Comment(rawValue: answer.text), sourceLocation: sourceLocation)
+    let cards = try sbd.get(proposer.id).cards.filter { $0.kind == .script }
+    #expect(
+      cards.map(\.id) == [answer["pending"]?.int].compactMap { $0 }.map(Int64.init), sourceLocation: sourceLocation)
   }
 
   // MARK: Run and record
@@ -506,9 +521,10 @@ import Testing
     #expect(try sbd.get(id).schedules == nil)
   }
 
-  /// A work session's Claude may not add a script, to itself or to another session.
+  /// A work session's Claude may not add a script, to itself or to another session. It proposes the script through a
+  /// card on itself, which stores nothing until the user allows it.
   @Test(arguments: [true, false])
-  func aWorkSessionsClaudePaneCannotAddAScript(_ toItself: Bool) throws {
+  func aWorkSessionsClaudePaneProposesAScriptAndStoresNothing(_ toItself: Bool) throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
     let target = toItself ? worker : try sbd.idleSession(name: "target")
@@ -516,13 +532,12 @@ import Testing
     let r = try waits.sbInPane(
       sbd, of: worker, ["schedule", target.id, "--every", "30m", "--script", "echo hi", "--json"])
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
-    #expect(r.stderr.contains(Self.refusal), Comment(rawValue: r.stderr))
+    try expectProposed(r, sbd, on: worker)
     #expect(try sbd.get(target.id).schedules == nil)
   }
 
   /// A session's Claude can type into its own shell pane with `tmux send-keys`, so the shell pane counts too.
-  @Test func aWorkSessionsShellPaneCannotAddAScript() throws {
+  @Test func aWorkSessionsShellPaneProposesAScriptAndStoresNothing() throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
     let terminals = try sbd.client.terminals(worker.id)
@@ -533,8 +548,7 @@ import Testing
     try sbd.typeInShell(terminals, "sh \"$SB_HOME/shell-add.sh\"")
     let r = try sbd.scriptResult("shell-add")
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
-    #expect(r.stderr.contains(Self.refusal), Comment(rawValue: r.stderr))
+    try expectProposed(r, sbd, on: worker)
     #expect(try sbd.get(worker.id).schedules == nil)
   }
 
@@ -599,7 +613,7 @@ import Testing
     #expect(try sbd.get(kid.id).schedules == [added.schedule])
   }
 
-  @Test func aWorkSessionsMCPServerCannotAddAScript() throws {
+  @Test func aWorkSessionsMCPServerProposesAScriptAndStoresNothing() throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
 
@@ -607,8 +621,9 @@ import Testing
       sbd, of: worker, "add_schedule", ["session": .string(worker.id), "every": "30m", "script": "echo hi"],
       name: "worker-mcp-add")
 
-    #expect(result.isError, Comment(rawValue: result.text))
-    #expect(result.text.contains(Self.refusal), Comment(rawValue: result.text))
+    #expect(!result.isError, Comment(rawValue: result.text))
+    #expect(result.json?["decision"]?.string == "pending", Comment(rawValue: result.text))
+    #expect(try sbd.get(worker.id).cards.filter { $0.kind == .script }.count == 1)
     #expect(try sbd.get(worker.id).schedules == nil)
   }
 
@@ -634,8 +649,9 @@ import Testing
   }
 
   /// The work session's side of the test above. Without a fresh snapshot, the installed one may know no pane and no
-  /// tmux server, so a client that claims no caller would pass as the user.
-  @Test func aWorkSessionsShellPaneThatOpenedSinceTheLastSnapshotCannotAddAScript() throws {
+  /// tmux server, so a client that claims no caller would pass as the user. The fresh snapshot places the client in
+  /// the work session, which proposes.
+  @Test func aWorkSessionsShellPaneThatOpenedSinceTheLastSnapshotProposesAScript() throws {
     let sbd = try Instance(config: ["tickSeconds": 3600])
     let worker = try sbd.idleSession(name: "worker")
     _ = try sbd.client.call("shell", ["session": .string(worker.id), "open": true])
@@ -648,23 +664,25 @@ import Testing
     try sbd.typeInShell(terminals, "sh \"$SB_HOME/late-add.sh\"")
     let r = try sbd.scriptResult("late-add")
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
+    try expectProposed(r, sbd, on: worker)
     #expect(try sbd.get(worker.id).schedules == nil)
-    // A command from a terminal is stored, so the refusal came from where the client runs.
-    #expect(try addScript(sbd, worker.id, "echo from the terminal").runner == .script)
   }
 
-  /// Decision 3 guards a script's command and timeout. The work session's pane changes neither.
+  /// Decision 3 guards a script's command and timeout. The work session's pane changes neither. Its edit opens a card
+  /// that holds the command and timeout before the edit.
   @Test(arguments: [["touch pwned"], ["--timeout", "2m"]])
-  func aWorkSessionsPaneCannotChangeAScriptsCommandOrTimeout(_ change: [String]) throws {
+  func aWorkSessionsPaneProposesAChangeOfAScriptsCommandOrTimeout(_ change: [String]) throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
     let made = try addScript(sbd, worker.id, "echo hi")
 
-    let r = try waits.sbInPane(sbd, of: worker, ["schedule", "edit", made.id] + change)
+    let r = try waits.sbInPane(sbd, of: worker, ["schedule", "edit", made.id] + change + ["--json"])
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
+    try expectProposed(r, sbd, on: worker)
     #expect(try current(sbd, worker.id, made.id) == made)
+    let proposal = try #require(try sbd.get(worker.id).cards.first { $0.kind == .script }?.scriptProposal)
+    #expect(proposal.schedule == made.id)
+    #expect(proposal.before?.command == "echo hi")
   }
 
   /// An interval changes when the script runs, not what runs, so it keeps today's rules.
@@ -731,8 +749,9 @@ import Testing
     try waits.expectRefused(r, sbd)
   }
 
+  /// sb in the run claims the work session, or only the run's pid places it there, so the nested add proposes.
   @Test(arguments: [false, true])
-  func aScriptOnAWorkSessionCannotAddAScript(_ unsetsCaller: Bool) throws {
+  func aScriptOnAWorkSessionProposesAScriptAndStoresNothing(_ unsetsCaller: Bool) throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
     let nested = sbCommand(
@@ -742,8 +761,8 @@ import Testing
     try runNow(sbd, made.id)
     let r = try sbd.scriptResult("run-add")
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
-    #expect(r.stderr.contains(Self.refusal), Comment(rawValue: r.stderr))
+    try expectProposed(r, sbd, on: worker)
     #expect(try sbd.get(worker.id).schedules?.map(\.id) == [made.id])
   }
+
 }

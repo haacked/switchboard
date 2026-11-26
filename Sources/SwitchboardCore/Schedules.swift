@@ -159,7 +159,12 @@ public struct Schedule: Codable, Equatable, Sendable {
   /// How long a run may take, in ms: the stored timeout, or else 30m for a headless run and 10m for a script, cut to
   /// the interval, so a run ends before the next one is due.
   public var runTimeout: Int64 {
-    timeout ?? min(runner == .headless ? 1_800_000 : 600_000, every)
+    timeout ?? Schedule.defaultTimeout(runner ?? .session, every: every)
+  }
+
+  /// The timeout of a run that has none of its own: 30m for a headless run and 10m for a script, cut to `every`.
+  public static func defaultTimeout(_ runner: Runner, every: Int64) -> Int64 {
+    min(runner == .headless ? 1_800_000 : 600_000, every)
   }
 
   /// The known runs, newest first. A row stored before sbd kept the history shows its `last`.
@@ -224,7 +229,7 @@ public struct Schedule: Codable, Equatable, Sendable {
 
   /// The prompt or command without the spaces and newlines at its ends. A script needs a command, and no run can
   /// carry a NUL character.
-  static func cleanPrompt(_ text: String?, runner: Runner) throws -> String {
+  public static func cleanPrompt(_ text: String?, runner: Runner) throws -> String {
     let prompt =
       runner == .script
       ? try cleanPrompt(text, refusal: "a script schedule needs a command") : try cleanPrompt(text)
@@ -361,6 +366,19 @@ public struct Schedule: Codable, Equatable, Sendable {
   public func fired(at now: Int64) -> (next: Int64, skipped: Int) {
     let next = (try? Schedule.next(after: now, every: every)) ?? .max
     return (next, Int(max(0, now - self.next) / every))
+  }
+
+  /// What runs, on one line: the prompt, `$ ` and a script's command, or `headless <model> on <account> · ` and the
+  /// prompt. A headless schedule without its own model or account leaves that part out, because it runs on the
+  /// session's. `sb schedule ls` and the app show it.
+  public var whatText: String {
+    switch runner ?? .session {
+    case .session: oneLine(prompt)
+    case .script: "$ \(oneLine(prompt))"
+    case .headless:
+      (["headless", model, account.map { "on \(Account.name(ofFolder: $0))" }].compactMap { $0 }
+        .joined(separator: " ")) + " · \(oneLine(prompt))"
+    }
   }
 
   /// The interval and the status text, such as `every 30m · next in 12m`. `sb schedule ls` and the app show it.

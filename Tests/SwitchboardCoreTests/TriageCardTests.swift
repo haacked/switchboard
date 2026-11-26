@@ -1275,3 +1275,83 @@ let staleCardShapes: [StaleCardShape] = [
     #expect(prompt.contains("sb summary set"))
   }
 }
+
+/// Stage 5 of the schedule plan: the Inbox item of a `script` card. Allow stores the schedule only after sbd checks
+/// that the user sent it, so the item recommends neither option.
+@Suite struct ScriptProposalTriageCardTests {
+  /// A work session whose turn ended after it proposed `command`.
+  func proposedFacts(_ command: String = "git fetch", schedule: String? = nil, before: (String, Int64?)? = nil)
+    -> SessionFacts
+  {
+    facts([
+      event("UserPromptSubmit", 0, ["prompt": "go"]),
+      scriptProposed(command: command, schedule: schedule, before: before.map { (command: $0.0, timeout: $0.1) }),
+      event("Stop", 11, ["last_assistant_message": "I proposed a script."]),
+    ])
+  }
+
+  func scriptItem(_ f: SessionFacts) throws -> TriageItem { try #require(item(f, now: 12)) }
+
+  /// Every text of the item that the user reads before deciding.
+  func texts(_ item: TriageItem) -> String {
+    ([item.title, item.summary, item.details.toolInput?.text ?? ""] + item.details.notes
+      + item.callouts.flatMap { [$0.title, $0.body] }).joined(separator: "\n")
+  }
+
+  @Test func theScriptCardIsTheItem() throws {
+    let item = try scriptItem(proposedFacts())
+
+    #expect(item.source == .card)
+    #expect(item.kind == .approval)
+    #expect(item.ref == "card:13")
+  }
+
+  @Test func theItemOffersAllowAndDenyAndRecommendsNeither() throws {
+    let item = try scriptItem(proposedFacts())
+
+    #expect(item.options.map(\.label) == ["Allow", "Deny"])
+    #expect(item.options.map(\.action) == [.allow, .deny])
+    #expect(item.options.map(\.recommended) == [false, false])
+  }
+
+  @Test(arguments: scriptCommands) func theItemsToolInputIsTheCommandExactly(_ command: String) throws {
+    let item = try scriptItem(proposedFacts(command))
+
+    #expect(item.details.toolInput?.text == command)
+    #expect(item.details.openByDefault)
+  }
+
+  @Test func theItemNamesTheTargetItsFolderAndTheInterval() throws {
+    let text = texts(try scriptItem(proposedFacts()))
+
+    #expect(text.contains("alpha"), "\(text)")
+    #expect(text.contains("/w/alpha"), "\(text)")
+    #expect(text.contains("1h"), "\(text)")
+  }
+
+  @Test func theItemHoldsTheReason() throws {
+    let text = texts(try scriptItem(proposedFacts()))
+
+    #expect(text.contains("Keep the branch fresh."), "\(text)")
+  }
+
+  /// Decision 3: a command that runs a file in the worktree runs code that the session's Claude can edit.
+  @Test func theItemWarnsThatTheSessionsClaudeCanEditWhatTheCommandRuns() throws {
+    let text = texts(try scriptItem(proposedFacts())).lowercased()
+
+    #expect(text.contains("claude can edit"), "\(text)")
+  }
+
+  @Test func anEditsItemShowsTheOldCommand() throws {
+    let text = texts(try scriptItem(proposedFacts("git pull", schedule: "r7", before: ("git fetch --prune", nil))))
+
+    #expect(text.contains("git fetch --prune"), "\(text)")
+    #expect(text.contains("git pull"), "\(text)")
+  }
+
+  @Test(arguments: scriptCommands) func theTitleHoldsNoControlCharacter(_ command: String) throws {
+    let title = try scriptItem(proposedFacts(command)).title
+
+    #expect(!title.unicodeScalars.contains { $0.properties.generalCategory == .control }, "\(title)")
+  }
+}

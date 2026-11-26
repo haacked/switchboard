@@ -165,8 +165,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// Whether the turn of `sessionSummary` has ended at a main Stop. The next main Stop drops the card.
   public var sessionSummaryStopped = false
   /// The model's summary of the PR for the merge card, from the last
-  /// `mergeBrief` event that has one.
-  public var mergeBrief: MergeBrief?
+  /// `mergeBrief` event that has one. The box keeps `SessionFacts` small enough for the server threads' stacks.
+  public var mergeBrief: Box<MergeBrief>?
   /// When sbd called the model for a summary, within the last hour.
   public var summaryCalls: [Int64] = []
   /// When the user last sent the session a prompt or answered its card, or 0.
@@ -190,8 +190,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   public var docket = DocketStatus()
   /// The last merge that sbd ran.
   public var merge: MergeAttempt?
-  /// The last review request that sbd ran.
-  public var reviewRequest: ReviewRequestAttempt?
+  /// The last review request that sbd ran. The box keeps `SessionFacts` small enough for the server threads' stacks.
+  public var reviewRequest: Box<ReviewRequestAttempt>?
   /// The Inbox item that the user acknowledged during this turn.
   public var acknowledgment: Acknowledgment?
   /// When sbd recorded the last `ack`. Unlike `acknowledgment`, it outlasts the turn.
@@ -492,7 +492,7 @@ public struct SessionFacts: Codable, Equatable, Sendable {
     case "merge":
       merge = try? JSONCoding.convert(event.data, to: MergeAttempt.self)
     case ReviewRequestAttempt.event:
-      reviewRequest = try? JSONCoding.convert(event.data, to: ReviewRequestAttempt.self)
+      reviewRequest = (try? JSONCoding.convert(event.data, to: ReviewRequestAttempt.self)).map(Box.init)
     case GroupContext.heardEvent:
       groupContextHeard = d["context"]?.string
     default:

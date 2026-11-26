@@ -71,7 +71,7 @@ public enum ChatMark: Equatable, Sendable {
 
   static func needsMe(_ kind: Card.Kind) -> Bool {
     switch kind {
-    case .permission, .question, .trust, .send, .mcp: true
+    case .permission, .question, .trust, .send, .mcp, .script: true
     }
   }
 

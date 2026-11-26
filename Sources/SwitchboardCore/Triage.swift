@@ -485,11 +485,11 @@ public enum Triage {
 
   /// Whether a card of this kind stops the session's turn until the user
   /// answers it. A send card does not: the turn goes on, and the card expires.
-  /// An MCP server request does, because the conversation ends its turn to
-  /// wait for the server.
+  /// An MCP server request and a script proposal do, because the session ends its turn to
+  /// wait for the user's decision.
   static func blocks(_ kind: Card.Kind) -> Bool {
     switch kind {
-    case .permission, .question, .trust, .mcp: true
+    case .permission, .question, .trust, .mcp, .script: true
     case .send: false
     }
   }
@@ -675,6 +675,16 @@ public enum Triage {
         ], source: .card,
         details: TriageDetails(
           openByDefault: true, toolInput: .init(tool: card.tool, text: card.mcpRequest?.reason ?? "")))
+    case .script:
+      // Allow stores a command that runs with no permission prompt, so neither option is the default.
+      let proposal = card.scriptProposal?.value
+      return TriageItem(
+        title: title(card.reason), kind: .approval, summary: proposal.map(scriptSummary) ?? "",
+        options: [TriageOption(label: "Allow", action: .allow), TriageOption(label: "Deny", action: .deny)],
+        source: .card,
+        details: TriageDetails(
+          openByDefault: true, toolInput: .init(tool: card.tool, text: proposal?.command ?? ""),
+          notes: proposal.map(scriptNotes) ?? []))
     case .permission:
       return TriageItem(
         title: title(card.reason), kind: .approval, summary: permissionSummary(card),
@@ -699,6 +709,22 @@ public enum Triage {
         summary: card.questions.map(\.question).joined(separator: " "), options: options,
         multiSelect: only?.multiSelect ?? false, source: .card)
     }
+  }
+
+  /// What a script proposal's item says it does: where and how often the command runs.
+  static func scriptSummary(_ p: ScriptProposal) -> String {
+    let what = p.schedule.map { "change schedule \($0) to run this command" } ?? "run this command"
+    return
+      "Claude asks to \(what) in \(p.targetName) (\(codeSpan(p.folder))), \(p.timingText). Nothing runs until you allow it."
+  }
+
+  /// The proposal's reason, the command that an edit replaces, and the note about code in the session's folder.
+  static func scriptNotes(_ p: ScriptProposal) -> [String] {
+    var notes: [String] = []
+    if !p.reason.isEmpty { notes.append("Reason: \(p.reason)") }
+    if let before = p.before { notes.append("Replaces: \(before.command.printable)") }
+    notes.append(ScriptProposal.worktreeNote)
+    return notes
   }
 
   static func ruleItem(_ verdict: Verdict) -> TriageItem {

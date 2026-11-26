@@ -4,7 +4,7 @@ import SwitchboardCore
 /// Schedules: prompts that sbd sends to a session on an interval, and scripts that sbd runs in its folder.
 extension Service {
   /// The `schedule`, `schedules`, `remove-schedule`, `pause-schedule`,
-  /// `edit-schedule`, `run-schedule`, and `schedule-log` requests. Each takes an optional
+  /// `edit-schedule`, `run-schedule`, `schedule-log`, and `schedule-pending` requests. Each takes an optional
   /// `group` and `caller`, which a scoped MCP server sends. With `group`, a
   /// request acts only on the group's sessions and on the caller. It runs on
   /// the state queue, so the scope check and the change happen in one step.
@@ -20,11 +20,28 @@ extension Service {
     case "edit-schedule": return try editSchedule(args, origin: origin, caller: caller)
     case "run-schedule": return try runSchedule(args)
     case "schedule-log": return try scheduleLog(args)
+    case "schedule-pending": return try JSON(encoding: scriptProposalStatus(args))
     default: throw APIError("unknown request \(op)")
     }
   }
 
+  /// Stores the schedule, or opens a `script` card on the session that proposes a script, as `scriptAuthority`
+  /// decides.
   private func addSchedule(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
+    let (id, schedule, authority) = try newSchedule(args, origin: origin, caller: caller)
+    if case .propose(let proposer) = authority {
+      return try openScriptProposal(
+        from: proposer, target: id, schedule: schedule, before: nil, reason: args["reason"]?.string)
+    }
+    return try storeNewSchedule(id, schedule)
+  }
+
+  /// The schedule that an add with `args` stores on the session that `args` names, after every check of the add.
+  /// It returns who sent a script, as `scriptAuthority` decides, and nil for another runner. With `approved`, the
+  /// user approved a card that holds the values, so no caller check runs.
+  func newSchedule(_ args: JSON, origin: RequestOrigin, caller: Caller, approved: Bool = false) throws -> (
+    id: String, schedule: Schedule, authority: ScriptAuthority?
+  ) {
     let id: String
     do {
       id = try lookup(args)
@@ -46,7 +63,8 @@ extension Service {
     if runner != .session, session.host != nil {
       throw APIError("--headless and --script run only for a session on this Mac")
     }
-    if runner == .script { try requireScriptAuthority(args, origin: origin, caller: caller) }
+    let authority =
+      runner == .script && !approved ? try scriptAuthority(args, origin: origin, caller: caller) : nil
     if runner == .headless {
       try checkHeadlessCaller(id, args, origin: origin, caller: caller)
       if request.account == nil, let refusal = codexLaunchRefusal(id) { throw APIError(refusal) }
@@ -56,6 +74,10 @@ extension Service {
     let taken = entries.values.flatMap(\.session.allSchedules).map(\.id)
     let schedule = try request.makeSchedule(id: shortId("r", taken: taken), now: nowMs(), group: group)
     if let duplicate = Schedule.duplicate(of: schedule, in: open) { throw APIError(duplicate) }
+    return (id, schedule, authority)
+  }
+
+  func storeNewSchedule(_ id: String, _ schedule: Schedule) throws -> JSON {
     try update(id) { $0.addSchedule(schedule) }
     record(id, "schedule", ["schedule": try JSON(encoding: schedule)])
     return try JSON(encoding: scheduleRow(id, schedule))
@@ -94,17 +116,8 @@ extension Service {
     case propose(String)
   }
 
-  /// sbd's refusal for a caller that `scriptAuthority` gives `propose`.
+  /// The start of sbd's refusal for a caller that may neither store a script nor propose one.
   static let scriptRefusal = "only you or a Manager conversation can add a script schedule"
-
-  /// Refuses a request that would store a script or change a script's command or timeout, unless the user, sbd, or a
-  /// Manager conversation sent it, as `scriptAuthority` decides. It runs on the state queue, after `install` of a
-  /// fresh snapshot.
-  private func requireScriptAuthority(_ args: JSON, origin: RequestOrigin, caller: Caller) throws {
-    if case .propose = try scriptAuthority(args, origin: origin, caller: caller) {
-      throw APIError(Self.scriptRefusal)
-    }
-  }
 
   /// Who sent a request that would store a script or change a script's command or timeout. `.inProcess` is sbd. A
   /// client's ancestry decides the rest, as the other `scriptAuthority` says. A request from a host is refused. It
@@ -228,9 +241,10 @@ extension Service {
 
   /// Changes the interval, the prompt or command, the timeout, a headless schedule's account or model, or several.
   /// It sends nothing: a next run that the edit makes due fires through `fireDueSchedules`. A schedule's runner
-  /// never changes. A change to a script's command or timeout needs the authority of `requireScriptAuthority`, and a
-  /// change to a coordinator's headless prompt, account, or model needs that of `checkHeadlessCaller`. A change to
-  /// the interval needs neither, because the interval changes when the run happens and not what runs.
+  /// never changes. A change to a script's command or timeout needs the authority of `scriptAuthority`, and a
+  /// session that may only propose gets a `script` card that holds the whole edit. A change to a coordinator's
+  /// headless prompt, account, or model needs the authority of `checkHeadlessCaller`. A change to the interval alone
+  /// needs neither, because the interval changes when the run happens and not what runs.
   private func editSchedule(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
     let (id, found) = try ownedSchedule(args)
     if found.gate != nil { try checkTopupCaller(args, origin: origin, caller: caller) }
@@ -241,9 +255,9 @@ extension Service {
         "schedule \(found.id) runs as \(runner.rawValue), and a schedule's runner can't change. Add a new schedule instead"
       )
     }
-    if runner == .script, request.prompt != nil || request.timeout != nil {
-      try requireScriptAuthority(args, origin: origin, caller: caller)
-    }
+    let authority =
+      runner == .script && (request.prompt != nil || request.timeout != nil)
+      ? try scriptAuthority(args, origin: origin, caller: caller) : nil
     if runner == .headless {
       if request.prompt != nil || request.account != nil || request.model != nil {
         try checkHeadlessCaller(id, args, origin: origin, caller: caller)
@@ -254,6 +268,14 @@ extension Service {
       every: request.every, prompt: request.prompt, account: request.account, model: request.model,
       timeout: request.timeout, now: nowMs())
     guard schedule != found else { return try JSON(encoding: scheduleRow(id, found)) }
+    if case .propose(let proposer) = authority {
+      return try openScriptProposal(
+        from: proposer, target: id, schedule: schedule, before: found, reason: args["reason"]?.string)
+    }
+    return try storeEdit(id, schedule, before: found)
+  }
+
+  func storeEdit(_ id: String, _ schedule: Schedule, before found: Schedule) throws -> JSON {
     try changeSchedule(id, schedule.id) { $0 = schedule }
     record(id, "schedule-edited", ["schedule": try eventJSON(schedule), "before": try eventJSON(found)])
     return try JSON(encoding: scheduleRow(id, schedule))

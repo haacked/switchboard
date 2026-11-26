@@ -654,9 +654,10 @@ extension Instance {
   // MARK: A run has its session's authority (Risk 2)
 
   /// `sb` in a work session's run claims the work session from SB_SESSION_ID. With the variable unset, only the
-  /// run's pid in the client's ancestry places sb inside the work session, which proposes and so is refused.
+  /// run's pid in the client's ancestry places sb inside the work session. Either way the add opens a script card on
+  /// the work session and stores nothing.
   @Test(arguments: [false, true])
-  func aWorkSessionsRunCannotAddAScript(_ unsetsCaller: Bool) throws {
+  func aWorkSessionsRunOnlyProposesAScript(_ unsetsCaller: Bool) throws {
     let sbd = try Instance()
     let worker = try sbd.idleSession(name: "worker")
     let add = scripts.sbCommand(
@@ -668,7 +669,7 @@ extension Instance {
     try runNow(sbd, worker.id, made.id)
     let r = try sbd.scriptResult("from-run")
 
-    #expect(r.status != 0, Comment(rawValue: r.stdout))
+    try scripts.expectProposed(r, sbd, on: worker)
     #expect(try sbd.get(worker.id).schedules?.map(\.runner) == [.headless])
   }
 

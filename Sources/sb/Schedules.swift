@@ -15,8 +15,10 @@ let topupFlags = ["--group", "--repo", "--target", "--template-file", "--rubric-
 /// `ls [<session>]` lists the schedules, `rm <id>` removes one, `pause <id>`
 /// and `resume <id>` pause and resume one, `edit <id> [--every <interval>]
 /// [--timeout <duration>] [--account A] [--model M] [<prompt>]` changes one, `run <id>` makes one due now,
-/// and `log <id> [--run N]` prints a run's output.
+/// and `log <id> [--run N]` prints a run's output. A script from a session that may only propose it opens a card,
+/// and `--pending <card> [--wait]` reads the user's decision on it.
 func scheduleCommand(_ a: Args) {
+  if let card = a.values["--pending"] { return scriptProposalCommand(a, card: card) }
   let first = a.session("schedule")
   let result: JSON
   switch first {
@@ -42,9 +44,7 @@ func scheduleCommand(_ a: Args) {
     if a.json { return printJSON(answer) }
     // A command can print escape sequences that a terminal would act on, so each line prints with them escaped.
     let text = answer["text"]?.string ?? ""
-    print(
-      text.split(separator: "\n", omittingEmptySubsequences: false).map { String($0).printable }.joined(
-        separator: "\n"), terminator: "")
+    print(text.printableLines, terminator: "")
     return
   case "rm", "pause", "resume", "run":
     guard a.positional.count == 2 else { die("schedule \(first) needs a schedule id") }
@@ -65,6 +65,7 @@ func scheduleCommand(_ a: Args) {
     if let account = a.values["--account"] { args["account"] = .string(account) }
     if let model = a.values["--model"] { args["model"] = .string(model) }
     guard args.count > 1 else { die("schedule edit needs --every, --timeout, --account, --model, or a prompt") }
+    if let reason = a.values["--reason"] { args["reason"] = .string(reason) }
     args.merge(callerArg) { $1 }
     result = call("edit-schedule", args)
   default:
@@ -83,13 +84,39 @@ func scheduleCommand(_ a: Args) {
     if let account = a.values["--account"] { args["account"] = .string(account) }
     if let model = a.values["--model"] { args["model"] = .string(model) }
     if let gate = topupGate(a) { args["gate"] = gate }
+    if let reason = a.values["--reason"] { args["reason"] = .string(reason) }
     args.merge(callerArg) { $1 }
     result = call("schedule", args)
   }
   if a.json { return printJSON(result) }
+  if let card = result["pending"]?.int {
+    return print(
+      "waiting for your approval: card \(card). Nothing runs until the user allows it. End your turn, and read the decision later with: sb schedule --pending \(card)"
+    )
+  }
   let row = decode(result, as: ScheduleRow.self)
   let names = gateGroupNames([row.schedule])
   print("\(first == "rm" ? "removed " : "")\(row.schedule.id)  \(scheduleText(row, groupNames: names))".printable)
+}
+
+/// Prints the decision on the script proposal whose card is `text`. With `--wait`, it waits up to 60 s for one.
+func scriptProposalCommand(_ a: Args, card text: String) {
+  guard let id = Int64(text) else { die("--pending needs the card number that sb schedule printed") }
+  let status: ScriptProposalStatus
+  do {
+    status = try client.awaitScriptProposal(id, timeout: a.switches.contains("--wait") ? 60 : 0)
+  } catch {
+    die("\(error)")
+  }
+  if a.json { return printJSON((try? JSON(encoding: status)) ?? .null) }
+  switch status.decision {
+  case .pending: print("The script still waits for the user's decision. Nothing runs yet.")
+  case .approved: print("The user allowed the script. It is schedule \(status.schedule ?? "?").")
+  case .denied: print("The user denied the script. Do not propose it again unless the user asks you to.")
+  case .expired: print("Nobody decided within a day, so the proposal expired. Nothing runs.")
+  case .stale:
+    print("The schedule changed or was removed before the user allowed the change, so nothing changed.")
+  }
 }
 
 /// The `gate` request of `sb schedule <session> --topup`, with the text of the template and rubric files, or nil
@@ -137,19 +164,9 @@ func scheduleText(_ r: ScheduleRow, groupNames: [String: String]) -> String {
   scheduleText(r.schedule, status: r.status?.text ?? r.schedule.nextText(), groupNames: groupNames)
 }
 
-/// The prompt on one line, `$ ` and a script's command, or `headless <model> on <account> · ` and the prompt, then
-/// the interval, the status, the last result, and a gate's last check. A headless schedule without its own model or
-/// account leaves that part out, because it runs on the session's.
+/// What runs, as `Schedule.whatText` says it, then the interval, the status, the last result, and a gate's last check.
 func scheduleText(_ s: Schedule, status: String, groupNames: [String: String]) -> String {
-  let what =
-    switch s.runner ?? .session {
-    case .session: oneLine(s.prompt)
-    case .script: "$ \(oneLine(s.prompt))"
-    case .headless:
-      (["headless", s.model, s.account.map { "on \(Account.name(ofFolder: $0))" }].compactMap { $0 }
-        .joined(separator: " ")) + " · \(oneLine(s.prompt))"
-    }
-  let line = "\(what)  \(s.timingText(status)) · \(s.lastText())"
+  let line = "\(s.whatText)  \(s.timingText(status)) · \(s.lastText())"
   guard let gate = s.gate else { return line }
   return "\(line)  \(gate.statusText(groupName: groupNames[gate.group] ?? gate.group))"
 }

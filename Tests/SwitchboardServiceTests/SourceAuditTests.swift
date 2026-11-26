@@ -41,6 +41,9 @@ enum SourceAudit {
   static let snapshotReaders = local.union(["\(service)Service+Sites.swift"])
   /// `FolderUsers.swift` holds `Processes.using`, which reads this Mac's processes for the site file.
   static let folderUsersFile = "\(service)FolderUsers.swift"
+  /// `Service+ScheduleRuns.swift` stops orphaned script and headless runs. sbd refuses those runs for a session on a
+  /// host, so every run is on this Mac.
+  static let scheduleRunsFile = "\(service)Service+ScheduleRuns.swift"
 
   /// The files of `sb` that may read stdin. The box's `sb` sends stdin through the `cli` request only for `summary
   /// set`, so a command in any other file would read an empty stdin on a host. `main.swift` reads a hook's payload,
@@ -66,7 +69,9 @@ enum SourceAudit {
     Rule("Processes.exists(", #"Processes\.exists\("#, under: service, allowed: local),
     Rule("Processes.waitForExit(", #"Processes\.waitForExit\("#, under: service, allowed: local),
     Rule("Processes.using(", #"Processes\.using\("#, under: service, allowed: local),
-    Rule("ProcessTable.readLocal(", #"(?<![A-Za-z0-9_])readLocal(?![A-Za-z0-9_])"#, under: service, allowed: local),
+    Rule(
+      "ProcessTable.readLocal(", #"(?<![A-Za-z0-9_])readLocal(?![A-Za-z0-9_])"#, under: service,
+      allowed: local.union([scheduleRunsFile])),
     Rule("realPath(", bare + #"realPath\("#, under: service, allowed: local.union([folderUsersFile])),
     Rule("snapshot.panes", bare + #"snapshot\.panes\b"#, under: service, allowed: snapshotReaders),
     Rule("snapshot.claudePids", bare + #"snapshot\.claudePids\b"#, under: service, allowed: snapshotReaders),

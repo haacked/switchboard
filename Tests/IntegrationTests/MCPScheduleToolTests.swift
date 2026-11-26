@@ -59,7 +59,9 @@ import Testing
     let add = try tool(mcp, "add_schedule")
 
     #expect(
-      properties(add) == ["session", "every", "prompt", "topup", "script", "timeout", "headless", "account", "model"])
+      properties(add) == [
+        "session", "every", "prompt", "topup", "script", "timeout", "headless", "account", "model", "reason",
+      ])
     #expect(required(add).contains("every"))
     #expect(required(add).isSubset(of: ["every", "prompt"]))
   }
@@ -119,7 +121,7 @@ import Testing
     #expect(properties(edit).isSuperset(of: ["schedule", "every", "prompt", "script", "timeout", "account", "model"]))
     #expect(
       properties(edit).isSubset(of: [
-        "schedule", "every", "prompt", "script", "timeout", "account", "model", "headless",
+        "schedule", "every", "prompt", "script", "timeout", "account", "model", "headless", "reason",
       ]))
     #expect(required(edit) == ["schedule"])
   }
@@ -895,8 +897,8 @@ import Testing
     #expect(try stored(sbd, s.id) == [row.schedule])
   }
 
-  /// Stage 3's refusal stays until the proposal card ships. IntegrationTests/ScheduleScriptTests covers the call from
-  /// inside a work session's pane.
+  /// A server outside every pane that claims a work session is refused, and opens no proposal card either.
+  /// IntegrationTests/ScriptProposalTests covers the call from inside a work session's pane, which proposes.
   @Test func addScheduleWithAScriptFromAWorkSessionStillStoresNothing() throws {
     let sbd = try Instance()
     let s = try sbd.new()
@@ -906,6 +908,7 @@ import Testing
 
     #expect(result.isError)
     #expect(try stored(sbd, s.id) == nil)
+    #expect(try sbd.get(s.id).cards.isEmpty)
   }
 
   // MARK: Status and history
