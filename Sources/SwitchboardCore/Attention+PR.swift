@@ -24,6 +24,27 @@ extension Attention {
     return Verdict(state: .needsYou, reason: "\(what); commit or discard the uncommitted changes", kind: .review)
   }
 
+  /// Done for a work session that never had a PR, once the user acknowledged the item of a last reply that asks
+  /// nothing and the poller found the folder clean with HEAD on a remote's default branch. A fresh worktree has the
+  /// same folder state, so the acknowledgment is the signal that the session finished. The folder check makes sure
+  /// that removing the worktree loses nothing. The wait rule and the first-prompt rule run before this one.
+  public static func finishedWithoutPR(_ session: Session, _ facts: SessionFacts, now: Int64) -> Verdict? {
+    guard awaitsFolderCheck(kind: session.kind, facts, now: now), facts.dirty == 0, !facts.folderGone,
+      facts.headOnDefault
+    else { return nil }
+    return Verdict(state: .done, reason: "finished without a PR; nothing to commit or push")
+  }
+
+  /// Whether every condition of `finishedWithoutPR` except the folder's holds. The poller checks the folder only
+  /// for such a session.
+  public static func awaitsFolderCheck(kind: SessionKind, _ facts: SessionFacts, now: Int64) -> Bool {
+    guard kind == .work, facts.pr == nil, facts.prNumbers.isEmpty, !facts.turnRunning, facts.prompts > 0,
+      facts.snooze == nil, !facts.subagentsRunning(now: now), !facts.jobsRunning(now: now),
+      case .other = classify(facts.lastReply ?? ""), let ack = facts.acknowledgment
+    else { return false }
+    return ack.covers(replyVerdict(facts.lastReply ?? ""), facts)
+  }
+
   /// The rules for an open PR of a session whose turn has ended: a merged
   /// base, a conflict, requested changes, a removal from Trunk's queue, a
   /// failed Depot job outside Trunk's queue, a PR ready to merge, and what

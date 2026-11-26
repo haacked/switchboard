@@ -14,7 +14,9 @@ extension Service {
     if args["undo"]?.bool == true {
       // The operator's reports reopen even while a wait or a prompt gives it an item that hides Undo Acknowledge.
       let reopensReports = e.session.kind == .operator && !e.facts.acknowledgedReports.isEmpty
-      guard shown(id, verdict, now: now).acknowledged || verdict.requested || reopensReports else {
+      // An acknowledgment that finished a session without a PR shows as Done, not as acknowledged.
+      let finished = Attention.finishedWithoutPR(e.session, e.facts, now: now) != nil
+      guard shown(id, verdict, now: now).acknowledged || verdict.requested || reopensReports || finished else {
         throw APIError("\(e.session.name) isn't acknowledged")
       }
       record(id, "unack")
