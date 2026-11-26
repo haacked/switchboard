@@ -108,7 +108,8 @@ extension GitHubPoller {
           session: s.session, wait: s.wait.id, outcome: s.settlement.outcome, changedAt: s.settlement.changedAt,
           met: s.settlement.met)
         stats.resolved += 1
-        // A wait's action can keep the wait open, as one that awaits the Operator's judgment does.
+        // A wait with an action stays open while the action runs, and its time to `wait-resolved` would include the
+        // action's run. Only a wait that this call closed gives the hub a time.
         if !summary.waits.contains(where: { $0.id == s.wait.id }) {
           hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
         }
