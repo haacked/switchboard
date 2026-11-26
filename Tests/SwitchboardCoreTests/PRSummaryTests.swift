@@ -131,6 +131,52 @@ private func encoded(_ summary: PRSummary) throws -> [String: JSON] {
     #expect(decoded.number == 42)
   }
 
+  // MARK: Source
+
+  @Test func aNewSummaryHasNoSource() {
+    #expect(PRSummary(samplePR()).source == nil)
+  }
+
+  @Test func aSummaryWithoutASourceHasNoSourceKey() throws {
+    #expect(try encoded(PRSummary(samplePR()))["source"] == nil)
+  }
+
+  @Test(arguments: ["events", "polling"])
+  func encodesTheSourceUnderItsName(_ source: String) throws {
+    var summary = PRSummary(samplePR())
+    summary.source = source
+
+    #expect(try encoded(summary)["source"] == .string(source))
+  }
+
+  @Test func roundTripsTheSource() throws {
+    var summary = PRSummary(samplePR())
+    summary.source = "events"
+
+    #expect(try JSONCoding.convert(summary, to: PRSummary.self) == summary)
+  }
+
+  /// An sbd from before read mode, local or on a remote host, sends no source.
+  @Test func decodesJSONWithoutASourceAsNoSource() throws {
+    var object = try encoded(PRSummary(samplePR()))
+    object["source"] = nil
+
+    let decoded = try JSONCoding.convert(JSON.object(object), to: PRSummary.self)
+
+    #expect(decoded.source == nil)
+    #expect(decoded.number == 42)
+  }
+
+  /// The source shows after the line in `sb get`, so the line itself stays as it was.
+  @Test func theSourceDoesNotChangeTheLine() {
+    var summary = PRSummary(samplePR())
+    let line = summary.line
+
+    summary.source = "events"
+
+    #expect(summary.line == line)
+  }
+
   @Test func decodesALiteralSummaryFromAnOlderSbd() throws {
     let text = """
       {"number": 42, "url": "https://github.com/acme/widgets/pull/42", "repo": "acme/widgets", "title": "",
@@ -144,5 +190,6 @@ private func encoded(_ summary: PRSummary) throws -> [String: JSON] {
     #expect(decoded.additions == nil)
     #expect(decoded.deletions == nil)
     #expect(decoded.rereview == nil)
+    #expect(decoded.source == nil)
   }
 }

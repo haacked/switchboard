@@ -773,7 +773,7 @@ func printSession(_ s: SessionSummary) {
   if let mode = s.permissionMode { print("  mode:    \(PermissionMode.title(mode))".printable) }
   if let b = s.branch { print("  branch:  \(b)") }
   if let note = s.branchSwitchNote { print("  warning: \(note)".printable) }
-  if let pr = s.pr { print("  pr:      \(pr.line)  \(pr.url)") }
+  if let pr = s.pr { print("  pr:      \(pr.line)\(pr.source.map { " (\($0))" } ?? "")  \(pr.url)") }
   if let earlier = s.earlierPRs { print("  earlier PRs: " + earlier.map { "#\($0)" }.joined(separator: ", ")) }
   for issue in s.issues ?? [] {
     print(

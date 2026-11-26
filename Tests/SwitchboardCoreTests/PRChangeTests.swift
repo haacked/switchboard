@@ -50,9 +50,10 @@ import Testing
       reads: 4, lastSignalAt: Self.now - 5_000, counts: ["streams": 42, "reconnects": 1])
 
     #expect(
-      PRSources(providers: [source]).lines(now: Self.now) == [
+      Self.unindented(PRSources(providers: [source]).lines(now: Self.now)) == [
         "github-events: live, since 2m ago, covers 42 of 45 PRs, 10 signals, 4 reads, last signal 5s ago,"
-          + " reconnects 1, streams 42"
+          + " reconnects 1, streams 42",
+        "misses: 0",
       ])
   }
 
@@ -62,9 +63,10 @@ import Testing
       retryAt: Self.now + 21_600_000)
 
     #expect(
-      PRSources(providers: [source]).lines(now: Self.now) == [
+      Self.unindented(PRSources(providers: [source]).lines(now: Self.now)) == [
         "github-events: unavailable (Event subscriptions are not enabled for this account.), retries in 6h,"
-          + " covers 0 of 0 PRs, 0 signals, 0 reads"
+          + " covers 0 of 0 PRs, 0 signals, 0 reads",
+        "misses: 0",
       ])
   }
 
@@ -108,11 +110,78 @@ import Testing
     #expect(lines[1].hasPrefix("shadow: 0 matched, 3 unmatched, 0 misses"))
   }
 
-  @Test func aSourceThatIsNotInShadowModeShowsNoShadowLine() {
+  /// Outside shadow mode, as in read mode, a source shows only its misses on its second line.
+  @Test func aSourceThatIsNotInShadowModeShowsItsMissesInsteadOfTheShadowLine() {
     var source = Self.liveSource()
     source.matched = 7
+    source.unmatched = 2
+    source.misses = 3
+    source.medianLeadMs = 12_000
 
-    #expect(PRSources(providers: [source]).lines(now: Self.now) == [Self.liveLine])
+    #expect(Self.unindented(PRSources(providers: [source]).lines(now: Self.now)) == [Self.liveLine, "misses: 3"])
+  }
+
+  @Test func aSourceShowsTheTimeToWaitResolvedByKindSortedByName() {
+    var source = Self.liveSource()
+    source.resolveLatency = [
+      "review": PRSources.Latency(count: 2, medianMs: 6_400), "ci": PRSources.Latency(count: 4, medianMs: 18_900),
+    ]
+
+    #expect(
+      Self.unindented(PRSources(providers: [source]).lines(now: Self.now)) == [
+        Self.liveLine, "misses: 0", "event to wait-resolved: ci 18 s (4), review 6 s (2)",
+      ])
+  }
+
+  /// The median shows in whole seconds, rounded down.
+  @Test(arguments: zip([0, 999, 1_000, 24_999] as [Int64], ["0 s", "0 s", "1 s", "24 s"]))
+  func theTimeToWaitResolvedShowsWholeSeconds(_ ms: Int64, _ shown: String) {
+    var source = Self.liveSource()
+    source.resolveLatency = ["merge": PRSources.Latency(count: 1, medianMs: ms)]
+
+    let lines = Self.unindented(PRSources(providers: [source]).lines(now: Self.now))
+
+    #expect(lines.last == "event to wait-resolved: merge \(shown) (1)")
+  }
+
+  @Test func aShadowSourceWithLatenciesShowsThemAfterItsShadowLine() {
+    var source = Self.liveSource()
+    source.shadow = true
+    source.resolveLatency = ["ci": PRSources.Latency(count: 1, medianMs: 20_000)]
+
+    #expect(
+      Self.unindented(PRSources(providers: [source]).lines(now: Self.now)) == [
+        Self.liveLine, "shadow: 0 matched, 0 unmatched, 0 misses", "event to wait-resolved: ci 20 s (1)",
+      ])
+  }
+
+  @Test(arguments: [nil, [:]] as [[String: PRSources.Latency]?])
+  func noLatenciesShowNoLatencyLine(_ latency: [String: PRSources.Latency]?) {
+    var source = Self.liveSource()
+    source.resolveLatency = latency
+
+    #expect(!PRSources(providers: [source]).lines(now: Self.now).contains { $0.contains("wait-resolved") })
+  }
+
+  @Test func theLatenciesSurviveARoundTrip() throws {
+    var source = Self.liveSource()
+    source.resolveLatency = [
+      "ci": PRSources.Latency(count: 4, medianMs: 18_900), "review": PRSources.Latency(count: 2, medianMs: 6_400),
+    ]
+    let sources = PRSources(providers: [source])
+
+    #expect(try JSONCoding.convert(sources, to: PRSources.self) == sources)
+  }
+
+  /// An sbd from before read mode sends no resolveLatency key.
+  @Test func aSourceFromAnOlderSbdDecodesWithoutLatencies() throws {
+    var object = try #require(try JSON(encoding: Self.liveSource()).object)
+    object["resolveLatency"] = nil
+
+    let decoded = try JSONCoding.convert(JSON.object(object), to: PRSources.Source.self)
+
+    #expect(decoded.resolveLatency == nil)
+    #expect(decoded.covered == 42)
   }
 
   @Test func theNewFieldsDefaultToNoShadowAndNoCounts() {
@@ -121,6 +190,7 @@ import Testing
     #expect(!source.shadow)
     #expect(source.matched == 0 && source.unmatched == 0 && source.misses == 0)
     #expect(source.medianLeadMs == nil)
+    #expect(source.resolveLatency == nil)
     #expect(PRSources(providers: [source]).pendingReads == 0)
     #expect(PRSources(providers: [source]).reviewOnlyReads == 0)
   }
@@ -143,7 +213,7 @@ import Testing
   @Test func noPendingReadsShowNoPendingReadsLine() {
     let sources = PRSources(providers: [Self.liveSource()])
 
-    #expect(sources.lines(now: Self.now) == [Self.liveLine])
+    #expect(!sources.lines(now: Self.now).contains { $0.contains("pending reads") })
   }
 
   @Test func theShadowFieldsSurviveARoundTrip() throws {

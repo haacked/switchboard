@@ -40,7 +40,7 @@ final class GitHubPoller {
   /// "failed" for any failure.
   var confirming: [String: (sha: String, outcome: String, polled: Int64)] = [:]
   /// How long after the poll that records a read in `confirming` the confirming read comes, in ms. With nil, the
-  /// PR's next due poll reads it.
+  /// hub's delay applies to a PR that a provider is live for, and the PR's next due poll reads any other PR.
   var confirmReadAfter: Int64?
   /// The `queue` waits whose PR a read showed in GitHub's merge queue.
   /// GitHub reports no removal state, so a later read that shows the open PR
@@ -216,7 +216,13 @@ final class GitHubPoller {
     self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
     let events: [any PRChangeProvider] =
       settings.events.mode == .off ? [] : [EventStreamsProvider(client: client, settings: settings.events)]
-    self.hub = PRChangeHub(providers: providers + events, queue: queue, shadow: settings.events.mode == .shadow)
+    let mode: PRChangeHub.Mode =
+      switch settings.events.mode {
+      case .shadow: .shadow
+      // `.off` creates no events provider, so the mode applies only to the providers that a test passes in.
+      case .off, .read: .read
+      }
+    self.hub = PRChangeHub(providers: providers + events, queue: queue, mode: mode)
     hub.reader = self
   }
 

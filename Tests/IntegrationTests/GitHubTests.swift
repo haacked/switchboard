@@ -131,7 +131,7 @@ extension FakeGitHub {
     #expect(github.requests.allSatisfy { $0.authorization == "bearer token-1" })
     #expect(
       try sbd.sb("get", s.id).contains(
-        "pr:      #18303 Approved, checks success  https://github.com/PostHog/charts/pull/18303"))
+        "pr:      #18303 Approved, checks success (polling)  https://github.com/PostHog/charts/pull/18303"))
     try sbd.poll(all: true)
     #expect(try sbd.events(s.id).filter { $0.kind == "pr" }.count == 1)
   }

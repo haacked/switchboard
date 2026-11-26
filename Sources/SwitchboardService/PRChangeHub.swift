@@ -1,5 +1,6 @@
 import Foundation
 import SwitchboardCore
+import os
 
 /// Turns what the providers report into reads by the GitHub poller and into the coverage that the poll rates read.
 /// It belongs to `GitHubPoller` and runs on the poller's queue. A signal only asks for a read, so every change still
@@ -11,11 +12,24 @@ final class PRChangeHub {
   private let byPreference: [any PRChangeProvider]
   let queue: DispatchQueue
   weak var reader: (any PRReader)?
-  /// In shadow mode a signal or a coverage change never asks for a read and never changes a poll rate. The hub only
-  /// counts what the providers report and measures it against the poller's reads.
-  let shadow: Bool
+  let mode: Mode
   /// The clock in ms. Tests replace it.
   var now: () -> Int64 = nowMs
+
+  /// What the providers' reports change. Every mode counts the signals and the polls' changes that no signal
+  /// reported.
+  enum Mode {
+    /// A signal or a coverage change never asks for a read and never changes a poll rate. The hub measures what the
+    /// providers report against the poller's reads.
+    case shadow
+    /// A signal asks for a read, and so does each `live` report with a gap. The poll rates stay as they are without a
+    /// provider.
+    case read
+    /// As `read`, and a covered PR's poll rates read its provider's signals.
+    case slowsPolling
+  }
+
+  private var shadow: Bool { mode == .shadow }
 
   /// The wait before a signal's read, so that a burst of signals shares one read.
   static let delayMs: Int64 = 2_000
@@ -31,6 +45,11 @@ final class PRChangeHub {
   /// How long a provider stays live for a PR before the PR counts as covered, so its poll rates read the provider's
   /// signals.
   static let liveMs: Int64 = 60_000
+  /// The time from the read that shows a `ci` wait's outcome to the read that confirms it, for a PR that a provider
+  /// is live for. Polling alone could leave the confirming read to the PR's next due poll.
+  static let confirmMs: Int64 = 10_000
+  /// The most times to `wait-resolved` kept for the median, for each provider and wait kind.
+  static let latencySamples = 100
 
   /// A PR that the poller read and that a session, wait, or merge trigger names.
   struct KnownPR: Equatable {
@@ -38,7 +57,7 @@ final class PRChangeHub {
     var headSha: String
     /// When the poller last read the PR, in ms.
     var polled: Int64
-    /// The fields of the read that shadow mode compares between reads.
+    /// The fields of the read that the tally compares between reads.
     var snapshot: ShadowTally.Snapshot? = nil
   }
 
@@ -78,7 +97,7 @@ final class PRChangeHub {
   }
 
   private var counts: [String: Counts] = [:]
-  /// What shadow mode measured for each provider, by provider id.
+  /// What the hub measured for each provider, by provider id.
   private var tallies: [String: ShadowTally] = [:]
 
   /// A read that the next poll's tally takes, with the PR's read before it and the time that read's poll started.
@@ -101,8 +120,23 @@ final class PRChangeHub {
   private var pendingReads = 0
   private var reviewOnlyReads = 0
 
-  init(providers: [any PRChangeProvider], queue: DispatchQueue, shadow: Bool = false) {
-    self.shadow = shadow
+  /// A signal of the last `dedupeMs` that has the provider's time of its change.
+  private struct RecentSignal {
+    var provider: String
+    var kind: PRSignal.Kind
+    var at: Int64
+    var arrived: Int64
+  }
+
+  /// The signals of the last `dedupeMs` outside shadow mode, by node id.
+  private var recentSignals: [String: [RecentSignal]] = [:]
+  /// The times from a signal's change to `wait-resolved`, in ms, by provider id and wait kind.
+  private var latencies: [String: [String: [Int64]]] = [:]
+  /// When each covered PR's coverage starts, by PR. `source(of:)` reads it from any thread.
+  private let coveredFrom = OSAllocatedUnfairLock(initialState: [PRRef: Int64]())
+
+  init(providers: [any PRChangeProvider], queue: DispatchQueue, mode: Mode) {
+    self.mode = mode
     self.providers = providers
     byPreference = providers.enumerated().sorted { a, b in
       let (ka, kb) = (a.element.signals.rawValue.nonzeroBitCount, b.element.signals.rawValue.nonzeroBitCount)
@@ -155,12 +189,14 @@ final class PRChangeHub {
   /// that hasn't happened.
   func cycleEnded(known: [String: KnownPR], interest: [PRRef]) {
     dispatchPrecondition(condition: .onQueue(queue))
-    if shadow {
-      tallyLastPoll()
-      holdForTally(known)
-    }
+    tallyLastPoll()
+    holdForTally(known)
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
+    recentSignals = recentSignals.compactMapValues { signals in
+      let kept = signals.filter { now() - $0.arrived < Self.dedupeMs }
+      return kept.isEmpty ? nil : kept
+    }.filter { known[$0.key] != nil }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
     if !shadow { settleNeededReads() }
     signalReads = signalReads.filter { known[$0.key] != nil }
@@ -176,6 +212,7 @@ final class PRChangeHub {
       p.setInterest(wanted)
     }
     if !shadow { requestCatchUps(fromPoll: true) }
+    publishCoverage()
   }
 
   /// Adds the reads of PRs that polled at the pending rate in one poll, and how many of them only awaited a review.
@@ -239,8 +276,53 @@ final class PRChangeHub {
   /// The signals of the provider that covers each covered PR, by node id. The poll rates read it.
   func coveredSignals() -> [String: ChangeSignals] {
     dispatchPrecondition(condition: .onQueue(queue))
-    guard !shadow else { return [:] }
+    guard mode == .slowsPolling else { return [:] }
     return known.compactMapValues { coveringProvider(of: $0)?.signals }
+  }
+
+  /// How long after the read that shows a wait's outcome the confirming read comes, for the PR with node id `id`.
+  /// It is nil unless the wait is a `ci` wait, a provider is live for the PR, and its signals cause reads. A read
+  /// during GitHub's merge can show the PR outside the merge queue before it shows the merge, so a `queue` wait's
+  /// confirming read waits for the PR's next due poll.
+  func confirmDelay(_ id: String, kind: Wait.Kind) -> Int64? {
+    dispatchPrecondition(condition: .onQueue(queue))
+    guard kind == .ci, !shadow, let ref = known[id]?.ref, providers.contains(where: { live($0.id, for: ref) != nil })
+    else { return nil }
+    return Self.confirmMs
+  }
+
+  /// Measures the time to the resolution of a wait on the PR with node id `id` from the newest change that a signal
+  /// of a matching kind reported after the wait was set. The provider that sent the signal gets the time. Shadow mode
+  /// measures nothing, because its signals cause no read.
+  func waitResolved(_ id: String, kind: Wait.Kind, created: Int64) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    guard !shadow, let kinds = kind.signalKinds,
+      let newest = recentSignals[id]?.filter({ $0.arrived >= created && kinds.contains($0.kind) }).max(by: {
+        $0.at < $1.at
+      })
+    else { return }
+    let samples = latencies[newest.provider]?[kind.rawValue] ?? []
+    latencies[newest.provider, default: [:]][kind.rawValue] =
+      Array((samples + [max(0, now() - newest.at)]).suffix(Self.latencySamples))
+  }
+
+  /// How sbd learns of the PR's changes, for `sb get`: `events` while a provider covers it and its signals cause
+  /// reads, else `polling`. It is nil without a provider. It runs on any queue.
+  func source(of ref: PRRef) -> String? {
+    guard !providers.isEmpty else { return nil }
+    guard let from = coveredFrom.withLock({ $0[ref] }), now() >= from else { return "polling" }
+    return "events"
+  }
+
+  /// Publishes when each PR's coverage starts, for `source(of:)`. Shadow mode publishes nothing, because its
+  /// signals cause no read.
+  private func publishCoverage() {
+    guard !shadow else { return }
+    var from: [PRRef: Int64] = [:]
+    for pr in known.values {
+      if let start = providers.compactMap({ coverageStart(of: pr, by: $0) }).min() { from[pr.ref] = start }
+    }
+    coveredFrom.withLock { [from] in $0 = from }
   }
 
   /// One entry for each provider, for `sb sources`.
@@ -256,7 +338,8 @@ final class PRChangeHub {
           id: p.id, state: "live", changedAt: c.changedAt, wanted: c.wanted,
           covered: covering.filter { $0 == p.id }.count, signals: c.signals, reads: c.reads,
           lastSignalAt: c.lastSignalAt, counts: status.counts, shadow: shadow, matched: t.matched,
-          unmatched: t.unmatched, misses: t.misses, medianLeadMs: t.medianLeadMs)
+          unmatched: t.unmatched, misses: t.misses, medianLeadMs: t.medianLeadMs,
+          resolveLatency: latencies[p.id]?.mapValues(Self.latency))
         switch status.availability {
         case .available: break
         case .unavailable(let reason, let retryAt):
@@ -265,6 +348,11 @@ final class PRChangeHub {
         }
         return source
       }, pendingReads: pendingReads, reviewOnlyReads: reviewOnlyReads)
+  }
+
+  /// The count and the median of the samples.
+  private static func latency(_ samples: [Int64]) -> PRSources.Latency {
+    PRSources.Latency(count: samples.count, medianMs: samples.sorted()[samples.count / 2])
   }
 
   // MARK: The providers' side
@@ -277,10 +365,11 @@ final class PRChangeHub {
     if let at = seen[key], now - at < Self.dedupeMs { return }
     seen[key] = now
     for id in targets(of: s.target).sorted() {
-      if shadow {
-        tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: arrived)
-      } else {
-        requestSignalRead(id, s, provider: provider, now: now)
+      tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: arrived)
+      guard !shadow else { continue }
+      requestSignalRead(id, s, provider: provider, now: now)
+      if let at = s.at {
+        recentSignals[id, default: []].append(RecentSignal(provider: provider, kind: s.kind, at: at, arrived: arrived))
       }
     }
   }
@@ -352,8 +441,9 @@ final class PRChangeHub {
       }
     case .down(let scope, _):
       set(scope, Coverage(since: nil, gap: false, order: reports), for: provider)
-      if shadow { downs[provider, default: []].append((scope, arrived)) }
+      downs[provider, default: []].append((scope, arrived))
     }
+    publishCoverage()
   }
 
   /// Records the provider's report for the scope. It replaces the provider's reports for the scopes inside it.
@@ -375,7 +465,8 @@ final class PRChangeHub {
     // A provider that can't report covers nothing until it reports `live` again.
     if a != .available {
       coverage[provider] = nil
-      if shadow { downs[provider, default: []].append((.everything, arrived)) }
+      downs[provider, default: []].append((.everything, arrived))
+      publishCoverage()
     }
   }
 
@@ -396,10 +487,14 @@ final class PRChangeHub {
   /// `catchUpMs` after it went live. The preferred provider wins when two cover it.
   private func coveringProvider(of pr: KnownPR) -> (any PRChangeProvider)? {
     let now = now()
-    return byPreference.first { p in
-      guard let since = live(p.id, for: pr.ref)?.since else { return false }
-      return now >= since + Self.liveMs && pr.polled >= since + Self.catchUpMs
-    }
+    return byPreference.first { coverageStart(of: pr, by: $0).map { now >= $0 } ?? false }
+  }
+
+  /// When the provider's coverage of the PR starts: `liveMs` after the provider went live for it, once the poller
+  /// stored a read from `catchUpMs` after that. nil while the provider isn't live or the read isn't stored.
+  private func coverageStart(of pr: KnownPR, by p: any PRChangeProvider) -> Int64? {
+    guard let since = live(p.id, for: pr.ref)?.since, pr.polled >= since + Self.catchUpMs else { return nil }
+    return since + Self.liveMs
   }
 
   /// Asks for a catch-up read of each tracked PR that a provider went live for with a gap and that the poller hasn't

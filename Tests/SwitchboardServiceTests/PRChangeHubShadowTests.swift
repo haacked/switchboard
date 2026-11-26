@@ -29,8 +29,8 @@ private final class RecordingReader: PRReader {
   func called(_ method: String) -> Bool { calls.contains { $0.hasPrefix(method + " ") } }
 }
 
-/// A hub with one fake provider and a recording reader on a test clock. The poller knows PR_7 and PR_8 in
-/// acme/widgets, and it read each with `base` a minute before the test starts.
+/// A hub with one fake provider and a recording reader on a test clock, in shadow mode unless the test names another
+/// mode. The poller knows PR_7 and PR_8 in acme/widgets, and it read each with `base` a minute before the test starts.
 private final class ShadowHarness {
   static let t0: Int64 = 1_000_000_000_000
   static let base = ShadowTally.Snapshot(
@@ -43,8 +43,8 @@ private final class ShadowHarness {
   let hub: PRChangeHub
   var known: [String: PRChangeHub.KnownPR] = [:]
 
-  init(shadow: Bool = true) {
-    hub = PRChangeHub(providers: [provider], queue: queue, shadow: shadow)
+  init(mode: PRChangeHub.Mode = .shadow) {
+    hub = PRChangeHub(providers: [provider], queue: queue, mode: mode)
     for (id, number) in [("PR_7", 7), ("PR_8", 8)] {
       var pr = PRChangeHub.KnownPR(ref: prRef(number), headSha: "head\(number)", polled: ShadowHarness.t0 - 60_000)
       pr.snapshot = ShadowHarness.base
@@ -99,21 +99,28 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   return s
 }
 
-/// In shadow mode the hub never asks the poller for a read. Each test also runs without shadow mode, where the same
-/// steps do call the reader, so the shadow flag is what stops the calls.
+/// Every mode of the hub.
+private let allModes: [PRChangeHub.Mode] = [.shadow, .read, .slowsPolling]
+
+/// The modes that count misses and matches: shadow mode and read mode.
+private let tallyModes: [PRChangeHub.Mode] = [.shadow, .read]
+
+/// In shadow mode the hub never asks the poller for a read. Each test also runs in read mode and in the mode that
+/// slows the poll rates, where the same steps do call the reader, so shadow mode is what stops the calls.
 @Suite struct PRChangeHubShadowReaderTests {
-  @Test(arguments: [true, false], [PRSignal.Kind.checks, .head, .review, .other])
-  func aSignalCallsTheReaderOnlyWithoutShadowMode(_ shadow: Bool, _ kind: PRSignal.Kind) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes, [PRSignal.Kind.checks, .head, .review, .other])
+  func aSignalCallsTheReaderOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode, _ kind: PRSignal.Kind) {
+    let h = ShadowHarness(mode: mode)
 
     h.signal(kind: kind)
 
-    #expect(h.reader.called("requestRead") == !shadow, "\(h.reader.calls)")
+    #expect(h.reader.called("requestRead") == (mode != .shadow), "\(h.reader.calls)")
   }
 
-  @Test(arguments: [true, false])
-  func aFailedSignalAfterASignalReadCallsTheReaderOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aFailedSignalAfterASignalReadCallsTheReaderOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
     h.signal()
     h.read(at: t0 + 2_000)
     let before = h.reader.calls.count
@@ -125,9 +132,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// A read that serves a signal before the hub's timed read withdraws that read.
-  @Test(arguments: [true, false])
-  func aReadThatServesASignalCancelsOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aReadThatServesASignalCancelsOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
     h.signal()
 
     h.read(at: t0 + 1_000)
@@ -136,9 +144,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// A signal whose read didn't run by the next cycle is asked for at the next poll.
-  @Test(arguments: [true, false])
-  func aSignalReadThatAPollMissedIsAskedAgainOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aSignalReadThatAPollMissedIsAskedAgainOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
     h.signal()
     h.setNow(t0 + 30_000)
 
@@ -147,9 +156,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.reader.called("readAtNextPoll") == !shadow, "\(h.reader.calls)")
   }
 
-  @Test(arguments: [true, false])
-  func liveWithAGapAsksForACatchUpOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func liveWithAGapAsksForACatchUpOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
 
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
 
@@ -157,9 +167,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// A catch-up read whose time passed is asked for at the next poll when a cycle ends.
-  @Test(arguments: [true, false])
-  func aPastCatchUpIsAskedAtTheNextPollOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aPastCatchUpIsAskedAtTheNextPollOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: t0 - 30_000, gap: true))
 
     h.endCycle()
@@ -167,9 +178,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.reader.called("readAtNextPoll") == !shadow, "\(h.reader.calls)")
   }
 
-  @Test(arguments: [true, false])
-  func aStreamThatComesBackAsksForAReadOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aStreamThatComesBackAsksForAReadOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 60_000)
     h.coverage(.down(.pr(prRef(7)), reason: "stream ended"))
@@ -182,9 +194,10 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// Signals of every kind, coverage that comes and goes, and reads whose times move, as a shadow run sees them.
-  @Test(arguments: [true, false])
-  func aWholeRunCallsTheReaderOnlyWithoutShadowMode(_ shadow: Bool) {
-    let h = ShadowHarness(shadow: shadow)
+  @Test(arguments: allModes)
+  func aWholeRunCallsTheReaderOnlyWithoutShadowMode(_ mode: PRChangeHub.Mode) {
+    let shadow = mode == .shadow
+    let h = ShadowHarness(mode: mode)
 
     h.coverage(.live(.everything, since: t0 - 10_000, gap: true))
     h.signal(kind: .head)
@@ -207,7 +220,8 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 }
 
-/// What a shadow hub reports in `sb sources`.
+/// What a shadow hub reports in `sb sources`. Read mode keeps the matches, misses, and pending reads that shadow mode
+/// counts, so the tests of those counts run in both modes.
 @Suite struct PRChangeHubShadowReportTests {
   @Test func aShadowHubReportsShadowMode() {
     let h = ShadowHarness()
@@ -215,8 +229,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.shadow == true)
   }
 
-  @Test func aHubWithoutShadowModeReportsNoShadowMode() {
-    let h = ShadowHarness(shadow: false)
+  @Test(arguments: [PRChangeHub.Mode.read, .slowsPolling])
+  func aHubWithoutShadowModeReportsNoShadowMode(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
 
     #expect(h.source?.shadow == false)
   }
@@ -233,9 +248,11 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.reads == 0)
   }
 
-  /// The report counts the PRs that the provider would cover, but the poll rates see no coverage.
-  @Test func aShadowHubReportsCoverageThatThePollRatesDoNotSee() {
-    let h = ShadowHarness()
+  /// The report counts the PRs that the provider would cover, but the poll rates see no coverage. Read mode leaves the
+  /// poll rates as they are too.
+  @Test(arguments: tallyModes)
+  func aHubReportsCoverageThatThePollRatesDoNotSee(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 5_000)
 
@@ -245,9 +262,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.covered.isEmpty)
   }
 
-  /// Without shadow mode the same steps cover the PR for the poll rates.
-  @Test func aHubWithoutShadowModeGivesThePollRatesItsCoverage() {
-    let h = ShadowHarness(shadow: false)
+  /// In the mode that slows the poll rates, the same steps cover the PR for the poll rates.
+  @Test func aHubThatSlowsPollingGivesThePollRatesItsCoverage() {
+    let h = ShadowHarness(mode: .slowsPolling)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 5_000)
 
@@ -256,8 +273,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.covered["PR_7"] == h.provider.signals)
   }
 
-  @Test func aSignalThatALaterReadShowsIsMatched() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aSignalThatALaterReadShowsIsMatched(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.setNow(t0 + 10_000)
     h.signal(kind: .head)
 
@@ -268,8 +286,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.misses == 0)
   }
 
-  @Test func aReadWhoseSnapshotDidNotChangeMatchesNothing() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aReadWhoseSnapshotDidNotChangeMatchesNothing(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.signal(kind: .head)
 
     h.read(at: t0 + 3_000)
@@ -278,8 +297,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// The provider was live from before the previous read, and a later read shows a new head without a signal.
-  @Test func aChangeOfALivePRWithoutASignalIsAMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aChangeOfALivePRWithoutASignalIsAMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
 
@@ -290,8 +310,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// The provider went live after the previous read, so the change may have come before it.
-  @Test func aChangeOfAPRThatWentLiveAfterThePreviousReadIsNotAMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aChangeOfAPRThatWentLiveAfterThePreviousReadIsNotAMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
 
     h.read(withHead("head7b"), at: t0 + 200_000)
@@ -299,8 +320,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.misses == 0)
   }
 
-  @Test func aChangeOfAPRThatIsNotLiveIsNotAMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aChangeOfAPRThatIsNotLiveIsNotAMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.read(at: t0 + 10_000)
 
     h.read(withHead("head7b"), at: t0 + 200_000)
@@ -308,8 +330,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.misses == 0)
   }
 
-  @Test func aChangeAfterTheStreamWentDownIsNotAMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aChangeAfterTheStreamWentDownIsNotAMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
     h.coverage(.down(.pr(prRef(7)), reason: "stream ended"))
@@ -319,8 +342,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.misses == 0)
   }
 
-  @Test func aSignalBeforeTheChangeOfALivePRPreventsTheMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aSignalBeforeTheChangeOfALivePRPreventsTheMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
     h.setNow(t0 + 190_000)
@@ -334,8 +358,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
 
   /// A signal that arrives while a poll holds the poller's queue reaches the hub after that poll ends. The read of
   /// that poll still counts it, because the hub tallies a poll's reads when the next poll ends.
-  @Test func aSignalThatArrivesDuringThePollThatShowsItsChangeIsMatched() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aSignalThatArrivesDuringThePollThatShowsItsChangeIsMatched(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
     h.known["PR_7"]?.polled = t0 + 200_000
@@ -356,8 +381,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
 
   /// A merge ends the PR's subscription before the next poll tallies the read that showed the merge. The miss still
   /// counts, because the hub keeps the coverage that held when that poll ended.
-  @Test func aChangeWhoseStreamClosesBeforeTheTallyIsStillAMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aChangeWhoseStreamClosesBeforeTheTallyIsStillAMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
     var merged = ShadowHarness.base
@@ -375,8 +401,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
   }
 
   /// A stream that drops during a poll reports down after the poll ends. The change that poll read isn't a miss.
-  @Test func aStreamThatDropsDuringThePollCountsNoMiss() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func aStreamThatDropsDuringThePollCountsNoMiss(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
     h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
     h.read(at: t0 + 10_000)
     h.known["PR_7"]?.polled = t0 + 200_000
@@ -393,8 +420,9 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.misses == 0)
   }
 
-  @Test func countPendingReadsAddsUpInTheReport() {
-    let h = ShadowHarness()
+  @Test(arguments: tallyModes)
+  func countPendingReadsAddsUpInTheReport(_ mode: PRChangeHub.Mode) {
+    let h = ShadowHarness(mode: mode)
 
     h.queue.sync {
       h.hub.countPendingReads(total: 10, reviewOnly: 4)

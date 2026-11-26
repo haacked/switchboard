@@ -104,10 +104,15 @@ extension GitHubPoller {
         !service.queue.sync(execute: { service.entries[s.session]?.session.done ?? true })
       else { continue }
       do {
-        _ = try service.resolveWait(
+        let summary = try service.resolveWait(
           session: s.session, wait: s.wait.id, outcome: s.settlement.outcome, changedAt: s.settlement.changedAt,
           met: s.settlement.met)
         stats.resolved += 1
+        // A wait with an action stays open while the action runs, and its time to `wait-resolved` would include the
+        // action's run. Only a wait that this call closed gives the hub a time.
+        if !summary.waits.contains(where: { $0.id == s.wait.id }) {
+          hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
+        }
       } catch {
         logLine("github: can't resolve wait \(s.wait.id) of \(s.session): \(error)")
       }
@@ -183,7 +188,9 @@ extension GitHubPoller {
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, s.polled)
-      if let after = confirmReadAfter { requestRead([s.prId], after: after, trigger: .confirm) }
+      if let after = confirmReadAfter ?? hub.confirmDelay(s.prId, kind: wait.kind) {
+        requestRead([s.prId], after: after, trigger: .confirm)
+      }
       return false
     }
     return s.polled > first.polled
