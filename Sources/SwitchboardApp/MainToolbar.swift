@@ -5,21 +5,25 @@ extension View {
   /// The main window's toolbar. macOS 26 draws each group in its own capsule and puts the system's gap between groups.
   /// Earlier versions draw no capsules and get no spacers. Apply it to the split view's detail column. On the split
   /// view itself, SwiftUI puts every spacer in the sidebar's part of the toolbar. Import Sessions shows only when
-  /// `showsImport` is true.
-  @ViewBuilder func mainToolbar(showsImport: Bool) -> some View {
+  /// `showsImport` is true, and the view picker only when `showsViewPicker` is true. A session's toolbar items do not
+  /// fit beside the sidebar and the picker in a 1024 pt window on macOS 26. Beside the Inbox the picker fits, because
+  /// the sidebar hides there at that width.
+  @ViewBuilder func mainToolbar(showsImport: Bool, showsViewPicker: Bool) -> some View {
     if #available(macOS 26, *) {
       toolbar {
         NavHistoryControls()
-        // A spacer with the navigation placement lands after the picker, so the picker takes the default placement.
-        ToolbarSpacer(.fixed)
-        ToolbarItem { ViewPicker() }
+        if showsViewPicker {
+          // A spacer with the navigation placement lands after the picker, so the picker takes the default placement.
+          ToolbarSpacer(.fixed)
+          ToolbarItem { ViewPicker() }
+        }
         ToolbarSpacer(.flexible)
         TrailingItems(showsImport: showsImport)
       }
     } else {
       toolbar {
         NavHistoryControls()
-        ToolbarItem(placement: .navigation) { ViewPicker() }
+        if showsViewPicker { ToolbarItem(placement: .navigation) { ViewPicker() } }
         ToolbarItem(placement: .navigation) { SessionFilterMenu() }
         AccountItems()
         if showsImport { ToolbarItem { ImportButton() } }
@@ -58,7 +62,7 @@ private struct AccountItems: ToolbarContent {
   }
 }
 
-/// Inbox, Board, Issues, and Loops. No segment is selected while a session shows.
+/// Inbox, Board, Issues, and Loops. No segment is selected while a session is selected.
 private struct ViewPicker: View {
   @EnvironmentObject var model: BoardModel
 
