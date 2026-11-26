@@ -76,7 +76,7 @@ public func runCommand(
   if let deadline { DispatchQueue(label: "runCommand.timeout").asyncAfter(deadline: deadline, execute: kill) }
   if let stdin, let input {
     // A program can exit before it reads all of its input. F_SETNOSIGPIPE makes the write fail with EPIPE instead of
-    // raising SIGPIPE. The throwing write returns that error, where `write(_:)` raises an Objective-C exception.
+    // raising SIGPIPE. `write(contentsOf:)` throws that error, where `write(_:)` raises an Objective-C exception.
     let writer = stdin.fileHandleForWriting
     _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
     try? writer.write(contentsOf: input)

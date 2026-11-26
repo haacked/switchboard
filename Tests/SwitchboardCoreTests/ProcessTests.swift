@@ -38,6 +38,12 @@ import Testing
 
   // MARK: ancestors(of:)
 
+  /// The input is larger than a pipe holds. The write therefore still waits when the program exits.
+  @Test(.timeLimit(.minutes(1))) func aProgramThatExitsWithoutReadingItsInputReturnsItsStatus() throws {
+    let r = try runCommand("/bin/sh", ["-c", "exit 3"], input: Data(count: 1 << 20), timeout: 30)
+    #expect(r.status == 3)
+  }
+
   @Test func ancestorsOfThisProcessHoldItselfItsParentAndLaunchd() throws {
     let ancestry = try #require(Processes.ancestors(of: Int(getpid())))
 
@@ -129,12 +135,6 @@ import Testing
 
     #expect(r.timedOut)
     #expect(kill(pid, 0) != 0, "yes still runs")
-  }
-
-  /// The input is larger than a pipe holds. The write therefore still waits when the program exits.
-  @Test(.timeLimit(.minutes(1))) func aProgramThatExitsWithoutReadingItsInputReturnsItsStatus() throws {
-    let r = try runCommand("/bin/sh", ["-c", "exit 3"], input: Data(count: 1 << 20), timeout: 30)
-    #expect(r.status == 3)
   }
 
   @Test func aProgramThatFinishesInTimeIsNotTimedOut() throws {
