@@ -134,7 +134,7 @@ public struct PRSources: Codable, Equatable, Sendable {
     public var changedAt: Int64?
     /// The PRs that sbd asked the source to report.
     public var wanted: Int
-    /// The PRs that the source covers, whose poll rates read the source's signals.
+    /// The PRs that the source covers. In the mode that slows polling, their poll rates read the source's signals.
     public var covered: Int
     /// The signals that the source sent.
     public var signals: Int
@@ -150,7 +150,7 @@ public struct PRSources: Codable, Equatable, Sendable {
     public var matched: Int
     /// In shadow mode, the signals whose change no poll showed within 10 minutes.
     public var unmatched: Int
-    /// In shadow mode, the polls that showed a change of a PR that the source was live for, without a signal.
+    /// The polls that showed a change of a PR that the source was live for, without a signal.
     public var misses: Int
     /// In shadow mode, the median time from a matched signal to the poll that showed its change, in ms.
     public var medianLeadMs: Int64?

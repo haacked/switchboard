@@ -219,6 +219,7 @@ final class GitHubPoller {
     let mode: PRChangeHub.Mode =
       switch settings.events.mode {
       case .shadow: .shadow
+      // `.off` creates no events provider, so the mode applies only to the providers that a test passes in.
       case .off, .read: .read
       }
     self.hub = PRChangeHub(providers: providers + events, queue: queue, mode: mode)

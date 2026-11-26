@@ -22,7 +22,8 @@ final class PRChangeHub {
     /// A signal or a coverage change never asks for a read and never changes a poll rate. The hub measures what the
     /// providers report against the poller's reads.
     case shadow
-    /// A signal and a provider's attach ask for reads. The poll rates stay as they are without a provider.
+    /// A signal asks for a read, and so does each `live` report with a gap. The poll rates stay as they are without a
+    /// provider.
     case read
     /// As `read`, and a covered PR's poll rates read its provider's signals.
     case slowsPolling
@@ -47,7 +48,7 @@ final class PRChangeHub {
   /// The time from the read that shows a `ci` wait's outcome to the read that confirms it, for a PR that a provider
   /// is live for. Polling alone could leave the confirming read to the PR's next due poll.
   static let confirmMs: Int64 = 10_000
-  /// How many times to `wait-resolved` the hub keeps for each provider and wait kind.
+  /// The most times to `wait-resolved` kept for the median, for each provider and wait kind.
   static let latencySamples = 100
 
   /// A PR that the poller read and that a session, wait, or merge trigger names.
@@ -56,7 +57,7 @@ final class PRChangeHub {
     var headSha: String
     /// When the poller last read the PR, in ms.
     var polled: Int64
-    /// The fields of the read that shadow mode compares between reads.
+    /// The fields of the read that the tally compares between reads.
     var snapshot: ShadowTally.Snapshot? = nil
   }
 
@@ -96,7 +97,7 @@ final class PRChangeHub {
   }
 
   private var counts: [String: Counts] = [:]
-  /// What shadow mode measured for each provider, by provider id.
+  /// What the hub measured for each provider, by provider id.
   private var tallies: [String: ShadowTally] = [:]
 
   /// A read that the next poll's tally takes, with the PR's read before it and the time that read's poll started.

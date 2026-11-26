@@ -184,7 +184,9 @@ extension GitHubPoller {
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, s.polled)
-      if let after = confirmReadAfter ?? hub.confirmDelay(s.prId) {
+      // A read during GitHub's merge can show the PR outside the queue before it shows the merge, so a queue removal
+      // keeps waiting for the PR's next due poll.
+      if let after = confirmReadAfter ?? (wait.kind == .ci ? hub.confirmDelay(s.prId) : nil) {
         requestRead([s.prId], after: after, trigger: .confirm)
       }
       return false
