@@ -417,7 +417,7 @@ let sessionCard = TriageSummary(
       event("UserPromptSubmit", 0, ["prompt": "go"]), stop(2, 1, proseQuestion), try summaryEvent(3, 2, sessionCard),
     ])
 
-    #expect(f.sessionSummary == sessionCard)
+    #expect(f.sessionSummary?.value == sessionCard)
     #expect(item(f)?.source == .session)
   }
 
@@ -712,7 +712,7 @@ let staleCardShapes: [StaleCardShape] = [
   func theCardStaysOnlyUntilASecondMainStop(_ shape: StaleCardShape) throws {
     let f = facts(try shape.events())
 
-    #expect((f.sessionSummary != nil) == shape.keeps, "\(f.sessionSummary.map(\.title) ?? "no card")")
+    #expect((f.sessionSummary != nil) == shape.keeps, "\(f.sessionSummary?.title ?? "no card")")
   }
 
   @Test(arguments: staleCardShapes)
@@ -751,7 +751,7 @@ let staleCardShapes: [StaleCardShape] = [
       try summaryEvent(5, 4, secondCard), stop(6, 5, proseQuestion),
     ])
 
-    #expect(f.sessionSummary == secondCard)
+    #expect(f.sessionSummary?.value == secondCard)
     #expect(itemOf(f)?.title == secondCard.title)
   }
 
@@ -807,7 +807,7 @@ let staleCardShapes: [StaleCardShape] = [
 
     for e in tail { restored.apply(e) }
 
-    #expect(restored.sessionSummary == sessionCard)
+    #expect(restored.sessionSummary?.value == sessionCard)
     #expect(restored == facts(head + tail))
   }
 }

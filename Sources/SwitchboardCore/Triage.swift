@@ -386,7 +386,7 @@ extension SessionFacts {
       dropSessionSummary()
     case Triage.sessionEvent:
       guard let card = try? JSONCoding.convert(event.data, to: TriageSummary.self) else { return }
-      sessionSummary = card
+      sessionSummary = Box(card)
       sessionSummaryId = event.id
       // A card recorded after its turn's Stop belongs to that ended turn.
       sessionSummaryStopped = !turnRunning
@@ -395,7 +395,7 @@ extension SessionFacts {
       guard lastStop != 0, event.data["stop"]?.int.map(Int64.init) == lastStop, event.data["error"] == nil,
         event.data["skipped"] == nil
       else { return }
-      triage = try? JSONCoding.convert(event.data, to: TriageSummary.self)
+      triage = (try? JSONCoding.convert(event.data, to: TriageSummary.self)).map(Box.init)
     default:
       break
     }
@@ -551,14 +551,14 @@ public enum Triage {
     } else if let card = facts.cards.first {
       item = cardItem(card)
       item.ref = card.ref
-    } else if let own = facts.sessionSummary, let ref = sessionSummaryRef(facts) {
+    } else if let own = facts.sessionSummary?.value, let ref = sessionSummaryRef(facts) {
       item = TriageItem(own, source: .session, ref: ref)
       if verdict.source != .reply { addRule(verdict, to: &item) }
     } else if !fromReply(facts, verdict) {
       item = ruleItem(verdict)
       item.ref = ruleRef(item.title)
     } else {
-      item = facts.triage.map { TriageItem($0, source: .summary) } ?? fallbackItem(facts.lastReply ?? "", verdict)
+      item = facts.triage.map { TriageItem($0.value, source: .summary) } ?? fallbackItem(facts.lastReply ?? "", verdict)
       item.ref = "stop:\(facts.lastStop)"
     }
     return item

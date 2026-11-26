@@ -377,7 +377,7 @@ public enum DraftReplies {
   /// session summary's draft names a target. A draft with a recorded
   /// attempt or a recorded target is not waiting for a read.
   public static func mayBeChecking(_ facts: SessionFacts) -> Bool {
-    guard let summary = facts.sessionSummary, let ref = Triage.sessionSummaryRef(facts) else { return false }
+    guard let summary = facts.sessionSummary?.value, let ref = Triage.sessionSummaryRef(facts) else { return false }
     return summary.drafts.enumerated().contains { i, draft in
       let key = key(ref: ref, number: i + 1)
       guard let replyTo = draft.replyTo, facts.draftReplies.attempts[key] == nil else { return false }
