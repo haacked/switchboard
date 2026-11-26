@@ -250,7 +250,9 @@ def exit_status(returncode):
 
 
 class Child:
-    """The command's process, once started. A signal before then interrupts the wait."""
+    """The command's process, once started. A signal before the start
+    interrupts the wait. A signal while Popen starts the command waits in
+    `pending` and reaches the command after Popen returns."""
 
     def __init__(self):
         self.process = None

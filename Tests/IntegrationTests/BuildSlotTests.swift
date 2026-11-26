@@ -455,7 +455,10 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
       class SignalDuringStart(subprocess.Popen):
           def __init__(self, *args, **kwargs):
               super().__init__(*args, **kwargs)
+              deadline = time.time() + 15
               while "start A" not in open(log).read():
+                  if time.time() > deadline:
+                      os._exit(99)
                   time.sleep(0.01)
               os.kill(os.getpid(), signum)
 
@@ -469,6 +472,7 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
         + q.command("A", before: SlotQueue.signalTrap),
       env: q.environment(), timeout: 60)
 
+    #expect(!r.timedOut, "the helper dropped the signal and waited for the timeout's SIGTERM")
     #expect(r.status == 42, "\(r.stderr)")
     #expect(q.logLines().contains("signal A"), "\(q.diagnostics())")
     #expect(q.tickets().isEmpty)
