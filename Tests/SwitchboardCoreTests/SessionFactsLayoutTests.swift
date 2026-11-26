@@ -31,4 +31,17 @@ import Testing
     let decoded = try JSONCoding.convert(facts, to: SessionFacts.self)
     #expect(decoded == facts)
   }
+
+  @Test func theBoxedReviewRequestAndMergeBriefEncodeAsThemselves() throws {
+    let attempt = ReviewRequestAttempt(head: "abc", result: .requested, reviewers: ["alice"])
+    let brief = MergeBrief(pr: 42, head: "abc", text: "Ships the fix.")
+    var facts = SessionFacts()
+    facts.reviewRequest = Box(attempt)
+    facts.mergeBrief = Box(brief)
+
+    let json = try JSON(encoding: facts)
+    #expect(json["reviewRequest"] == (try JSON(encoding: attempt)))
+    #expect(json["mergeBrief"] == (try JSON(encoding: brief)))
+    #expect(try JSONCoding.convert(facts, to: SessionFacts.self) == facts)
+  }
 }

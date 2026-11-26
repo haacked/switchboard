@@ -5,6 +5,11 @@ import SwitchboardCore
 /// leaves out the group and the repository.
 struct ScheduleCaption {
   let prompt: String
+  /// What runs, on one line, as `sb schedule ls` says it: the prompt, `$ ` and a script's command, or
+  /// `headless <model> on <account> · ` and the prompt.
+  let what: String
+  /// A headless or script loop keeps each run's log, which Output… shows.
+  let showsOutput: Bool
   /// Computed from the session facts that sbd's tick reads, so the row says held exactly when the tick holds the
   /// session.
   let status: ScheduleStatus
@@ -26,6 +31,8 @@ struct ScheduleCaption {
   /// `status` and `hold` are the schedule's `ScheduleStatus` and its session's `scheduleHold`.
   init(_ schedule: Schedule, status: ScheduleStatus, hold: String?, now: Int64) {
     prompt = schedule.prompt
+    what = schedule.whatText
+    showsOutput = schedule.isDetached
     self.status = status
     timing = schedule.timingText(status.text)
     result = [schedule.lastText(now: now), schedule.gate?.checkText(now: now).map { "top-up \($0)" }]
@@ -49,7 +56,7 @@ struct ScheduleList: View {
     TimelineView(.everyMinute) { _ in
       let now = nowMs()
       VStack(alignment: .leading, spacing: 10) {
-        ForEach(session.schedules ?? [], id: \.id) {
+        ForEach(session.allSchedules, id: \.id) {
           ScheduleItem(schedule: $0, caption: ScheduleCaption($0, session: session, now: now))
         }
       }
@@ -57,14 +64,16 @@ struct ScheduleList: View {
   }
 }
 
-/// One schedule's row: its prompt, timing, and last run, with its actions.
+/// One schedule's row: its prompt, or what a headless or script loop runs, its timing, and its last run, with its
+/// actions.
 struct ScheduleItem: View {
   let schedule: Schedule
   let caption: ScheduleCaption
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text(caption.prompt).lineLimit(3).help(caption.prompt).textSelection(.enabled)
+      Text(verbatim: caption.showsOutput ? caption.what.printable : caption.prompt).lineLimit(3).help(caption.prompt)
+        .textSelection(.enabled)
         .fixedSize(horizontal: false, vertical: true)
       ScheduleTiming(caption: caption)
       Text(caption.result).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
@@ -85,7 +94,8 @@ struct ScheduleTiming: View {
   }
 }
 
-/// Pause or Resume, Run Now, Edit…, and Delete…, which asks first because the prompt is lost.
+/// Pause or Resume, Run Now, Edit…, Delete…, which asks first because the prompt is lost, and a headless or script
+/// loop's Output….
 struct ScheduleActions: View {
   @EnvironmentObject var model: BoardModel
   let schedule: Schedule
@@ -93,7 +103,8 @@ struct ScheduleActions: View {
   @State private var confirmingDelete = false
 
   var body: some View {
-    HStack(spacing: 8) {
+    // Five buttons pass the width of the Loops list at its ideal width, so they wrap onto a second row.
+    WrappingRow {
       Button(caption.toggleTitle) { model.pauseSchedule(schedule.id, paused: schedule.paused != true) }
         .help(
           schedule.paused == true
@@ -112,6 +123,13 @@ struct ScheduleActions: View {
       Button("Delete…") { confirmingDelete = true }
         .help("Delete the loop. It does not run again.")
         .accessibilityLabel("Delete loop: \(caption.prompt)")
+      if caption.showsOutput {
+        Button("Output…") { model.loadScheduleLog(schedule.id) }
+          .disabled(schedule.history.isEmpty)
+          .help(schedule.history.isEmpty ? "The loop has not run yet." : "Show the output of the loop's runs")
+          .accessibilityLabel("Output of loop: \(caption.prompt)")
+          .clickAnchor("loop-output-\(schedule.id)")
+      }
     }
     .controlSize(.small)
     .confirmationDialog(caption.deleteQuestion, isPresented: $confirmingDelete, titleVisibility: .visible) {
@@ -140,7 +158,7 @@ struct SchedulesStrip: View {
 
   var body: some View {
     TimelineView(.everyMinute) { _ in
-      if let text = Self.text(session.schedules, now: nowMs()) {
+      if let text = Self.text(session.allSchedules, now: nowMs()) {
         HStack {
           Button {
             showing = true

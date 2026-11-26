@@ -97,8 +97,9 @@ extension Service {
   /// by typing into the terminal. An allow with an extra's argument, such as
   /// `autoMode` or `always`, also applies that extra, which only a held card's
   /// hook can do. An allow takes at most one extra. A host may answer a group message only when every target is on
-  /// that host, since the answer decides what those sessions receive.
-  func answer(_ args: JSON, origin: RequestOrigin) throws -> JSON {
+  /// that host, since the answer decides what those sessions receive. `caller` sent the request. Only a `script`
+  /// card reads it, because only the user may allow a script.
+  func answer(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
     let card = try chosenCard(args)
     let extras = AllowExtra.allCases.filter { args[$0.argument]?.bool == true }
     if extras.count > 1 { throw APIError("card \(card.id): pick one of \(englishList(extras.map(\.argument)))") }
@@ -115,8 +116,16 @@ extension Service {
     case .send: return try answerGroupMessage(card, args, origin: origin)
     case .trust: return try answerTrust(card, args)
     case .mcp: return try answerMCPRequest(card, args)
+    case .script: return try answerScriptProposal(card, args, origin: origin, caller: caller)
     case .permission, .question: return try answerPrompt(card, args, extra: extra)
     }
+  }
+
+  private func answerScriptProposal(_ card: Card, _ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
+    // The session's turn already ended, so a deny message has no one to read it.
+    guard args["answers"] == nil, let behavior = args["behavior"]?.string, behavior == "allow" || behavior == "deny"
+    else { throw APIError("card \(card.id) proposes a script schedule. Allow it or deny it") }
+    return try decideScriptProposal(card, allow: behavior == "allow", args: args, origin: origin, caller: caller)
   }
 
   private func answerMCPRequest(_ card: Card, _ args: JSON) throws -> JSON {
@@ -263,5 +272,26 @@ extension Service {
   private func deferQuestion(_ card: Card, _ request: HeldRequest) {
     request.resolve(Decision.deny(message: Card.deferMessage).hookOutput)
     record(card.session, "deferred", ["card": .number(Double(card.id))])
+  }
+}
+
+/// A card that waits for the user's decision, while it is open or after a stored decision closed it.
+enum DecisionCard {
+  case open(Card)
+  /// The event that opened the card, and the event that closed it.
+  case decided(opened: Event, decision: Event)
+}
+
+extension Service {
+  /// The open card `id` of `kind`, else the `opened` event with that id and the `decided` event that closed its
+  /// card, or nil when sbd has neither. It runs on the state queue.
+  func decisionCard(_ id: Int64, kind: Card.Kind, opened: String, decided: String) throws -> DecisionCard? {
+    if let card = entries.values.lazy.flatMap(\.facts.cards).first(where: { $0.id == id && $0.kind == kind }) {
+      return .open(card)
+    }
+    guard let event = try store.event(id: id), event.kind == opened,
+      let decision = try store.decision(card: id, session: event.session, kind: decided)
+    else { return nil }
+    return .decided(opened: event, decision: decision)
   }
 }

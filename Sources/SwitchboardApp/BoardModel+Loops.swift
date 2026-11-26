@@ -41,7 +41,7 @@ extension SessionSummary {
 extension BoardModel {
   /// The shown sessions that have a loop, by name. The Loops view's session filter lists them.
   var loopSessions: [SessionSummary] {
-    sessions.filter { !($0.schedules ?? []).isEmpty }.sorted(by: Self.byName)
+    sessions.filter { !$0.allSchedules.isEmpty }.sorted(by: Self.byName)
   }
 
   /// `loopSessionFilter` while a shown session with that id has a loop, else nil. A filter whose session lost its
@@ -70,7 +70,7 @@ extension BoardModel {
   var hiddenLoopCount: Int {
     let filter = filter
     return allSessions.filter { !$0.isBeingRemoved && !filter.shows($0) }
-      .reduce(0) { $0 + ($1.schedules?.count ?? 0) }
+      .reduce(0) { $0 + $1.allSchedules.count }
   }
 
   /// The loops of every shown session that need attention. The tab's session filter does not change it.
@@ -81,7 +81,18 @@ extension BoardModel {
   /// The loop that an Edit… request names, from every listed session, or nil for New Loop… or a loop that is gone.
   func editedSchedule(_ request: LoopEditorRequest) -> Schedule? {
     guard case .edit(let id) = request else { return nil }
-    return allSessions.lazy.flatMap { $0.schedules ?? [] }.first { $0.id == id }
+    return schedule(id)
+  }
+
+  /// The loop with the id, from every listed session, or nil when it is gone.
+  func schedule(_ id: String) -> Schedule? { owner(ofSchedule: id)?.schedule }
+
+  /// The listed session that has the loop with the id, with the loop, or nil when it is gone.
+  func owner(ofSchedule id: String) -> (session: SessionSummary, schedule: Schedule)? {
+    for session in allSessions {
+      if let schedule = session.allSchedules.first(where: { $0.id == id }) { return (session, schedule) }
+    }
+    return nil
   }
 
   /// The focused loop while the list shows it, else the first row.
@@ -128,7 +139,7 @@ extension BoardModel {
   private func allLoopRows(now: Int64) -> [LoopRow] {
     sessions.flatMap { session in
       let hold = session.scheduleHold
-      return (session.schedules ?? []).map {
+      return session.allSchedules.map {
         LoopRow(session: session, schedule: $0, status: ScheduleStatus($0, hold: hold, now: now))
       }
     }

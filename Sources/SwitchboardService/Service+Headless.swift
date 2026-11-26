@@ -63,12 +63,16 @@ extension Service {
       outcome = HeadlessOutcome(reply: nil, result: .failure(error))
     }
     let (reply, error) = (outcome.reply, outcome.error.map { "\($0)" })
-    queue.async { [self] in
-      let call = HeadlessCall(
-        t: nowMs(), kind: kind.rawValue, session: session, model: reply?.model, usage: reply?.usage, error: error)
-      do { try store.append(headlessCall: call) } catch { logLine("can't store the \(kind.rawValue) call: \(error)") }
-    }
+    queue.async { [self] in storeHeadlessCall(kind, session: session, reply: reply, error: error) }
     return outcome
+  }
+
+  /// Stores the `headless_calls` row of one call that started claude: the model and the tokens that claude's
+  /// envelope reports, and the error when the call gave no answer. It runs on the state queue.
+  func storeHeadlessCall(_ kind: HeadlessKind, session: String?, reply: HeadlessReply?, error: String?) {
+    let call = HeadlessCall(
+      t: nowMs(), kind: kind.rawValue, session: session, model: reply?.model, usage: reply?.usage, error: error)
+    do { try store.append(headlessCall: call) } catch { logLine("can't store the \(kind.rawValue) call: \(error)") }
   }
 
   /// The headless calls per day and kind. `durationMs` limits the report to

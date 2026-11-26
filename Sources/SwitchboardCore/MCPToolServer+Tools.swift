@@ -209,7 +209,7 @@ extension MCPToolServer {
       ], required: ["plan", "kind"]),
     Tool(
       "add_schedule",
-      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits.",
+      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits. With `headless`, Switchboard runs the prompt as its own one-shot claude -p turn in the session's folder instead of sending it, under the account and model you pick, so a cheaper model can run a check that needs no memory of the conversation. Its reply goes to the run's log, not to the conversation. With `script` instead of a prompt, Switchboard runs the shell command in the session's folder on the interval, outside the conversation, and keeps each run's exit status and output. A Manager conversation adds a script directly. The Operator can't add one. From any other session, the call stores nothing. It returns {pending: <card>, decision: \"pending\"} and shows the user a card to approve or deny. Send a `reason` with the script, end the turn after the call, and don't call again while the card waits.",
       [
         "session": session,
         "every": interval,
@@ -232,6 +232,23 @@ extension MCPToolServer {
           ],
           "required": ["group", "repo", "target", "template", "rubric"],
         ],
+        "script": string(
+          "A shell command to run on each run instead of sending a prompt. It runs in the session's folder with the user's login shell. Send script or prompt, not both, and not with headless."
+        ),
+        "reason": string(
+          "Why the session needs the script, in one line. The user reads it on the approval card, so send one with every script that needs approval."
+        ),
+        "timeout": string(
+          "How long a headless or script run may take, one number and one unit, such as 5m: 10s to 2h, and no longer than the interval. The default is 30m for a headless run and 10m for a script, or the interval when that is shorter."
+        ),
+        "headless": boolean(
+          "Runs the prompt as its own claude -p turn in the session's folder instead of sending it. Each run starts with empty context, and its reply goes to the run's log and never reaches the conversation, so write a prompt that acts on what it finds. The run has the session's permission mode and MCP servers. A headless schedule on a Manager conversation or the Operator must come from a Manager conversation or the Operator."
+        ),
+        "account": string(
+          "The Claude account of a headless run, by name. The default is the account of the session. It needs headless."
+        ),
+        "model": string(
+          "The model of a headless run, such as haiku. The default is the session's model. It needs headless."),
       ], required: ["every"]),
     Tool(
       "list_schedules",
@@ -243,11 +260,24 @@ extension MCPToolServer {
       required: ["schedule"]),
     Tool(
       "edit_schedule",
-      "Changes a schedule's interval, its prompt, or both. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing.",
+      "Changes a schedule's interval, its prompt or command, its timeout, a headless schedule's account or model, or any combination. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing. A schedule's runner can't change. A Manager conversation changes a script's command or timeout directly. The Operator can't change them. From any other session, such a change stores nothing. It returns {pending: <card>, decision: \"pending\"} and shows the user a card to approve or deny. Send a `reason` with the change, end the turn after the call, and don't call again while the card waits.",
       [
         "schedule": schedule,
         "every": interval,
-        "prompt": string("The new prompt to send on each run."),
+        "prompt": string(
+          "The new prompt of a schedule that sends a prompt or runs headless. For a script schedule, send script instead."
+        ),
+        "script": string(
+          "The new command of a schedule that already runs a script. Send script or prompt, not both."
+        ),
+        "reason": string(
+          "Why the session needs the change, in one line. The user reads it on the approval card, so send one with every change to a script's command or timeout."
+        ),
+        "timeout": string(
+          "The new timeout of a headless or script schedule, one number and one unit, such as 5m: 10s to 2h, and no longer than the interval."
+        ),
+        "account": string("The new account of a headless schedule. An empty value resets it to the session's account."),
+        "model": string("The new model of a headless schedule. An empty value resets it to the session's model."),
       ], required: ["schedule"]),
     Tool(
       "run_schedule",

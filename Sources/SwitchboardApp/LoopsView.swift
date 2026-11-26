@@ -274,3 +274,96 @@ private struct BackgroundActivityRow: View {
     }
   }
 }
+
+/// The Output… sheet: the log of one run of a headless or script loop, with a picker for the loop's other kept runs.
+/// The picker names each run by its time, which names its log, so a run that lands while the sheet is open doesn't
+/// move the selection to another run. A command can print escape sequences, so the log shows each control character
+/// as an escape.
+struct LoopOutputSheet: View {
+  @EnvironmentObject var model: BoardModel
+  let output: LoopOutput
+  /// The loop, or nil when it is gone.
+  let schedule: Schedule?
+
+  var body: some View {
+    let history = schedule?.history ?? []
+    let gone = output.t != nil && output.shownRun(in: history) == nil
+    VStack(alignment: .leading, spacing: 12) {
+      Text("Output").font(.title2.bold())
+      if let schedule {
+        Text(verbatim: schedule.whatText.printable).foregroundStyle(.secondary).lineLimit(2)
+      }
+      Picker(
+        "Run",
+        selection: Binding(
+          get: { output.t },
+          set: { t in
+            if let i = history.firstIndex(where: { $0.t == t }) { model.loadScheduleLog(output.schedule, run: i + 1) }
+          })
+      ) {
+        ForEach(Array(history.enumerated()), id: \.offset) { _, run in Text(verbatim: run.text()).tag(Optional(run.t)) }
+        if gone { Text("A run that the loop no longer keeps").tag(output.t) }
+      }
+      .help("The loop keeps the logs of its newest runs")
+      .clickAnchor("loop-output-run")
+      LoopOutputLog(output: output)
+        .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 420, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
+        .clickAnchor("loop-output-text")
+      if gone {
+        Text("The loop no longer keeps this run. The log shows what the sheet read before.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if output.truncated {
+        Text("The run printed more than the log keeps, so the log stops at its cap.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      HStack {
+        Spacer()
+        Button("Done") { model.loopOutput = nil }
+          .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(20)
+    .frame(width: 640)
+    .announcesRefusal(output.error)
+  }
+
+}
+
+/// The log of one run in the Output… sheet. It reads only the output, so a change elsewhere in the model doesn't draw
+/// the log again.
+struct LoopOutputLog: View {
+  let output: LoopOutput
+  /// A log with more lines draws only the lines that scroll into view, and each line is selected on its own.
+  static let wholeTextLines = 500
+
+  var body: some View {
+    if let error = output.error {
+      Text(error).foregroundStyle(.red).textSelection(.enabled).padding(8)
+    } else if let text = output.text {
+      ScrollView {
+        Group {
+          if text.isEmpty {
+            Text("The run printed nothing.")
+          } else if output.lines.count <= Self.wholeTextLines {
+            Text(verbatim: output.lines.joined(separator: "\n"))
+          } else {
+            LazyVStack(alignment: .leading, spacing: 0) {
+              ForEach(output.lines.indices, id: \.self) { i in
+                // An empty Text has no height, so a blank line holds a space.
+                Text(verbatim: output.lines[i].isEmpty ? " " : output.lines[i])
+              }
+            }
+          }
+        }
+        .font(.body.monospaced())
+        .textSelection(.enabled)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(8)
+      }
+    } else {
+      ProgressView().padding(8).accessibilityLabel("Reading the log")
+    }
+  }
+}

@@ -69,8 +69,11 @@ public struct Session: Codable, Equatable, Sendable {
   public var waits: [Wait]?
   /// Nil in a session that an older sbd stored.
   public var notes: [Note]?
-  /// Nil when the session has none, and in a session that an older sbd stored.
+  /// The schedules that send their prompt into the session. Nil when the session has none, and in a session that an
+  /// older sbd stored. Read and change them through `allSchedules` and the other `Session` schedule accessors.
   public var schedules: [Schedule]?
+  /// The headless and script schedules, which an older sbd ignores. Nil when the session has none.
+  public var jobs: [Schedule]?
   /// The session that added this one, such as the session that captured a follow-up.
   public var parent: String?
   /// True for a Manager conversation, of which several can exist, and for the operator.
@@ -497,6 +500,17 @@ public func oneLine(_ text: String, max: Int = 70) -> String {
   let line = text.split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
     .filter { !$0.isEmpty }.joined(separator: " ")
   return truncated(line, max: max)
+}
+
+/// The text without terminal escape sequences and without control characters other than line breaks, with each tab as
+/// a space. A terminal would act on them where `sb` prints the text.
+func stripTerminalCodes(_ text: String) -> String {
+  let unescaped = text.replacingOccurrences(of: "\u{1B}\\[[0-?]*[ -/]*[@-~]", with: "", options: .regularExpression)
+  var stripped = ""
+  stripped.unicodeScalars.append(
+    contentsOf: unescaped.unicodeScalars.lazy.map { $0 == "\t" ? " " : $0 }
+      .filter { $0.properties.generalCategory != .control || Character($0).isNewline })
+  return stripped
 }
 
 /// The text cut to `max` characters, the last of which is an ellipsis.

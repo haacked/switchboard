@@ -408,11 +408,11 @@ public final class Store {
     try query("\(Store.eventColumns) WHERE id = ?", [id], Store.event).first
   }
 
-  /// The `send_decided` event that closed the session's group message card with this id.
-  public func decision(card: Int64, session: String) throws -> Event? {
+  /// The event of `kind`, such as `send_decided`, that closed the session's card with this id.
+  public func decision(card: Int64, session: String, kind: String) throws -> Event? {
     try query(
-      "\(Store.eventColumns) WHERE session = ? AND id > ? AND kind = 'send_decided' AND json_extract(data, '$.card') = ? LIMIT 1",
-      [session, card, card], Store.event
+      "\(Store.eventColumns) WHERE session = ? AND id > ? AND kind = ? AND json_extract(data, '$.card') = ? LIMIT 1",
+      [session, card, kind, card], Store.event
     ).first
   }
 

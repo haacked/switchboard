@@ -40,16 +40,21 @@ extension Service {
   /// open, else the decision that closed it.
   func groupMessageStatus(_ args: JSON) throws -> GroupSend {
     guard let id = args["card"]?.int.map(Int64.init) else { throw APIError("name a group message by its id") }
-    if let m = entries.values.lazy.flatMap(\.facts.cards).first(where: { $0.id == id })?.send {
-      return GroupSend(m, pending: id, decision: .pending)
+    switch try decisionCard(id, kind: .send, opened: "send_pending", decided: "send_decided") {
+    case .open(let card)?:
+      if let m = card.send { return GroupSend(m, pending: id, decision: .pending) }
+    case .decided(let opened, let decided)?:
+      if let m = Card(groupMessage: opened)?.send,
+        let decision = decided.data["decision"]?.string.flatMap(SendDecision.init(rawValue:))
+      {
+        let deliveries = try decided.data["deliveries"].map {
+          try JSONCoding.convert($0, to: [GroupSend.Result].self)
+        }
+        return GroupSend(m, pending: id, decision: decision, deliveries: deliveries)
+      }
+    case nil: break
     }
-    guard let opened = try store.event(id: id), opened.kind == "send_pending",
-      let m = Card(groupMessage: opened)?.send,
-      let decided = try store.decision(card: id, session: opened.session),
-      let decision = decided.data["decision"]?.string.flatMap(SendDecision.init(rawValue:))
-    else { throw APIError("no group message \(id)") }
-    let deliveries = try decided.data["deliveries"].map { try JSONCoding.convert($0, to: [GroupSend.Result].self) }
-    return GroupSend(m, pending: id, decision: decision, deliveries: deliveries)
+    throw APIError("no group message \(id)")
   }
 
   /// Records `expired` for each group message whose time ran out.

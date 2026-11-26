@@ -78,6 +78,36 @@ func headlessUsage(_ json: JSON?) -> HeadlessUsage? {
     #expect(row["models"]?.array?.compactMap(\.string) == ["sonnet"])
   }
 
+  /// Decision 18: each headless schedule run adds a `schedule` row with the run's model and tokens.
+  @Test func aHeadlessScheduleRunRecordsAScheduleRowWithItsModelAndTokens() throws {
+    let sbd = try Instance()
+    let s = try sbd.idleSession()
+    let headless = ScheduleHeadlessTests()
+    let made = try headless.addHeadless(sbd, s.id, model: "haiku")
+
+    let last = try headless.runNow(sbd, s.id, made.id)
+
+    #expect(last.outcome == .ran, "\(last)")
+    let row = try sbd.waitForHeadlessUsageRow("schedule", calls: 1)
+    #expect(headlessUsage(row["usage"]) == stubUsage)
+    #expect(row["models"]?.array?.compactMap(\.string) == ["haiku"])
+    #expect(row["errors"]?.int == 0)
+  }
+
+  /// An error envelope still reports the tokens that the run spent, and the row counts the error.
+  @Test func aHeadlessScheduleRunThatFailsRecordsItsTokensAndItsError() throws {
+    let sbd = try Instance()
+    let s = try sbd.idleSession()
+    let headless = ScheduleHeadlessTests()
+    let made = try headless.addHeadless(sbd, s.id, "ERROR-SCHEDULE", model: "haiku")
+
+    try headless.runNow(sbd, s.id, made.id)
+
+    let row = try sbd.waitForHeadlessUsageRow("schedule", calls: 1)
+    #expect(row["errors"]?.int == 1)
+    #expect(headlessUsage(row["usage"]) == stubUsage)
+  }
+
   /// A question refused before launch starts no `claude`, so it records no call. Store writes run one at a time on
   /// the state queue, so a row for the refusal would be in place before the ask's row. The text form prints one
   /// line for each day and kind. The date's three numbers come first, and the counts follow in column order.

@@ -193,6 +193,12 @@ struct ContentView: View {
         .environmentObject(model)
       }
     }
+    .sheet(isPresented: model.isPresent(\.loopOutput)) {
+      if let output = model.loopOutput {
+        LoopOutputSheet(output: output, schedule: model.schedule(output.schedule))
+          .environmentObject(model)
+      }
+    }
     .inlineLinks(model)
   }
 }

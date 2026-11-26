@@ -41,6 +41,7 @@ import Testing
     case .send: facts([sendPending()]).cards[0]
     case .trust: trustCard()
     case .mcp: mcpCard()
+    case .script: scriptCard()
     }
   }
 

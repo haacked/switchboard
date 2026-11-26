@@ -215,6 +215,22 @@
 # dialog before SessionStart, unless the account's .claude.json trusts the
 # folder. See trust_dialog.
 # With STUB_HOOKS=off it runs no hooks, as when every hook fails.
+# A `claude -p` run whose environment holds SB_SCHEDULE_RUN is a headless
+# schedule's run. sbd passes its prompt after `--` and nothing on stdin, so the
+# stub checks it before it reads stdin. It writes its arguments, each with a
+# NUL after it, to $SB_HOME/schedule-runs/<run>.args, and its
+# CLAUDE_CONFIG_DIR, SB_SESSION_ID, SB_SCHEDULE_RUN, and physical working
+# folder, each with a NUL after it, to $SB_HOME/schedule-runs/<run>.env.
+# <run> is SB_SCHEDULE_RUN with each character other than a letter, a digit,
+# _, or - turned into _. When $SB_HOME/schedule-run.sh exists, it runs that
+# file as a Bash tool call would, a child of the stub, before it answers. A
+# prompt that holds SLOW-SCHEDULE writes the stub's pid to
+# $SB_HOME/schedule-run.pid and becomes sleep 600. FAIL-SCHEDULE exits 1 with
+# no envelope. ERROR-SCHEDULE prints an error envelope whose result is "The
+# run failed." and a second line, and exits 1. Anything else prints an
+# envelope whose result is "Done: <prompt>" and a second line "It ran
+# headless.". Each envelope reports the token counts of the other calls
+# under the --model it got.
 # Each `claude -p` run appends its CLAUDE_CONFIG_DIR, empty when unset, with a
 # NUL after it to $SB_HOME/headless-accounts.log before it reads the prompt's
 # kind. A -p run does not go to stub-calls.log.
@@ -242,6 +258,40 @@ envelope() {
     structured_output: $o, usage: {input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 300,
     cache_creation_input_tokens: 40}, modelUsage: {($m): {inputTokens: 100, outputTokens: 20,
     cacheReadInputTokens: 300, cacheCreationInputTokens: 40}}}'
+}
+# Prints the JSON that claude -p --output-format json prints for a turn whose reply is the text $1, with the token
+# counts of `envelope`.
+text_envelope() {
+  jq -nc --arg r "$1" --arg m "$(model)" '{type: "result", subtype: "success", is_error: false, result: $r,
+    usage: {input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 300, cache_creation_input_tokens: 40},
+    modelUsage: {($m): {inputTokens: 100, outputTokens: 20, cacheReadInputTokens: 300, cacheCreationInputTokens: 40}}}'
+}
+# A headless schedule's run. See the header.
+schedule_run() {
+  local prompt='' i dir="$SB_HOME/schedule-runs" name
+  for ((i = 0; i < ${#args[@]}; i++)); do
+    [ "${args[i]}" = -- ] && prompt=${args[i + 1]-} && break
+  done
+  name=${SB_SCHEDULE_RUN//[^A-Za-z0-9_-]/_}
+  mkdir -p "$dir"
+  printf '%s\0' "${args[@]}" >"$dir/$name.args"
+  printf '%s\0' "${CLAUDE_CONFIG_DIR-}" "${SB_SESSION_ID-}" "$SB_SCHEDULE_RUN" "$(pwd -P)" >"$dir/$name.env"
+  [ -f "$SB_HOME/schedule-run.sh" ] && sh "$SB_HOME/schedule-run.sh" </dev/null >/dev/null 2>&1
+  case $prompt in
+  *SLOW-SCHEDULE*)
+    echo $$ >"$SB_HOME/schedule-run.pid"
+    exec sleep 600
+    ;;
+  *FAIL-SCHEDULE*)
+    echo "schedule run failed" >&2
+    return 1
+    ;;
+  *ERROR-SCHEDULE*)
+    text_envelope $'The run failed.\nIt hit an error.' | jq -c '.subtype = "error_during_execution" | .is_error = true'
+    return 1
+    ;;
+  esac
+  text_envelope "Done: $prompt"$'\nIt ran headless.'
 }
 # Prints the init message of a Slack call. Like claude, it lists StructuredOutput, three Slack tools, and each
 # name in $SB_HOME/slack-extra-tools, then drops the names that a --disallowedTools entry names in full or as their
@@ -314,6 +364,11 @@ slack_threads() {
   envelope "$(jq -c '{threads: .}' <<<"$answers")"
 }
 if [ "${1-}" = -p ]; then
+  if [ -n "${SB_SCHEDULE_RUN-}" ]; then
+    printf '%s\0' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/headless-accounts.log"
+    schedule_run
+    exit $?
+  fi
   input=$(cat)
   printf '%s\0' "${CLAUDE_CONFIG_DIR-}" >>"$SB_HOME/headless-accounts.log"
   # The Slack inputs start with their tags and hold only JSON, so they come first.

@@ -158,7 +158,12 @@ public enum Headless {
   /// The output with the model and the tokens that its envelope reports. It reads them even when the answer is an
   /// error or holds no JSON object, because the call spent the tokens either way.
   public static func reply(_ output: String) -> HeadlessReply {
-    guard let envelope = envelope(output) else { return HeadlessReply(output: output) }
+    reply(envelope: envelope(output), output: output)
+  }
+
+  /// `reply(_:)` for output whose envelope the caller already read with `envelope(_:)`.
+  public static func reply(envelope: [String: JSON]?, output: String) -> HeadlessReply {
+    guard let envelope else { return HeadlessReply(output: output) }
     if let models = envelope["modelUsage"]?.object, !models.isEmpty {
       let usage = models.values.map {
         HeadlessUsage(
@@ -196,17 +201,21 @@ public enum Headless {
 
   /// The JSON object that the envelope of `claude -p` answers with.
   public static func answer(_ output: String) throws -> [String: JSON] {
-    guard let envelope = envelope(output) else {
-      throw APIError("claude printed no JSON: \(oneLine(output, max: 200))")
-    }
-    if envelope["is_error"]?.bool == true {
-      throw APIError("claude failed: \(oneLine(envelope["result"]?.string ?? output, max: 200))")
-    }
+    let envelope = envelope(output)
+    if let problem = problem(envelope: envelope, output: output) { throw APIError(problem) }
     let payload =
-      envelope["structured_output"]
-      ?? envelope["result"]?.string.flatMap { JSON.parse(unfenced($0)) }
+      envelope?["structured_output"]
+      ?? envelope?["result"]?.string.flatMap { JSON.parse(unfenced($0)) }
     guard let object = payload?.object else { throw APIError("claude's answer holds no JSON object") }
     return object
+  }
+
+  /// Why `envelope`, which `envelope(_:)` read from `output`, holds no answer: claude printed no envelope, or the
+  /// envelope is an error. It is nil for an envelope that is not an error.
+  public static func problem(envelope: [String: JSON]?, output: String) -> String? {
+    guard let envelope else { return "claude printed no JSON: \(oneLine(output, max: 200))" }
+    guard envelope["is_error"]?.bool == true else { return nil }
+    return "claude failed: \(oneLine(envelope["result"]?.string ?? output, max: 200))"
   }
 
   /// The text without a Markdown code fence around it.

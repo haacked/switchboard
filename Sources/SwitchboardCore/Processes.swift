@@ -26,6 +26,14 @@ extension String {
   public var hasNul: Bool { utf8.contains(0) }
 }
 
+/// Throws when the program, an argument, or the environment holds a NUL byte, which none of them can carry.
+public func refuseNul(executable: String, arguments: [String], env: [String: String]?) throws {
+  if ([executable] + arguments + (env.map { Array($0.keys) + Array($0.values) } ?? [])).contains(where: \.hasNul) {
+    throw APIError(
+      "\((executable as NSString).lastPathComponent) can't run with a NUL character in its arguments or environment")
+  }
+}
+
 extension CommandResult {
   /// The trimmed error text, else the exit status.
   public var problem: String {
@@ -43,10 +51,7 @@ public func runCommand(
   cwd: String? = nil
 ) throws -> CommandResult {
   // Process raises an Objective-C exception for a NUL. Swift can't catch it, so it would end the program.
-  if ([executable] + args + (env.map { Array($0.keys) + Array($0.values) } ?? [])).contains(where: \.hasNul) {
-    throw APIError(
-      "\((executable as NSString).lastPathComponent) can't run with a NUL character in its arguments or environment")
-  }
+  try refuseNul(executable: executable, arguments: args, env: env)
   let p = Process()
   p.executableURL = URL(fileURLWithPath: executable)
   p.arguments = args
@@ -201,6 +206,13 @@ public enum Processes {
       next = up
     }
     return found
+  }
+
+  /// The start time of the process, in microseconds since the epoch, as `ProcessTable` reads it. It is nil when no
+  /// process has the pid. A pid that exited and was reused names a process with another start time.
+  public static func startTime(of pid: Int) -> Int64? {
+    guard isValidPid(pid) else { return nil }
+    return info(of: pid_t(pid)).map(ProcessTable.startTime)
   }
 
   /// The parent pid from sysctl, which reads processes of every user, as `ps` does.

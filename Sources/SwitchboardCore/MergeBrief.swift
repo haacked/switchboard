@@ -63,12 +63,12 @@ extension SessionFacts {
     guard event.data["error"] == nil, event.data["skipped"] == nil,
       let brief = try? JSONCoding.convert(event.data, to: MergeBrief.self)
     else { return }
-    mergeBrief = brief
+    mergeBrief = Box(brief)
   }
 
   /// The brief of the PR's current head commit.
   public var currentMergeBrief: MergeBrief? {
-    guard let brief = mergeBrief, let pr, brief.pr == pr.number, brief.head == pr.headSha else { return nil }
+    guard let brief = mergeBrief?.value, let pr, brief.pr == pr.number, brief.head == pr.headSha else { return nil }
     return brief
   }
 }

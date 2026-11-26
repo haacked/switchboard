@@ -71,8 +71,15 @@
 # the description is the user's. It opens the Links popover, removes the seeded link, adds a link through the
 # popover's fields and Return, and checks both through sb. It adds a claude.ai artifact link through the same fields and
 # removes it from the Artifacts popover. It opens the Notes link and checks that the popover shows each note.
+# The scriptcard check proposes a script schedule from a work session's shell pane, which opens a script card on
+# the session. In a window 1024 pt wide, it checks through the app's ShellSelfTest commands that the session view
+# shows the card's command and its Allow button, clicks Allow, and checks through sb that the script is stored and
+# the card is closed.
+# The loops check opens New Loop… on the Loops view, picks Script in its Runs picker, and checks that the editor shows
+# the command and timeout fields and no account field. It then adds a script loop through sb, runs it once, clicks
+# the loop's Output… button, and checks that the Output sheet shows the run's log and its run picker.
 # Arguments name the checks to run (terminal, relaunch, drafts, shell, drops, keys, slash, multiselect,
-# settings, shortcuts, boardselect, boarddrag, wake, links, header, group). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
+# settings, shortcuts, boardselect, boarddrag, wake, links, header, group, scriptcard, loops). With none, it runs them all. SB_GUI_SKIP names checks to leave out, separated by spaces.
 # The script ends the app, sbd, the tmux server, the stand-in, and its folder
 # in /tmp when it exits, whether or not the checks passed. It keeps the app's
 # log, the screen, and the pane PNGs in .build/gui-test/terminal. After any
@@ -87,9 +94,9 @@ checks=("$@")
 read -r -a skips <<<"${SB_GUI_SKIP:-}"
 for name in ${checks[@]+"${checks[@]}"} ${skips[@]+"${skips[@]}"}; do
   case $name in
-  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | shortcuts | boardselect | boarddrag | wake | links | header | group) ;;
+  terminal | relaunch | drafts | shell | drops | keys | slash | multiselect | settings | shortcuts | boardselect | boarddrag | wake | links | header | group | scriptcard | loops) ;;
   *)
-    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, shortcuts, boardselect, boarddrag, wake, links, header, and group." >&2
+    echo "bin/test-gui has no check named $name. The checks are terminal, relaunch, drafts, shell, drops, keys, slash, multiselect, settings, shortcuts, boardselect, boarddrag, wake, links, header, group, scriptcard, and loops." >&2
     exit 2
     ;;
   esac
@@ -1263,3 +1270,95 @@ check_group() {
 }
 
 if wants group; then check_group; fi
+
+check_scriptcard() {
+  check=scriptcard
+  local shots="$home/shots/scriptcard" tmux_socket="$home/tmux.sock" card='' result
+  mkdir "$shots"
+  echo "Checking a script card in the session view…"
+  new_session scriptcard
+  sb shell "$session" --open >/dev/null
+  # A shell pane of a work session counts as the session, so its add of a script opens a card instead.
+  tmux -S "$tmux_socket" send-keys -t "=$session-shell:" "'$bin_dir/sb' schedule $session --every 1h --script 'echo from-the-card'" Enter
+  script_card() { sb cards "$session" --json | jq -r '.[] | select(.kind == "script") | .id'; }
+  has_card() { card=$(script_card); [ -n "$card" ]; }
+  wait_for 20 has_card || fail "the shell pane's proposal opened no script card: $(sb cards "$session" --json)"
+  stored() {
+    sb get "$session" --json |
+      jq -e '[.schedules[]? | select(.runner == "script" and .prompt == "echo from-the-card")] | length == 1' >/dev/null
+  }
+  ! stored || fail "the proposal stored the script before Allow"
+  shows() { [ "$(app where)" = "session(\"$session\")" ]; }
+  card_shows() {
+    result=$(app anchors "script-card-$card")
+    [[ $result != *":out"* && ",$result," == *",script-card-$card-command:in,"* && ",$result," == *",script-card-$card-allow:in,"* ]]
+  }
+  SB_SELECT="$session" SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows || fail "the app did not select $session: $(app where)"
+  pinned
+  wait_for 10 card_shows || fail "the session view does not show card $card's command and Allow inside the window: $result"
+  app snapshot "$shots/script-card.png" >/dev/null
+  wait_for 10 clicked "script-card-$card-allow" || fail "the app could not click Allow on card $card: $result"
+  wait_for 10 stored || fail "Allow did not store the script: $(sb get "$session" --json | jq -c '.schedules')"
+  [ -z "$(script_card)" ] || fail "card $card stayed open after Allow"
+  app width restore >/dev/null
+  end_app
+  save_shots
+  echo "ok: scriptcard (the card shows its command, and Allow stores the script, 1024 pt)"
+}
+
+if wants scriptcard; then check_scriptcard; fi
+
+check_loops() {
+  check=loops
+  local shots="$home/shots/loops" id result
+  mkdir "$shots"
+  echo "Checking the loop editor's runners and a script loop's Output…"
+  new_session loops
+  shows() { [ "$(app where)" = "$1" ]; }
+  # Each anchor is followed by :in or :out, so a name followed by :in is not a prefix of another name.
+  all_in() { # <anchors result> <name…>
+    local listed=$1 name
+    shift
+    [[ $listed != *":out"* ]] || return 1
+    for name in "$@"; do [[ ",$listed," == *",$name:in,"* ]] || return 1; done
+  }
+  editor_shows() { result=$(app anchors loop-editor-); all_in "$result" loop-editor-runner-script; }
+  script_fields() {
+    result=$(app anchors loop-editor-)
+    all_in "$result" loop-editor-command loop-editor-timeout && [[ $result != *"loop-editor-account"* ]]
+  }
+  SB_LOOPS=1 SB_SHEET=loop SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows loops || fail "the app did not show the Loops view: $(app where)"
+  pinned
+  wait_for 20 editor_shows || fail "New Loop… did not show its Runs picker inside the window: $result"
+  wait_for 10 clicked loop-editor-runner-script || fail "the app could not pick Script in the Runs picker: $result"
+  wait_for 10 script_fields || fail "the editor does not show the command and timeout fields for a script: $result"
+  app snapshot "$shots/loop-editor-script.png" >/dev/null
+  wait_for 10 clicked loop-editor-cancel || fail "the app could not cancel the loop editor: $result"
+  end_app
+
+  id=$(sb schedule "$session" --every 1h --script 'echo loops-output' --json | jq -r '.schedule.id')
+  [ -n "$id" ] && [ "$id" != null ] || check=sbd fail "sb schedule --script returned no schedule id"
+  sb schedule run "$id" >/dev/null
+  ran() { sb get "$session" --json | jq -e --arg id "$id" '.schedules[]? | select(.id == $id) | .last.outcome == "ran"' >/dev/null; }
+  wait_for 30 ran || check=sbd fail "the script loop did not run: $(sb get "$session" --json | jq -c '.schedules')"
+  row_shows() { result=$(app anchors "loop-output-$id"); all_in "$result" "loop-output-$id"; }
+  sheet_shows() { result=$(app anchors loop-output-); all_in "$result" loop-output-text loop-output-run; }
+  SB_LOOPS=1 SB_SHELL_TEST="$shots" "$bin_dir/Switchboard" >>"$shots/app.log" 2>&1 &
+  app_pid=$!
+  wait_for 60 shows loops || fail "the app did not show the Loops view: $(app where)"
+  pinned
+  wait_for 10 row_shows || fail "the loop row of $id shows no Output… button inside the window: $result"
+  wait_for 10 clicked "loop-output-$id" || fail "the app could not click Output… on $id: $result"
+  wait_for 10 sheet_shows || fail "the Output sheet does not show the log and the run picker: $result"
+  app snapshot "$shots/loop-output.png" >/dev/null
+  app width restore >/dev/null
+  end_app
+  save_shots
+  echo "ok: loops (the editor's Script fields, a script loop's Output sheet, 1024 pt)"
+}
+
+if wants loops; then check_loops; fi

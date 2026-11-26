@@ -504,3 +504,110 @@ enum SessionShape: CaseIterable, CustomTestStringConvertible {
     }
   }
 }
+
+// MARK: - Runners
+
+/// A script loop that runs `command`, last run `last`.
+private func scriptRow(_ command: String = "git fetch", last: Schedule.Run? = nil) -> Schedule {
+  var s = scheduleFixture("r2", command, last: last)
+  s.runner = .script
+  return s
+}
+
+private func headlessRow(
+  account: String? = "/Users/me/.claude-work", model: String? = "haiku", last: Schedule.Run? = nil
+)
+  -> Schedule
+{
+  var s = scheduleFixture("r3", "Summarize the open PRs", last: last)
+  s.runner = .headless
+  s.account = account
+  s.model = model
+  return s
+}
+
+private func run(_ outcome: Schedule.Run.Outcome, minutesAgo: Int64, error: String? = nil, exit: Int32?, tail: String?)
+  -> Schedule.Run
+{
+  var r = Schedule.Run(t: scheduleNow - minutesAgo * minuteMs, outcome: outcome, skipped: 0, error: error)
+  r.exit = exit
+  r.tail = tail
+  return r
+}
+
+extension ScheduleListTests {
+  /// A loop row names what runs and where, as `sb schedule ls` does.
+  @Suite struct Runner {
+    func caption(_ schedule: Schedule) -> ScheduleCaption {
+      ScheduleCaption(schedule, session: freeSession, now: scheduleNow)
+    }
+
+    @Test func aLoopThatRunsInTheSessionShowsItsPrompt() {
+      #expect(caption(scheduleFixture("r1")).what == "Run the Waiting audit")
+    }
+
+    @Test func aScriptShowsItsCommandAfterADollarSign() {
+      #expect(caption(scriptRow()).what == "$ git fetch")
+    }
+
+    @Test func aHeadlessLoopShowsItsModelItsAccountAndItsPrompt() {
+      #expect(caption(headlessRow()).what == "headless haiku on work · Summarize the open PRs")
+    }
+
+    /// A headless loop without its own model or account runs on the session's, so the row leaves that part out.
+    @Test(
+      arguments: [
+        (nil, nil, "headless · Summarize the open PRs"),
+        (nil, "opus", "headless opus · Summarize the open PRs"),
+        ("/Users/me/.claude-personal", nil, "headless on personal · Summarize the open PRs"),
+      ] as [(String?, String?, String)])
+    func aHeadlessLoopLeavesOutWhatItTakesFromTheSession(_ account: String?, _ model: String?, _ what: String) {
+      #expect(caption(headlessRow(account: account, model: model)).what == what)
+    }
+
+    @Test func aMultiLineCommandShowsOnOneLine() {
+      #expect(caption(scriptRow("git fetch\ngit status")).what == "$ git fetch git status")
+    }
+
+    /// The app and `sb schedule ls` read the same Core text, so the row can't drift from the CLI.
+    @Test(arguments: [scheduleFixture("r1"), scriptRow(), headlessRow(), headlessRow(account: nil, model: nil)])
+    func theRunnerTextIsTheCLIs(_ schedule: Schedule) {
+      #expect(caption(schedule).what == schedule.whatText)
+    }
+
+    @Test func onlyAHeadlessOrScriptLoopOffersItsOutput() {
+      #expect(!caption(scheduleFixture("r1")).showsOutput)
+      #expect(caption(scriptRow()).showsOutput)
+      #expect(caption(headlessRow()).showsOutput)
+    }
+
+    // MARK: The last run of a detached loop
+
+    @Test func aScriptThatRanShowsItsExitAndItsLastLine() {
+      let schedule = scriptRow(last: run(.ran, minutesAgo: 5, exit: 0, tail: "Already up to date."))
+
+      #expect(caption(schedule).result == "last: ran 5m ago · exit 0 · Already up to date.")
+    }
+
+    @Test func aScriptThatFailedShowsTheErrorTheExitAndItsLastLine() {
+      let schedule = scriptRow(
+        last: run(.failed, minutesAgo: 2, error: "exited with status 3", exit: 3, tail: "fatal: no remote"))
+
+      #expect(caption(schedule).result == "last: failed 2m ago: exited with status 3 · exit 3 · fatal: no remote")
+      #expect(caption(schedule).status.state == .failed)
+    }
+
+    /// A run that timed out ended on a signal, so it has no exit status.
+    @Test func aScriptThatTimedOutShowsTheTimeoutAndNoExit() {
+      let schedule = scriptRow(last: run(.failed, minutesAgo: 2, error: "timed out after 10m", exit: nil, tail: nil))
+
+      #expect(caption(schedule).result == "last: failed 2m ago: timed out after 10m")
+    }
+
+    @Test func aHeadlessRunShowsTheFirstLineOfItsReply() {
+      let schedule = headlessRow(last: run(.ran, minutesAgo: 5, exit: 0, tail: "3 PRs need review."))
+
+      #expect(caption(schedule).result == "last: ran 5m ago · exit 0 · 3 PRs need review.")
+    }
+  }
+}

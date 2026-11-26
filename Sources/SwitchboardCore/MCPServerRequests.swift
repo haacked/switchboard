@@ -86,16 +86,7 @@ extension Card {
   /// The card that an `mcp_request` event opens, or nil when its data isn't a request.
   public init?(mcpRequest event: Event) {
     guard let request = try? JSONCoding.convert(event.data, to: MCPServerRequest.self) else { return nil }
-    id = event.id
-    session = event.session
-    kind = .mcp
-    tool = "request_mcp_server"
-    summary = request.summary
-    input = [:]
-    questions = []
-    since = event.t
-    deferred = false
-    hookClosed = false
+    self.init(decision: event, kind: .mcp, tool: "request_mcp_server", summary: request.summary)
     mcpRequest = request
   }
 }

@@ -204,7 +204,7 @@ extension Service {
   /// Why the schedule can't start sessions now, or nil when it can: the session no longer has it, it is paused, or
   /// `Schedule.hold` holds its session. It runs on the state queue.
   private func scheduleRefusal(_ id: String, _ scheduleID: String) -> String? {
-    guard let s = entries[id]?.session, let schedule = s.schedules?.first(where: { $0.id == scheduleID }) else {
+    guard let s = entries[id]?.session, let schedule = s.schedule(scheduleID) else {
       return "\(id) no longer has the schedule"
     }
     if schedule.paused == true { return "the schedule is paused" }
@@ -265,7 +265,7 @@ extension Service {
     } catch {
       logLine("can't save the top-up check of schedule \(scheduleID) of \(id): \(error)")
     }
-    let schedule = entries[id]?.session.schedules?.first { $0.id == scheduleID }
+    let schedule = entries[id]?.session.schedule(scheduleID)
     let data = gateEventData(
       schedule, status: status,
       [
@@ -302,15 +302,13 @@ extension Service {
       if let refusal = scheduleRefusal(id, scheduleID) {
         return logLine("not sending the fallback of schedule \(scheduleID) of \(id), because \(refusal)")
       }
-      guard let e = entries[id], let schedule = e.session.schedules?.first(where: { $0.id == scheduleID }) else {
+      guard let e = entries[id], let schedule = e.session.schedule(scheduleID) else {
         return
       }
       let now = nowMs()
       let check = Schedule.Gate.Check(.failed, status: status, now: now, skipped: skips, error: failure)
       // A busy session would queue the message, and each later failed top-up would queue another behind it.
-      if let blocker = Schedule.blocker(
-        facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
-      {
+      if let blocker = pasteBlocker(id, e, now: now) {
         logLine("not sending the fallback of schedule \(scheduleID) of \(id), because \(blocker)")
         do {
           try changeSchedule(id, scheduleID) { $0.gate?.last = check }
@@ -331,11 +329,11 @@ extension Service {
   /// yet. It drops from each gate's `started` the ids that sbd no longer has and each id whose merge it armed, so it
   /// arms each session's merge once. The tick calls it on the state queue.
   func armTopupMerges() {
-    let owners = entries.filter { _, e in e.session.schedules?.contains { $0.gate?.started?.isEmpty == false } == true }
+    let owners = entries.filter { _, e in e.session.allSchedules.contains { $0.gate?.started?.isEmpty == false } }
     guard !owners.isEmpty else { return }
     var candidates: [(id: String, scheduleID: String, subject: String, repo: String)] = []
     for (id, e) in owners.sorted(by: { $0.key < $1.key }) {
-      for schedule in e.session.schedules ?? [] {
+      for schedule in e.session.allSchedules {
         guard let started = schedule.gate?.started, !started.isEmpty else { continue }
         let kept = started.filter { entries[$0] != nil }
         if kept != started {

@@ -162,6 +162,13 @@ public final class Service {
   let topupQueue = DispatchQueue(label: "sbd.topup")
   /// The schedules whose top-up runs on `topupQueue`. The tick skips them, so they stay due until the top-up ends.
   var topupsInFlight: Set<String> = []
+  /// Runs headless and script schedules off the state queue, up to `Schedule.maxRunning` at once.
+  let scheduleRunQueue = DispatchQueue(label: "sbd.schedule-run", attributes: .concurrent)
+  /// Each headless or script run in flight, keyed by the schedule's id. Only the state queue reads and writes it.
+  var runsInFlight: [String: RunInFlight] = [:]
+  /// The schedules whose run in flight sbd cancels. The lock guards it, because each run reads it on
+  /// `scheduleRunQueue`.
+  let cancelledRuns = OSAllocatedUnfairLock(initialState: Set<String>())
   /// The operator settings that `operatorSettings` last read, with config.json's modification date at that read.
   /// The lock guards it, because the follow-through and top-up queues read the settings too.
   let operatorSettingsRead = OSAllocatedUnfairLock<(stamp: Date?, settings: OperatorSettings)?>(initialState: nil)
@@ -453,6 +460,7 @@ public final class Service {
       if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
     }
     markInterruptedPosts()
+    recoverRuns()
     // Replay gives no session its Operator items. The parent marks must include them, or the next digest tells each
     // parent again about an ask that it already heard about.
     syncOperatorItems()
@@ -590,11 +598,18 @@ public final class Service {
           install(fresh)
           return try approveWait(request.args, caller: caller)
         })
-    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule":
-      // A top-up's caller check reads the client's panes, so it takes a new snapshot.
+    case "schedule-log":
+      // A log can hold a mebibyte, so sbd reads it after it leaves the state queue.
+      let log = try prepared(request, origin: origin) { try scheduleLogPath(request.args) }
+      return .success(try Self.scheduleLog(log))
+    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule",
+      "schedule-pending":
+      // The caller checks of a top-up, a script, and a coordinator's headless schedule read the client's panes, so
+      // they take a new snapshot.
       let checksCaller =
-        (request.op == "schedule" && request.args["gate"] != nil)
-        || (request.op == "edit-schedule" && queue.sync { editsGatedSchedule(request.args) })
+        (request.op == "schedule"
+          && (request.args["gate"] != nil || ["script", "headless"].contains(request.args["runner"]?.string)))
+        || (request.op == "edit-schedule" && queue.sync { editChecksCaller(request.args) })
       let fresh = checksCaller ? buildSnapshot() : nil
       return try .success(
         prepared(request, origin: origin) {
@@ -630,7 +645,12 @@ public final class Service {
     case "import":
       return .success(try JSON(encoding: importSessions(request.args)))
     case "triage", "choose", "reply", "summary-set", "item-context":
-      return try triageRequest(request, origin: origin)
+      return try triageRequest(request, origin: origin, caller: caller)
+    case "answer":
+      // An allow of a `script` card checks who sent it. `prepared` takes a fresh snapshot for an answer, so the check
+      // reads the current panes.
+      return try .success(
+        prepared(request, origin: origin) { try answer(request.args, origin: origin, caller: caller) })
     case "decisions", "decision-answer", "decision-submit", "decision-resend", "decision-discard", "decision-ask":
       return try decisionRequest(request.op, request.args)
     case "plan-attach", "plan-update":
@@ -697,7 +717,7 @@ public final class Service {
 
   /// Takes the steps that `request` needs before it acts, then runs `body`
   /// on the state queue.
-  func prepared(_ request: Request, origin: RequestOrigin, _ body: () throws -> JSON) throws -> JSON {
+  func prepared<T>(_ request: Request, origin: RequestOrigin, _ body: () throws -> T) throws -> T {
     let hostRead = try readHost(for: request)
     if Service.settles.contains(request.op), let id = try? queue.sync(execute: { try messaged(request) }) {
       settle(id)
@@ -903,8 +923,6 @@ public final class Service {
         } ?? store.events(session: session, sessions: sessions, kinds: kinds, limit: limit, newest: true)
       if case .remote(let host) = origin { events = events.map { event($0, shownTo: host) } }
       return try JSON(encoding: args["full"]?.bool == true ? events : events.map(\.slimmed))
-    case "answer":
-      return try answer(args, origin: origin)
     case "screen":
       let id = try lookup(args)
       let pane = Pane(rawValue: args["pane"]?.string ?? "claude") ?? .claude
@@ -1597,26 +1615,17 @@ public final class Service {
     if local {
       try writeClaudeSettings(id, session)
       args += ["--settings", home.claudeSettings(id)]
-      args += launchMCPArgs(id, session)
-      // Claude in Chrome loads even under `--strict-mcp-config`. Nobody reads the operator's chat, so it has no use
-      // for a browser.
-      if session.kind == .operator { args.append("--no-chrome") }
     } else {
       args += ["--settings", "\(try site(for: session).sbFolder())/claude-settings.json"]
     }
-    if let model = SessionModel.launch(
-      kind: session.kind, stored: session.model, coordinatorModel: managerModel,
-      operatorModel: operatorSettings.model)
-    {
-      args += ["--model", model]
-    }
-    if local { args += config.claudeArgs }
-    // After claudeArgs, so that the session's mode wins over a global one.
     let mode = PermissionMode.forLaunch(session, resume: resume, lastReported: entries[id]?.facts.permissionMode)
-    if let mode { args += ["--permission-mode", mode] }
-    if let system = appendedSystemPrompt(for: session) {
-      args += ["--append-system-prompt", system]
-    }
+    args += ClaudeLaunch.options(
+      mcpArgs: local ? launchMCPArgs(id, session) : [], noChrome: local && session.kind == .operator,
+      model: SessionModel.launch(
+        kind: session.kind, stored: session.model, coordinatorModel: managerModel,
+        operatorModel: operatorSettings.model),
+      claudeArgs: local ? config.claudeArgs : [], permissionMode: mode,
+      appendedPrompt: appendedSystemPrompt(for: session))
     // `--` keeps a prompt that starts with a dash from reading as an option.
     if let prompt, !prompt.isEmpty { args += ["--", prompt] }
     let site = self.site(for: session)
@@ -2087,13 +2096,12 @@ public final class Service {
   ) throws -> [String] {
     var picked: [String] = []
     var panes: [String] = []
-    _ = try prepared(request, origin: origin) {
+    try prepared(request, origin: origin) {
       picked = try pick()
       for id in picked {
         try stop(id, reason: reason)
         if entries[id]?.session.host == nil { panes.append(paneName(id, .claude)) }
       }
-      return .null
     }
     if !panes.isEmpty {
       let terminals = mac.terminals()
@@ -2322,6 +2330,8 @@ public final class Service {
       install(fresh, of: session)
       if whileIdle, let e = entries[session.id], turnRuns(e) { throw TurnRunsError(name: session.name) }
       try scope.require()
+      // A run sbd started is below no pane, so no pane stop reaches it.
+      cancelRuns(of: session.id)
       if worktree { return try beginPaneStop(session.id, ancestry: ancestry, command: Self.removalCommand) }
       try stopForRemoval(session, at: site(for: session))
       return nil
@@ -2946,6 +2956,7 @@ public final class Service {
       rotateOperatorIfDue(now: now)
       deferDueQuestions(now: now)
       expireGroupMessages(now: now)
+      expireScriptProposals(now: now)
       readyDueFollowups(now: now)
       pollDocketsIfDue(now: now)
       pollSlackThreadsIfDue(now: now)
@@ -3016,7 +3027,8 @@ public final class Service {
       let earlier = facts.earlierPRNumbers
       if !earlier.isEmpty { out.earlierPRs = earlier }
     }
-    if s.schedules?.isEmpty == false { out.schedules = s.schedules }
+    let schedules = s.allSchedules
+    if !schedules.isEmpty { out.schedules = schedules }
     if s.kind == .work {
       out.checkout = checkout(s)
       out.repository = out.checkout.flatMap { repository($0, of: s) }

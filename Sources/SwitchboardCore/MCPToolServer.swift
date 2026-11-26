@@ -248,14 +248,12 @@ public struct MCPToolServer: Sendable {
       if let scoped { request["scope"] = .string(scoped.group.id) }
       return try client.call("parent", request)
     case "add_schedule":
-      var request = pick(args, ["every", "prompt"])
+      var request = try scheduleRequest(args, ["every", "prompt", "timeout", "account", "model", "reason"])
       request["session"] = try sessionOrCaller(args, scoped)
       request["by"] = MCPToolServer.byClaude
-      if let topup = args["topup"] {
-        request["gate"] = topup
-        // sbd checks who may add a top-up, so the caller goes with it unscoped too.
-        if let caller { request["caller"] = .string(caller) }
-      }
+      if let topup = args["topup"] { request["gate"] = topup }
+      // sbd checks who may add a top-up, a script, or a headless schedule, so the caller goes with it unscoped too.
+      if args["topup"] != nil || request["runner"] != nil, let caller { request["caller"] = .string(caller) }
       return try scheduleCall("schedule", request, scoped)
     case "list_schedules":
       let request = try args["session"].map { _ in ["session": try sessionID(args, scoped)] } ?? [:]
@@ -263,7 +261,10 @@ public struct MCPToolServer: Sendable {
     case "remove_schedule":
       return try scheduleCall("remove-schedule", pick(args, ["schedule"]), scoped)
     case "edit_schedule":
-      return try scheduleCall("edit-schedule", pick(args, ["schedule", "every", "prompt"]), scoped)
+      var request = try scheduleRequest(args, ["schedule", "every", "prompt", "timeout", "account", "model", "reason"])
+      // sbd checks who may change a top-up, a script, or a headless schedule, so the caller goes with it unscoped too.
+      if let caller { request["caller"] = .string(caller) }
+      return try scheduleCall("edit-schedule", request, scoped)
     case "run_schedule":
       return try scheduleCall("run-schedule", pick(args, ["schedule"]), scoped)
     case "request_mcp_server":

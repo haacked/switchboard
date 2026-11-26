@@ -30,7 +30,7 @@ extension SessionFacts {
   /// earlier attempts irrelevant.
   public var currentReviewRequest: ReviewRequestAttempt? {
     guard let reviewRequest, reviewRequest.head == pr?.headSha else { return nil }
-    return reviewRequest
+    return reviewRequest.value
   }
 
   /// The reviewers whose review is asked for: the ones that GitHub lists, or

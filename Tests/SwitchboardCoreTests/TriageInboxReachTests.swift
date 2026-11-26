@@ -32,6 +32,8 @@ let inboxShapes: [InboxShape] = [
   InboxShape(name: "a permission card", events: { permissionTurn() }, work: true, conversation: true),
   InboxShape(name: "a question card", events: { questionTurn() }, work: true, conversation: true),
   InboxShape(name: "a trust card", events: { trustLaunch() }, work: true, conversation: true),
+  // A group chat proposes a script for a member, and only the Inbox shows the chat's card.
+  InboxShape(name: "a script card", events: { [scriptProposed()] }, work: true, conversation: true),
   InboxShape(
     name: "a send card, then a permission card", events: { [sendPending()] + permissionTurn() }, work: true,
     conversation: true),

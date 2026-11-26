@@ -1,8 +1,8 @@
 import SwiftUI
 import SwitchboardCore
 
-/// A permission prompt, a question, a group message, a folder trust prompt, or an MCP server request, answered
-/// without opening the session.
+/// A permission prompt, a question, a group message, a folder trust prompt, an MCP server request, or a script
+/// proposal, answered without opening the session.
 struct CardView: View {
   /// What the user picked or typed on the card and has not sent. BoardModel keeps one per card, so it outlives the view.
   final class Draft: ObservableObject {
@@ -47,6 +47,7 @@ struct CardView: View {
       case .send: groupMessage
       case .trust: trust
       case .mcp: mcpRequest
+      case .script: scriptProposal
       }
       RefusalLabel(refusal: model.cardErrors[card.id])
     }
@@ -123,6 +124,48 @@ struct CardView: View {
     }
   }
 
+  /// Claude wrote the command and the reason. Allow stores the command as shown, so it shows in full, with each
+  /// control character as an escape, and never as Markdown.
+  @ViewBuilder
+  private var scriptProposal: some View {
+    if let proposal = card.scriptProposal?.value {
+      VStack(alignment: .leading, spacing: 8) {
+        let asker = model.allSessions.first { $0.id == card.session }?.name ?? card.session
+        Text(verbatim: "\(asker) wants to \(proposal.whatText)").font(.headline)
+        VStack(alignment: .leading, spacing: 2) {
+          Text(verbatim: "In \(proposal.targetName) · \(proposal.folder)")
+          Text(verbatim: proposal.timingText)
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+        // The Inbox's Details shows the command verbatim, so even the compact card shows it with escapes.
+        Self.textBox(proposal.command.printableLines, maxHeight: 160)
+          .accessibilityLabel("Command: \(proposal.command.printable)")
+          .clickAnchor("script-card-\(card.id)-command")
+        if !compact {
+          if let before = proposal.before {
+            Text("Replaces").font(.caption).foregroundStyle(.secondary)
+            Self.textBox(before.command.printableLines, maxHeight: 80)
+              .accessibilityLabel("Replaces: \(before.command.printable)")
+          }
+          if !proposal.reason.isEmpty { Self.textBox(proposal.reason, maxHeight: 60) }
+        }
+        HStack {
+          Button("Allow") { model.answer(card, behavior: "allow") }
+            .help("Store the loop. Its command then runs on the interval with no permission prompt.")
+            .clickAnchor("script-card-\(card.id)-allow")
+          Button("Deny") { model.answer(card, behavior: "deny") }
+          Spacer()
+          ExpiryLabel(ms: proposal.expires)
+        }
+        Text("Nothing runs until you allow it. \(ScriptProposal.worktreeNote)")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+    }
+  }
+
   static func textBox(_ text: String, maxHeight: CGFloat) -> some View { TextBox(text: text, maxHeight: maxHeight) }
 
   /// Whether Return in the deny message denies. A blank message does not, because a deny without a
@@ -159,12 +202,7 @@ struct CardView: View {
             .buttonStyle(.borderedProminent)
           Button("Cancel") { model.answer(card, behavior: "deny") }
           Spacer()
-          HStack(spacing: 4) {
-            Text("Expires in")
-            Text(Date(timeIntervalSince1970: Double(message.expires) / 1000), style: .relative)
-          }
-          .font(.caption)
-          .foregroundStyle(.secondary)
+          ExpiryLabel(ms: message.expires)
         }
         Text(
           "Nothing is sent until you send it. The text can quote PR comments or logs, so read it before you send it."
@@ -353,5 +391,19 @@ struct ToolInputBox: View {
         TextBox(text: text, maxHeight: maxHeight)
       }
     }
+  }
+}
+
+/// `Expires in` and the time left until `ms`, in milliseconds since the epoch, which counts down as it shows.
+struct ExpiryLabel: View {
+  let ms: Int64
+
+  var body: some View {
+    HStack(spacing: 4) {
+      Text("Expires in")
+      Text(Date(timeIntervalSince1970: Double(ms) / 1000), style: .relative)
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
   }
 }

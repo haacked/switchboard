@@ -50,16 +50,7 @@ extension Card {
   /// The card that a `send_pending` event opens, or nil when its data isn't a group message.
   public init?(groupMessage event: Event) {
     guard let message = try? JSONCoding.convert(event.data, to: GroupMessage.self) else { return nil }
-    id = event.id
-    session = event.session
-    kind = .send
-    tool = "send_group"
-    summary = message.summary
-    input = [:]
-    questions = []
-    since = event.t
-    deferred = false
-    hookClosed = false
+    self.init(decision: event, kind: .send, tool: "send_group", summary: message.summary)
     send = message
   }
 }
@@ -68,10 +59,18 @@ extension Client {
   /// Asks sbd about the group message every 0.5 s until the user decides or
   /// `timeout` seconds pass, and returns the last `GroupSend`.
   public func awaitGroupMessage(_ id: Int64, timeout: TimeInterval) throws -> GroupSend {
+    try awaitDecision("send-pending", card: id, timeout: timeout) { (status: GroupSend) in status.decision != .pending }
+  }
+
+  /// Sends `op` for the card every 0.5 s until `decided` returns true for sbd's answer or `timeout` seconds pass,
+  /// and returns the last answer.
+  public func awaitDecision<T: Decodable>(
+    _ op: String, card id: Int64, timeout: TimeInterval, decided: (T) -> Bool
+  ) throws -> T {
     let deadline = Date().addingTimeInterval(timeout)
     while true {
-      let status = try call("send-pending", ["card": .number(Double(id))], as: GroupSend.self)
-      if status.decision != .pending || Date() >= deadline { return status }
+      let status = try call(op, ["card": .number(Double(id))], as: T.self)
+      if decided(status) || Date() >= deadline { return status }
       Thread.sleep(forTimeInterval: 0.5)
     }
   }

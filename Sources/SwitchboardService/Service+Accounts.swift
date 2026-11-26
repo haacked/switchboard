@@ -68,10 +68,14 @@ extension Service {
   /// The stored account, config.env, or sbd's own CLAUDE_CONFIG_DIR may name a folder that became one. A pane
   /// without CLAUDE_CONFIG_DIR runs claude under the default account.
   func codexLaunchRefusal(_ id: String) -> String? {
-    guard entries[id]?.session.host == nil,
-      let name = codexName(paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder)
-    else { return nil }
+    guard entries[id]?.session.host == nil, let name = codexName(paneAccountFolder(id)) else { return nil }
     return Self.codexRefusal(name)
+  }
+
+  /// The folder of the Claude account that the session's pane sets. A pane without CLAUDE_CONFIG_DIR runs claude
+  /// under the default account.
+  func paneAccountFolder(_ id: String) -> String {
+    paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder
   }
 
   /// Why a conversation can't move to or from the Codex account `name`.

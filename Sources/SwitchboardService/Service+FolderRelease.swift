@@ -43,13 +43,20 @@ extension Service {
     entries[id]?.session.host == nil && !ancestry.isDisjoint(with: livePanePids(id, panes: panes))
   }
 
-  /// Where a client with `ancestry` runs: the sessions on this Mac whose panes it runs below, in id order, and
-  /// whether it runs below sbd's tmux server. A program that a session starts with `tmux new-session` or
-  /// `tmux new-window` runs below the server and outside every pane. It runs on the state queue, after `install` of a
-  /// fresh snapshot.
+  /// Where a client with `ancestry` runs: the sessions on this Mac whose panes or headless and script runs it runs
+  /// below, in id order, and whether it runs below sbd's tmux server. A program that a session starts with
+  /// `tmux new-session` or `tmux new-window` runs below the server and outside every pane. A run's pid counts only
+  /// while its start time matches the one that sbd recorded, so a reused pid places no client. It runs on the state
+  /// queue, after `install` of a fresh snapshot.
   func callerPlace(_ ancestry: Set<Int>) -> (inside: [String], inServer: Bool) {
     let servers = Set(mac.snapshot.panes.values.map(\.server).filter(Processes.isValidPid))
-    return (entries.keys.sorted().filter { isInside($0, ancestry) }, !ancestry.isDisjoint(with: servers))
+    // A run outlives its schedule and its session by up to its kill grace, so its session needn't be in `entries`.
+    // A run whose start time sbd couldn't read counts by its pid alone, so the check fails closed.
+    let runs = runsInFlight.values.filter {
+      ancestry.contains($0.pid) && ($0.start == 0 || Processes.startTime(of: $0.pid) == $0.start)
+    }
+    let inside = Set(entries.keys.filter { isInside($0, ancestry) }).union(runs.map(\.session))
+    return (inside.sorted(), !ancestry.isDisjoint(with: servers))
   }
 
   /// The refusal for a caller that runs below the session's Claude or shell pane, or nil.
@@ -168,18 +175,24 @@ extension Service {
     let marker = "SB_SESSION_ID=\(sessionId)"
     var found: [Int: Int64] = [:]
     for user in users where !sparing.contains(user.pid) {
-      guard let row = table.row(user.pid), row.ppid == 1, !row.isZombie, row.startTime > 0,
-        row.startTime >= since * 1000, environment(user.pid).contains(marker)
+      guard let row = table.row(user.pid), isOrphan(row), row.startTime >= since * 1000,
+        environment(user.pid).contains(marker)
       else { continue }
       found[user.pid] = row.startTime
     }
     return found
   }
 
+  /// Whether launchd adopted the process: its parent is pid 1, it is not a zombie, and the table holds its start
+  /// time. A table parsed from `ps` holds start time 0, so it gives no orphan.
+  static func isOrphan(_ row: ProcessRow) -> Bool {
+    row.ppid == 1 && !row.isZombie && row.startTime > 0
+  }
+
   /// Sends SIGTERM to each leftover on this Mac, waits up to `stopWaitSeconds` for them to exit, then sends
   /// SIGKILL to each that still runs. A pid whose start time differs from the recorded one names another
   /// process, so it gets no signal.
-  private func stopLeftovers(_ leftovers: [Int: Int64], of session: Session, at site: any SessionSite) throws {
+  func stopLeftovers(_ leftovers: [Int: Int64], of session: Session, at site: any SessionSite) throws {
     let signal = { (sig: Int32) throws in
       let table = try site.processes()
       for (pid, start) in leftovers where table.row(pid)?.startTime == start {

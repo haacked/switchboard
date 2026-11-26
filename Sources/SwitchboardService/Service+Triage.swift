@@ -2,13 +2,19 @@ import Foundation
 import SwitchboardCore
 
 extension Service {
-  func triageRequest(_ request: Request, origin: RequestOrigin) throws -> Response {
+  /// `caller` sent the request. A `choose` that allows a `script` card passes it on, so the answer checks the
+  /// sender of the click as `sb allow` does.
+  func triageRequest(_ request: Request, origin: RequestOrigin, caller: Caller) throws -> Response {
     let args = request.args
     switch request.op {
     case "triage":
       return .success(try queue.sync { try JSON(encoding: Triage.order(summaries())) })
     case "choose":
-      return handle(try queue.sync { try chooseRequest(args) })
+      let (chosen, answersScript) = try queue.sync {
+        let chosen = try chooseRequest(args)
+        return (chosen, chosen.op == "answer" && (try? chosenCard(chosen.args))?.kind == .script)
+      }
+      return handle(chosen, caller: answersScript ? caller : .inProcess)
     case "summary-set":
       return .success(
         try queue.sync {
@@ -198,9 +204,7 @@ extension Service {
   func transcriptFinder(_ id: String) -> () -> String? {
     let e = entries[id]!
     let session = e.session
-    let account =
-      session.host == nil
-      ? (paneEnv(id)["CLAUDE_CONFIG_DIR"] ?? ClaudeAccount.defaultFolder) : transcriptAccount(session)
+    let account = session.host == nil ? paneAccountFolder(id) : transcriptAccount(session)
     let known = e.facts.transcriptPath
     let machine = site(for: session).machine
     return {
