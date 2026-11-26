@@ -80,7 +80,7 @@ import Testing
 
   /// sbd being down or refusing for another reason says nothing about where PR updates come from.
   @Test func anotherErrorLeavesTheRowLoading() async {
-    let (model, sent) = model { throw APIError("connection refused") }
+    let (model, _) = model { throw APIError("connection refused") }
 
     model.loadPRSources()
     await settle { !model.prSourcesLoading }
@@ -89,7 +89,7 @@ import Testing
   }
 
   @Test func anotherErrorKeepsTheLastReport() async {
-    let (model, sent) = model { throw Boom() }
+    let (model, _) = model { throw Boom() }
     model.prSources = .report(Self.sources)
 
     model.loadPRSources()
@@ -100,7 +100,7 @@ import Testing
 
   /// An "unknown request" for some other op is not an older sbd's answer to `sources`.
   @Test func anUnknownRequestOfAnotherOpIsAnotherError() async {
-    let (model, sent) = model { throw APIError("unknown request live") }
+    let (model, _) = model { throw APIError("unknown request live") }
 
     model.loadPRSources()
     await settle { !model.prSourcesLoading }
@@ -108,7 +108,8 @@ import Testing
     #expect(model.prSources == .loading)
   }
 
-  /// A counter that the row doesn't show changes with each event. Storing it would republish the model and redraw every view.
+  /// A counter that the row doesn't show changes with each event. Storing it would republish the model and redraw
+  /// every view.
   @Test func aReportKeepsOnlyTheFieldsThatTheRowShows() async {
     var counted = Self.sources
     counted.providers[0].signals = 9
@@ -125,13 +126,14 @@ import Testing
   /// A failed read ends the read in flight, so the next call asks again.
   @Test func aReadAfterAFailureAsksAgain() async {
     let (model, sent) = model { throw Boom() }
+    let reads = { sent.value.filter { $0.op == "sources" }.count }
 
     model.loadPRSources()
-    await settle { !model.prSourcesLoading && sent.value.contains { $0.op == "sources" } }
+    await settle { !model.prSourcesLoading }
     model.loadPRSources()
-    await settle { sent.value.filter { $0.op == "sources" }.count == 2 }
+    await settle { reads() == 2 }
 
-    #expect(sent.value.filter { $0.op == "sources" }.count == 2)
+    #expect(reads() == 2)
   }
 
   @Test func aNewerReportReplacesAnOlderOne() async {
