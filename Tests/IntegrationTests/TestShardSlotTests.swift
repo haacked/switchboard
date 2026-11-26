@@ -25,8 +25,11 @@ private struct ShardCall: Equatable, CustomStringConvertible {
 /// reads the order of the calls. The id of the build is "build". The id of a
 /// test call joins the suites that its --filter matches with "+", such as
 /// "AlphaTests". With FAKE_SWIFT_HOLD set, a test call waits until the test
-/// creates go.<id> or go.all, and then exits 1 when fail.<id> exists. It
-/// writes its SB_BUILD_SLOT_HELD to held.<id> and its parent's pid to
+/// creates go.<id>, go.all, or fail.<id>. A test call reports the number of
+/// tests that its filter matches, or FAKE_SWIFT_RAN when that is set. When
+/// fail.<id> exists, a call prints a Swift Testing issue line at <id>.swift
+/// and exits 1. With FAKE_SWIFT_NO_ISSUE set, it exits 1 without that line.
+/// It writes its SB_BUILD_SLOT_HELD to held.<id> and its parent's pid to
 /// ppid.<id>. The fake sysctl reports no load, because bin/test waits for the
 /// load to drop below the CPU count before it runs MeasureTests. The fake cp
 /// copies and then logs "cloned <destination>". It first sleeps
@@ -102,10 +105,22 @@ private final class ShardRig {
         done
       fi
       if [ "$1" = test ] && [ -n "$filter" ]; then
-        echo "Test run with $(grep -c -E "$filter" "$FAKE_SWIFT_TESTS" || true) tests passed"
+        if [ -n "${FAKE_SWIFT_RAN-}" ]; then
+          ran=$FAKE_SWIFT_RAN
+        else
+          ran=$(grep -c -E "$filter" "$FAKE_SWIFT_TESTS" || true)
+        fi
+        echo "Test run with $ran tests passed"
       fi
       echo "end $id" >> "$FAKE_SWIFT_EVENTS"
-      if [ -e "$FAKE_SWIFT_DIR/fail.$id" ]; then exit 1; fi
+      if [ -e "$FAKE_SWIFT_DIR/fail.$id" ]; then
+        if [ -z "${FAKE_SWIFT_NO_ISSUE-}" ]; then
+          echo "✘ Test t() recorded an issue at $id.swift:9:5: Expectation failed: (x → 1) == 2"
+        else
+          echo "fake swift: $id failed quietly"
+        fi
+        exit 1
+      fi
       exit 0
       """)
     try write(
@@ -133,8 +148,8 @@ private final class ShardRig {
       """)
   }
 
-  private func write(_ name: String, _ script: String) throws {
-    let path = "\(bin)/\(name)"
+  private func write(_ name: String, _ script: String, in folder: String? = nil) throws {
+    let path = "\(folder ?? bin)/\(name)"
     guard
       FileManager.default.createFile(
         atPath: path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o755])
@@ -148,9 +163,13 @@ private final class ShardRig {
     queue.stop()
   }
 
+  /// SlotQueue copies the test process's environment. In CI, bin/test would
+  /// otherwise annotate the real job and append to its summary.
   func environment(_ extra: [String: String?] = [:]) -> [String: String] {
     var env = queue.environment(slots: "1")
     env["CI"] = nil
+    env["GITHUB_ACTIONS"] = nil
+    env["GITHUB_STEP_SUMMARY"] = nil
     env["PATH"] = "\(bin):\(env["PATH"] ?? "/usr/bin:/bin")"
     env["FAKE_SWIFT_CALLS"] = calls
     env["FAKE_SWIFT_EVENTS"] = queue.log
@@ -245,6 +264,31 @@ private final class ShardRig {
     p.waitUntilExit()
   }
 
+  /// Replaces the copy's bin/lib/test-failures with a script that exits 3 and
+  /// leaves a file behind, which testFailuresRan finds.
+  func breakTestFailures() throws {
+    try write("test-failures", "#!/bin/sh\n: > \"$FAKE_SWIFT_DIR/test-failures.ran\"\nexit 3\n", in: "\(repo)/bin/lib")
+  }
+
+  func testFailuresRan() -> Bool { FileManager.default.fileExists(atPath: "\(queue.root)/test-failures.ran") }
+
+  /// The file that the tests pass as GITHUB_STEP_SUMMARY.
+  var summary: String { "\(queue.root)/summary.md" }
+
+  func summaryText() -> String? { try? String(contentsOfFile: summary, encoding: .utf8) }
+
+  /// The annotations that bin/test printed on stdout or stderr. The shards'
+  /// own lines start with their "[<i>] " prefix instead.
+  static func annotations(_ r: CommandResult) -> [String] { errorAnnotations(r.stdout + "\n" + r.stderr) }
+
+  /// The environment of a CI run that annotates. The queue is off, as in CI.
+  /// So no waiting line reaches the shard logs.
+  func ciEnv(_ extra: [String: String?] = [:]) -> [String: String?] {
+    var env: [String: String?] = ["SB_BUILD_SLOTS": "0", "GITHUB_ACTIONS": "true", "GITHUB_STEP_SUMMARY": summary]
+    for (key, value) in extra { env[key] = value }
+    return env
+  }
+
   /// The lines of `text` that print the limits.
   static func limitsLines(_ text: String) -> [String] {
     text.split(separator: "\n").map(String.init).filter { $0.contains(limitsPrefix) }
@@ -293,6 +337,30 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
   var warns: Bool
 
   var testDescription: String { "\(arguments.joined(separator: " ")) CI=\(ci ?? "unset")" }
+}
+
+/// How a sharded run fails in the annotation tests.
+private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConvertible {
+  /// AlphaTests prints an issue line and exits 1.
+  case issue
+  /// AlphaTests exits 1 without an issue line.
+  case silent
+  /// Every shard passes, but each reports that it ran 0 tests.
+  case count
+
+  var env: [String: String?] {
+    switch self {
+    case .issue: [:]
+    case .silent: ["FAKE_SWIFT_NO_ISSUE": "1"]
+    case .count: ["FAKE_SWIFT_RAN": "0"]
+    }
+  }
+
+  func arrange(_ rig: ShardRig) {
+    if self != .count { rig.fail("AlphaTests") }
+  }
+
+  var testDescription: String { rawValue }
 }
 
 /// bin/test --shards runs each shard as its own client of the build queue.
@@ -570,5 +638,87 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
 
     #expect(r.status == 0, "\(r.stderr)")
     #expect(Set(rig.shardCalls().map(\.id)) == Set(expected), "\(rig.swiftCalls())")
+  }
+
+  @Test(arguments: ["AlphaTests", "MeasureTests"])
+  func inGitHubActionsAFailingShardsIssueLineBecomesAnAnnotationAndASummaryLine(_ shard: String) throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    rig.fail(shard)
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv())
+
+    #expect(r.status == 1, "\(r.stderr)")
+    let issue = "recorded an issue at \(shard).swift:9:5"
+    #expect(ShardRig.annotations(r).contains { $0.contains(issue) }, "\(r.stdout)\(r.stderr)")
+    #expect(rig.summaryText()?.contains(issue) == true, "\(rig.summaryText() ?? "no summary")")
+  }
+
+  /// Without an issue line, the annotation comes from the `--failed` label that
+  /// bin/test passes for the failed shard. bin/test adds that label after `wait`
+  /// for a parallel shard and after the MeasureTests run.
+  @Test(arguments: ["AlphaTests", "MeasureTests"])
+  func inGitHubActionsAFailingShardWithNoIssueLineGetsOneAnnotation(_ shard: String) throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    rig.fail(shard)
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv(ShardFailure.silent.env))
+
+    #expect(r.status == 1, "\(r.stderr)")
+    #expect(ShardRig.annotations(r).count == 1, "\(r.stdout)\(r.stderr)")
+    #expect(
+      rig.summaryText()?.contains("fake swift: \(shard) failed quietly") == true, "\(rig.summaryText() ?? "no summary")"
+    )
+  }
+
+  @Test func inGitHubActionsTheShardsRanNOfMLineStaysOnStderrAndBecomesAnAnnotation() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv(ShardFailure.count.env))
+
+    #expect(r.status == 1, "\(r.stderr)")
+    #expect(r.stderr.contains("bin/test: the shards ran 0 of 4 tests"), "\(r.stderr)")
+    let annotations = ShardRig.annotations(r)
+    #expect(annotations.count == 1, "\(annotations)")
+    #expect(annotations.first?.contains("the shards ran 0 of 4 tests") == true, "\(annotations)")
+  }
+
+  @Test(arguments: [nil, "false"] as [String?])
+  func outsideGitHubActionsAFailingShardMakesNoAnnotationAndNoSummary(_ actions: String?) throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    rig.fail("AlphaTests")
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv(["GITHUB_ACTIONS": actions]))
+
+    #expect(r.status == 1, "\(r.stderr)")
+    #expect(ShardRig.annotations(r).isEmpty, "\(r.stdout)\(r.stderr)")
+    #expect(rig.summaryText() == nil)
+  }
+
+  @Test func inGitHubActionsAPassingRunSkipsTheAnnotationScript() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    try rig.breakTestFailures()
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv())
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(!rig.testFailuresRan(), "the script ran on a passing run")
+  }
+
+  @Test(arguments: ShardFailure.allCases)
+  fileprivate func aFailingAnnotationScriptLeavesTheExitStatusAlone(_ failure: ShardFailure) throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+    failure.arrange(rig)
+    try rig.breakTestFailures()
+
+    let r = try rig.run(["--shards", "2"], env: rig.ciEnv(failure.env))
+
+    #expect(r.status == 1, "\(r.stderr)")
+    #expect(rig.testFailuresRan(), "\(r.stderr)")
   }
 }
