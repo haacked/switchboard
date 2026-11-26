@@ -15,8 +15,8 @@ private struct ShardCall: Equatable, CustomStringConvertible {
 }
 
 /// A copy of the repo's bin/ folder next to an empty .build folder, with a
-/// fake swift and a fake sysctl at the front of PATH. bin/test --shards runs
-/// `rm -rf .build-shards` in the folder above its own bin/, so the tests run
+/// fake swift, a fake cp, and a fake sysctl at the front of PATH. bin/test
+/// --shards runs `rm -rf .build-shards` in the folder above its own bin/, so the tests run
 /// only this copy. Running the repo's own bin/test --shards in CI would delete
 /// the clones that the running shards use.
 ///
@@ -417,6 +417,13 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
       events.firstIndex { $0.hasPrefix("start ") && !$0.hasPrefix("start build ") }, "\(events)")
     #expect(clones.count == ShardRig.parallelShards.count - 1, "\(events)")
     #expect(clones.allSatisfy { $0 < firstShard }, "\(events)")
+
+    let paths = rig.shardCalls().filter { ShardRig.parallelShards.contains($0.id) }.compactMap { call in
+      call.args.firstIndex(of: "--scratch-path").map { call.args[$0 + 1] }
+    }
+    let cloned = clones.map { String(events[$0].dropFirst("cloned ".count)) }
+    #expect(paths.filter { $0 == ".build" }.count == 1, "\(paths)")
+    #expect(Set(paths.filter { $0 != ".build" }) == Set(cloned), "\(paths) \(cloned)")
   }
 
   @Test func aFailedCloneStopsBinTestBeforeAnyShardStarts() throws {
