@@ -225,8 +225,7 @@ public enum DetachedRun {
     /// Ends a cut log with the marker on a line of its own.
     mutating func finish() {
       guard cut else { return }
-      let marker = (lastByte == UInt8(ascii: "\n") ? "" : "\n") + DetachedRun.cutMarker + "\n"
-      write(Array(marker.utf8)[...])
+      write(Array(DetachedRun.markerLine(after: lastByte))[...])
     }
 
     /// A log that can't be written stops growing, and the run goes on.
@@ -253,6 +252,21 @@ public enum DetachedRun {
       else { return nil }
       return truncated(line, max: DetachedRun.tailMax)
     }
+  }
+
+  /// True when the log ends with the cut marker, so the output passed `logCap`.
+  public static func isCut(_ log: String) -> Bool { log.hasSuffix("\(cutMarker)\n") }
+
+  /// The first `logCap` bytes of `data`, and the cut marker on a line of its own when `data` is longer.
+  public static func capped(_ data: Data) -> Data {
+    guard data.count > logCap else { return data }
+    let kept = data.prefix(logCap)
+    return kept + markerLine(after: kept.last ?? UInt8(ascii: "\n"))
+  }
+
+  /// The cut marker on a line of its own, after output whose last byte is `last`.
+  private static func markerLine(after last: UInt8) -> Data {
+    Data(((last == UInt8(ascii: "\n") ? "" : "\n") + cutMarker + "\n").utf8)
   }
 
   /// The first line of the text that isn't blank, cleaned and cut as `Result.tail` is, or nil when every line is blank.

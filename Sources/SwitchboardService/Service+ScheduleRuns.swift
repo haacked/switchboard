@@ -21,26 +21,27 @@ extension Service {
 
   /// Saves the schedule's next run and the start of this run, marks the run in flight, and runs the command on
   /// `scheduleRunQueue`. A crash after the save leaves `running` set, which `recoverRuns` reads at the next load. A
-  /// schedule whose save fails runs nothing. A run that `runCommand` refuses starts no process and records a failed
-  /// run. It runs on the state queue.
+  /// schedule whose save fails runs nothing. A run that `runCommand` refuses, or whose log folder can't be made,
+  /// starts no process and records a failed run. It runs on the state queue.
   func dispatchRun(_ id: String, _ schedule: Schedule, now: Int64) {
     guard let session = entries[id]?.session else { return }
+    func fail(_ error: String) {
+      var ran = schedule
+      guard let skipped = saveNextRun(id, &ran, now: now) else { return }
+      recordRun(id, ran, run: Schedule.Run(t: now, outcome: .failed, skipped: skipped, error: error), check: nil)
+    }
     let command: (argv: [String], env: [String: String])
     do {
       command = try runCommand(id, session, schedule, marker: "\(schedule.id):\(now)")
     } catch {
-      var ran = schedule
-      guard let skipped = saveNextRun(id, &ran, now: now) else { return }
-      recordRun(id, ran, run: Schedule.Run(t: now, outcome: .failed, skipped: skipped, error: "\(error)"), check: nil)
-      return
+      return fail("\(error)")
     }
     let folder = runLogFolder(id, schedule.id)
     do {
       // A removal deletes the folder on the state queue, so the run can't make it again after that.
       try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     } catch {
-      logLine("can't run schedule \(schedule.id) of \(id): \(error)")
-      return
+      return fail("can't make the folder of the run's log: \(error)")
     }
     var ran = schedule
     guard let skipped = saveNextRun(id, &ran, now: now, running: true) else { return }
@@ -121,18 +122,24 @@ extension Service {
 
   /// Reads a headless run's log, which holds claude's envelope, and returns the model and tokens that it reports.
   /// It sets `run`'s tail to the first line of the envelope's result, and it fails a run whose envelope is an error
-  /// or that printed none, with the words of `Headless.answer`. A timeout or a cancel keeps its own error. It rewrites
-  /// the log as the result's text, then what claude printed. It runs off the state queue.
-  private static func readHeadlessLog(_ log: String, ended: DetachedRun.Result, run: inout Schedule.Run)
+  /// or that printed none, with the words of `Headless.answer`. A timeout or a cancel keeps its own error. A log that
+  /// passed the cap holds no whole envelope, so the exit status decides the run, and its usage is unknown. It rewrites
+  /// the log as the result's text, then what claude printed, within the log's cap. It runs off the state queue.
+  static func readHeadlessLog(_ log: String, ended: DetachedRun.Result, run: inout Schedule.Run)
     -> HeadlessReply
   {
-    let output = String(decoding: FileManager.default.contents(atPath: log) ?? Data(), as: UTF8.self)
+    let data = FileManager.default.contents(atPath: log) ?? Data()
+    let output = String(decoding: data, as: UTF8.self)
     let envelope = Headless.envelope(output)
     let result = envelope?["result"]?.string
     if let result {
       FileManager.default.createFile(
-        atPath: log, contents: Data((result + "\n\n" + output).utf8), attributes: [.posixPermissions: 0o600])
+        atPath: log, contents: DetachedRun.capped(Data((result + "\n\n").utf8) + data),
+        attributes: [.posixPermissions: 0o600])
       run.tail = DetachedRun.firstLine(result)
+    } else if DetachedRun.isCut(output) {
+      run.tail = "claude's reply passed the log's 1 MiB cap, so sbd read no result from it"
+      return HeadlessReply(output: output)
     }
     if ended.reason == nil, let problem = Headless.problem(envelope: result == nil ? nil : envelope, output: output) {
       run.outcome = .failed

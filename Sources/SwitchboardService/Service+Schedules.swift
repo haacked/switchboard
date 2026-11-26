@@ -113,6 +113,10 @@ extension Service {
     case manager(String)
     /// The session with this id, whose request the user approves through a card.
     case propose(String)
+
+    var storesDirectly: Bool {
+      if case .propose = self { false } else { true }
+    }
   }
 
   /// The start of sbd's refusal for a caller that may neither store a script nor propose one.
@@ -245,7 +249,9 @@ extension Service {
   /// never changes. A change to a script's command or timeout needs the authority of `scriptAuthority`, and a
   /// session that may only propose gets a `script` card that holds the whole edit. A change to a coordinator's
   /// headless prompt, account, or model needs the authority of `checkHeadlessCaller`. A change to the interval alone
-  /// needs neither, because the interval changes when the run happens and not what runs.
+  /// needs neither, because the interval changes when the run happens and not what runs. A script without a timeout
+  /// of its own runs for 10 minutes, or for the interval when that is shorter. An interval edit that would lengthen that default, from a
+  /// caller without script authority, stores the timeout before the edit.
   private func editSchedule(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
     let (id, found) = try ownedSchedule(args)
     if found.gate != nil { try checkTopupCaller(args, origin: origin, caller: caller) }
@@ -265,9 +271,15 @@ extension Service {
       }
       request.account = try request.account.map(headlessAccountFolder)
     }
-    let schedule = try found.edited(
+    var schedule = try found.edited(
       every: request.every, prompt: request.prompt, account: request.account, model: request.model,
       timeout: request.timeout, now: nowMs())
+    if runner == .script, request.every != nil, request.timeout == nil, found.timeout == nil,
+      Schedule.defaultTimeout(.script, every: schedule.every) > found.runTimeout
+    {
+      let sender = authority ?? (try? scriptAuthority(args, origin: origin, caller: caller))
+      if sender?.storesDirectly != true { schedule.timeout = found.runTimeout }
+    }
     guard schedule != found else { return try JSON(encoding: scheduleRow(id, found)) }
     if case .propose(let proposer) = authority {
       return try openScriptProposal(
@@ -282,9 +294,9 @@ extension Service {
     return try JSON(encoding: scheduleRow(id, schedule))
   }
 
-  /// The path of the log of one of the schedule's runs, with the run's number. `run` 1, or no `run`, is the newest
-  /// run. It runs on the state queue.
-  func scheduleLogPath(_ args: JSON) throws -> (path: String, run: Int, schedule: String) {
+  /// The path of the log of one of the schedule's runs, with the run's number and time. `run` 1, or no `run`, is the
+  /// newest run. It runs on the state queue.
+  func scheduleLogPath(_ args: JSON) throws -> (path: String, run: Int, schedule: String, t: Int64) {
     let (id, schedule) = try ownedSchedule(args)
     guard schedule.isDetached else {
       throw APIError("schedule \(schedule.id) sends its prompt into the session, so it keeps no log")
@@ -297,17 +309,18 @@ extension Service {
           ? "schedule \(schedule.id) has not run yet"
           : "schedule \(schedule.id) has \(history.count) runs, so it has no run \(n)")
     }
-    return ("\(runLogFolder(id, schedule.id))/\(history[n - 1].t).log", n, schedule.id)
+    let t = history[n - 1].t
+    return ("\(runLogFolder(id, schedule.id))/\(t).log", n, schedule.id, t)
   }
 
-  /// The log at `scheduleLogPath`'s path, with whether the run's output passed the log's cap. It runs off the state
-  /// queue, because a log can hold a mebibyte.
-  static func scheduleLog(_ log: (path: String, run: Int, schedule: String)) throws -> JSON {
+  /// The log at `scheduleLogPath`'s path, with the run's time and whether the run's output passed the log's cap. It
+  /// runs off the state queue, because a log can hold a mebibyte.
+  static func scheduleLog(_ log: (path: String, run: Int, schedule: String, t: Int64)) throws -> JSON {
     guard let data = FileManager.default.contents(atPath: log.path) else {
       throw APIError("run \(log.run) of schedule \(log.schedule) has no log")
     }
     let text = String(decoding: data, as: UTF8.self)
-    return ["text": .string(text), "truncated": .bool(text.hasSuffix("\(DetachedRun.cutMarker)\n"))]
+    return ["text": .string(text), "truncated": .bool(DetachedRun.isCut(text)), "t": .number(Double(log.t))]
   }
 
   /// Run now: makes the schedule due and sends nothing. The next tick fires it
@@ -339,7 +352,8 @@ extension Service {
   /// stay due, so Undo lets them run.
   ///
   /// A headless or script run starts on `scheduleRunQueue` only while fewer than `Schedule.maxRunning` runs are in
-  /// flight, and a schedule whose run is in flight stays due, as a top-up does.
+  /// flight, and a schedule whose run is in flight stays due, as a top-up does. A session with a run in flight sends
+  /// none of its prompts, which stay due and run once the run ends.
   ///
   /// A schedule with a gate checks the gate first. A closed gate sends
   /// nothing, so its check runs while the session is busy. A short group
@@ -386,18 +400,26 @@ extension Service {
     // A detached run waits for a free slot before the guard reads the session.
     if schedule.isDetached, runsInFlight.count >= Schedule.maxRunning { return }
     // A run makes the session busy, so the guard runs again before each schedule.
-    guard let e = entries[id],
-      Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
-        == nil
-    else { return }
+    guard let e = entries[id] else { return }
     if schedule.isDetached {
-      if beingDeletedRefusal(id) != nil { return }
+      guard
+        Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
+          == nil, beingDeletedRefusal(id) == nil
+      else { return }
       dispatchRun(id, schedule, now: now)
       return
     }
+    guard pasteBlocker(id, e, now: now) == nil else { return }
     let text = opened.map { $0.gate.fallbackMessage(status: $0.status, prompt: schedule.prompt) } ?? schedule.prompt
     let check = opened.map { Schedule.Gate.Check(.prompted, status: $0.status, now: now) }
     fire(id, schedule, text: text, check: check, now: now)
+  }
+
+  /// Why sbd can't paste a schedule's prompt into the session now, or nil when it can. A headless or script run of the
+  /// session holds the paste, so the session's claude never works in the folder while the run does.
+  func pasteBlocker(_ id: String, _ e: Entry, now: Int64) -> String? {
+    if runsInFlight.values.contains(where: { $0.session == id }) { return "a headless or script run is in flight" }
+    return Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
   }
 
   /// Saves the next run before the send and the result after it, so a crash

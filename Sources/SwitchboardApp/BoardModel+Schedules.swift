@@ -5,6 +5,9 @@ struct LoopOutput: Equatable {
   let schedule: String
   /// 1 is the newest run.
   let run: Int
+  /// The time of the run whose log `text` holds, which names the log. sbd's answer sets it, because a run that lands
+  /// before sbd reads the log changes which run `run` counts to.
+  var t: Int64?
   /// The log, or nil until sbd answers.
   var text: String?
   /// The lines of `text`, each control character shown as an escape. The app escapes sbd's answer once, off the main
@@ -14,6 +17,11 @@ struct LoopOutput: Equatable {
   var truncated = false
   /// sbd's refusal, such as a loop that has not run yet.
   var error: String?
+
+  /// The run whose log the sheet shows, or nil when `history` no longer keeps it.
+  func shownRun(in history: [Schedule.Run]) -> Schedule.Run? {
+    t.flatMap { t in history.first { $0.t == t } }
+  }
 
   static func printableLines(_ text: String) -> [String] {
     var lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
@@ -89,7 +97,9 @@ extension BoardModel {
   /// Opens the Output sheet on the loop's run `run`, 1 for the newest, and reads its log from sbd. A refusal shows
   /// in the sheet. An answer for a run that the sheet no longer shows is dropped.
   func loadScheduleLog(_ id: String, run: Int? = nil) {
-    let shown = LoopOutput(schedule: id, run: run ?? 1)
+    let n = run ?? 1
+    let known = schedule(id)?.history
+    let shown = LoopOutput(schedule: id, run: n, t: known.flatMap { n <= $0.count ? $0[n - 1].t : nil })
     loopOutput = shown
     var args: [String: JSON] = ["schedule": .string(id)]
     if let run { args["run"] = .number(Double(run)) }
@@ -104,6 +114,7 @@ extension BoardModel {
           self.loopOutput?.lines = lines
           self.loopOutput?.text = text
           self.loopOutput?.truncated = answer["truncated"]?.bool == true
+          if let t = answer["t"]?.int { self.loopOutput?.t = Int64(t) }
         }
       },
       failed: { error in if self.loopOutput == shown { self.loopOutput?.error = "\(error)" } })

@@ -308,9 +308,7 @@ extension Service {
       let now = nowMs()
       let check = Schedule.Gate.Check(.failed, status: status, now: now, skipped: skips, error: failure)
       // A busy session would queue the message, and each later failed top-up would queue another behind it.
-      if let blocker = Schedule.blocker(
-        facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
-      {
+      if let blocker = pasteBlocker(id, e, now: now) {
         logLine("not sending the fallback of schedule \(scheduleID) of \(id), because \(blocker)")
         do {
           try changeSchedule(id, scheduleID) { $0.gate?.last = check }

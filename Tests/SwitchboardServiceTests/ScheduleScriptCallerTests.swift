@@ -408,6 +408,22 @@ private func classify(
 
 // MARK: - Who approves a script card
 
+/// A service whose entries and store hold one session of each kind, with a second work session `w2`.
+private func withStoredSessions(_ body: (Service) throws -> Void) throws {
+  try withService { service, _ in
+    for (id, kind) in [
+      (manager, SessionKind.manager), (otherManager, .manager), (work, .work), ("w2", .work), (chat, .chat),
+      (theOperator, .operator),
+    ] {
+      let s = session(id, kind)
+      try service.store.save(s)
+      service.queue.sync { service.entries[id] = Service.Entry(session: s) }
+    }
+    service.queue.sync { service.mac.snapshot.taken = .max }
+    try body(service)
+  }
+}
+
 /// The `schedule` request that the app's loop editor sends for a new script, as `BoardModel.addSchedule` builds it:
 /// no `caller` and no `group`, with the user as the author.
 private func appScriptArgs() -> JSON {
@@ -428,22 +444,6 @@ extension ScheduleScriptCallerTests {
   /// same `scriptAuthority` as an add and requires `.user`. The pane rows of the installed snapshot place the test
   /// process, so no shape needs a live pane. IntegrationTests/ScriptProposalTests runs the shapes with real panes.
   @Suite struct Approval {
-    /// A service whose entries and store hold one session of each kind, with a second work session `w2`.
-    private func withStoredSessions(_ body: (Service) throws -> Void) throws {
-      try withService { service, _ in
-        for (id, kind) in [
-          (manager, SessionKind.manager), (otherManager, .manager), (work, .work), ("w2", .work), (chat, .chat),
-          (theOperator, .operator),
-        ] {
-          let s = session(id, kind)
-          try service.store.save(s)
-          service.queue.sync { service.entries[id] = Service.Entry(session: s) }
-        }
-        service.queue.sync { service.mac.snapshot.taken = .max }
-        try body(service)
-      }
-    }
-
     /// Opens a `script` card on `work` and returns its id.
     private func openCard(_ service: Service, _ command: String = "git fetch", target: String = work) -> Int64 {
       service.queue.sync { service.record(work, "script_proposed", proposalData(command, target: target)).id }
@@ -705,6 +705,96 @@ extension ScheduleScriptCallerTests {
         #expect(openCards(service).isEmpty)
         #expect(scripts(service).isEmpty)
         #expect(try decisions(service) == ["denied"])
+      }
+    }
+  }
+}
+
+// MARK: - An interval edit of a script
+
+extension ScheduleScriptCallerTests {
+  /// A script without a timeout of its own runs for 10m cut to the interval. An interval edit that would lengthen
+  /// that default, from a caller that may not change a script's timeout, stores the timeout before the edit, so the
+  /// run's timeout never grows.
+  @Suite struct IntervalEdit {
+    /// Stores a script on `work` that runs every `every`, edits its interval to `to` with the caller's claim, and
+    /// returns the stored schedule. It fails the test when the edit opens a card.
+    private func editInterval(
+      _ service: Service, every: String, to: String, caller claimed: String?
+    ) throws -> Schedule {
+      let made = try ScheduleRequest(every: every, prompt: "git fetch", by: nil, runner: "script")
+        .makeSchedule(id: "r1", now: created)
+      try service.queue.sync { try service.update(work) { $0.addSchedule(made) } }
+      return try editInterval(service, to: to, caller: claimed)
+    }
+
+    /// Edits the interval of `work`'s script `r1` to `to` with the caller's claim, and returns the stored schedule.
+    private func editInterval(_ service: Service, to: String, caller claimed: String?) throws -> Schedule {
+      var a: [String: JSON] = ["schedule": "r1", "every": .string(to)]
+      if let claimed { a["caller"] = .string(claimed) }
+
+      let answer = try service.queue.sync {
+        try service.scheduleRequest("edit-schedule", .object(a), origin: .mac, caller: me)
+      }
+
+      #expect(answer["pending"] == nil, Comment(rawValue: answer.text))
+      return try #require(service.queue.sync { service.entries[work]?.session.schedule("r1") })
+    }
+
+    /// A work session may change its script's interval, and the Operator may change any script's interval, but
+    /// neither may change a script's timeout.
+    @Test(arguments: [work, theOperator])
+    func anIntervalEditFromAPaneThatMayNotChangeTheTimeoutKeepsTheRunsTimeout(_ inside: String) throws {
+      try withStoredSessions { service in
+        placeMe(service, in: inside)
+
+        let stored = try editInterval(service, every: "1m", to: "10m", caller: inside)
+
+        #expect(stored.every == 600_000)
+        #expect(stored.timeout == 60_000)
+        #expect(stored.runTimeout == 60_000)
+      }
+    }
+
+    /// A shorter interval shortens the default, so the edit stores no timeout.
+    @Test func anIntervalEditFromAWorkPaneThatShortensTheIntervalKeepsTheDefault() throws {
+      try withStoredSessions { service in
+        placeMe(service, in: work)
+
+        let stored = try editInterval(service, every: "30m", to: "5m", caller: work)
+
+        #expect(stored.every == 300_000)
+        #expect(stored.timeout == nil)
+        #expect(stored.runTimeout == 300_000)
+      }
+    }
+
+    /// An edit that leaves the default as it is stores no timeout, so a later shorter interval isn't refused for a
+    /// stored timeout longer than it.
+    @Test func anIntervalEditFromAWorkPaneThatKeepsTheDefaultLeavesALaterShorterIntervalOpen() throws {
+      try withStoredSessions { service in
+        placeMe(service, in: work)
+
+        let longer = try editInterval(service, every: "30m", to: "1h", caller: work)
+        let shorter = try editInterval(service, to: "5m", caller: work)
+
+        #expect(longer.timeout == nil)
+        #expect(shorter.every == 300_000)
+        #expect(shorter.timeout == nil)
+      }
+    }
+
+    /// The user and a Manager conversation may change a script's timeout, so the default timeout follows the interval.
+    @Test(arguments: [nil, manager] as [String?])
+    func anIntervalEditFromACallerThatMayChangeTheTimeoutKeepsTheDefault(_ inside: String?) throws {
+      try withStoredSessions { service in
+        if let inside { placeMe(service, in: inside) }
+
+        let stored = try editInterval(service, every: "1m", to: "10m", caller: inside)
+
+        #expect(stored.every == 600_000)
+        #expect(stored.timeout == nil)
+        #expect(stored.runTimeout == 600_000)
       }
     }
   }

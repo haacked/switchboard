@@ -206,16 +206,16 @@ private func rowAnsweringModel() -> (BoardModel, SentRequests) {
 
 // MARK: - Runners and output
 
-/// A model whose `send` records every request and answers `schedule-log` with `text`.
+/// A model whose `send` records every request and answers `schedule-log` with `text` as the log of the run at `t`.
 @MainActor
-private func logAnsweringModel(_ text: String = "Already up to date.\n", truncated: Bool = false) -> (
-  BoardModel, SentRequests
-) {
+private func logAnsweringModel(
+  _ text: String = "Already up to date.\n", truncated: Bool = false, t: Int64 = 1_800_000_000_000
+) -> (BoardModel, SentRequests) {
   let model = offlineModel()
   let sent = SentRequests()
   model.send = { op, args in
     sent.append(op, args)
-    return ["text": .string(text), "truncated": .bool(truncated)]
+    return ["text": .string(text), "truncated": .bool(truncated), "t": .number(Double(t))]
   }
   return (model, sent)
 }
@@ -311,8 +311,26 @@ extension BoardModelScheduleTests {
 
     #expect(model.loopOutput?.schedule == "r1")
     #expect(model.loopOutput?.run == 2)
+    #expect(model.loopOutput?.t == 1_800_000_000_000)
     #expect(model.loopOutput?.text == "Already up to date.\n")
     #expect(model.loopOutput?.truncated == true)
+  }
+
+  /// The sheet names the run by the time in sbd's answer, so a run that lands while the sheet is open leaves the
+  /// selection on the run whose log the sheet shows.
+  @Test func theShownRunStaysTheRunOfTheLogWhenANewRunLands() {
+    let output = LoopOutput(schedule: "r1", run: 1, t: 200)
+    let runs = ([400, 300, 200, 100] as [Int64]).map { Schedule.Run(t: $0, outcome: .ran, skipped: 0) }
+
+    #expect(output.shownRun(in: Array(runs[2...]))?.t == 200)
+    #expect(output.shownRun(in: runs)?.t == 200)
+  }
+
+  @Test func aRunThatTheHistoryNoLongerKeepsIsNotShown() {
+    let output = LoopOutput(schedule: "r1", run: 1, t: 50)
+    let runs = ([400, 300, 200] as [Int64]).map { Schedule.Run(t: $0, outcome: .ran, skipped: 0) }
+
+    #expect(output.shownRun(in: runs) == nil)
   }
 
   @Test func aLogThatSbdRefusesShowsTheRefusalInTheSheet() async {

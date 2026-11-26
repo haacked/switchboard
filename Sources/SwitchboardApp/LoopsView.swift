@@ -276,7 +276,9 @@ private struct BackgroundActivityRow: View {
 }
 
 /// The Output… sheet: the log of one run of a headless or script loop, with a picker for the loop's other kept runs.
-/// A command can print escape sequences, so the log shows each control character as an escape.
+/// The picker names each run by its time, which names its log, so a run that lands while the sheet is open doesn't
+/// move the selection to another run. A command can print escape sequences, so the log shows each control character
+/// as an escape.
 struct LoopOutputSheet: View {
   @EnvironmentObject var model: BoardModel
   let output: LoopOutput
@@ -285,13 +287,22 @@ struct LoopOutputSheet: View {
 
   var body: some View {
     let history = schedule?.history ?? []
+    let gone = output.t != nil && output.shownRun(in: history) == nil
     VStack(alignment: .leading, spacing: 12) {
       Text("Output").font(.title2.bold())
       if let schedule {
         Text(verbatim: schedule.whatText.printable).foregroundStyle(.secondary).lineLimit(2)
       }
-      Picker("Run", selection: Binding(get: { output.run }, set: { model.loadScheduleLog(output.schedule, run: $0) })) {
-        ForEach(Array(history.enumerated()), id: \.offset) { i, run in Text(verbatim: run.text()).tag(i + 1) }
+      Picker(
+        "Run",
+        selection: Binding(
+          get: { output.t },
+          set: { t in
+            if let i = history.firstIndex(where: { $0.t == t }) { model.loadScheduleLog(output.schedule, run: i + 1) }
+          })
+      ) {
+        ForEach(Array(history.enumerated()), id: \.offset) { _, run in Text(verbatim: run.text()).tag(Optional(run.t)) }
+        if gone { Text("A run that the loop no longer keeps").tag(output.t) }
       }
       .help("The loop keeps the logs of its newest runs")
       .clickAnchor("loop-output-run")
@@ -299,6 +310,10 @@ struct LoopOutputSheet: View {
         .frame(maxWidth: .infinity, minHeight: 240, maxHeight: 420, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary))
         .clickAnchor("loop-output-text")
+      if gone {
+        Text("The loop no longer keeps this run. The log shows what the sheet read before.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
       if output.truncated {
         Text("The run printed more than the log keeps, so the log stops at its cap.")
           .font(.caption).foregroundStyle(.secondary)

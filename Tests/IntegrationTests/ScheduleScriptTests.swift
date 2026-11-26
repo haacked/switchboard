@@ -352,6 +352,29 @@ import Testing
     #expect(lines(path(sbd, "marks")) == ["start", "end", "start", "end"])
   }
 
+  /// Decision 7: a run and the session's turn never overlap, so a run in flight holds the session's prompt schedules.
+  /// The prompt goes in once, after the run ends.
+  @Test func aScriptInFlightHoldsTheSessionsPromptUntilItEnds() throws {
+    let sbd = try Instance()
+    let s = try sbd.idleSession()
+    let made = try addScript(sbd, s.id, gated(sbd, marks: "marks", gate: "go"))
+    let prompt = try fire.add(sbd, s.id, every: "30m", "tick after the run")
+    // sbd pastes only `pasteSettleSeconds` after SessionStart, so a run right after the first reply would be queued.
+    try sbd.advanceClock(2_000)
+    try runNow(sbd, made.id)
+    try sbd.waitFor("the run to start") { lines(path(sbd, "marks")) == ["start"] }
+
+    try runNow(sbd, prompt.schedule.id)
+    sleep(2)
+
+    #expect(try fire.runs(sbd, s.id, "tick after the run").isEmpty)
+    #expect(try current(sbd, s.id, prompt.schedule.id)?.last == nil)
+    sbd.hold("go")
+    #expect(try waitForRun(sbd, s.id, made.id).outcome == .ran)
+    try sbd.waitFor(s.id, "the reply to the prompt", timeout: 30) { $0.lastReply == "Done: tick after the run" }
+    #expect(try fire.runs(sbd, s.id, "tick after the run").count == 1)
+  }
+
   // MARK: Restart and removal
 
   /// Decision 19: a run in flight across a restart records a failed run, and sbd stops the orphan that launchd
