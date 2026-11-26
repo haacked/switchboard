@@ -141,8 +141,8 @@ public struct SessionFacts: Codable, Equatable, Sendable {
   /// failed. A count that failed for another reason leaves this false.
   public var folderGone = false
   /// Whether the folder's HEAD is on a remote's default branch, as the poller last found it for a work session
-  /// that never had a PR. A `worktree` event without the field reads false, and so does every fact from before the
-  /// latest turn started.
+  /// that never had a PR. A `worktree` event without the field reads false. A turn that starts resets it to false
+  /// until the poller's next count.
   public var headOnDefault = false
   /// What the cleanup checks of the last `worktree` event found.
   public var cleanupChecked: CleanupStatus?

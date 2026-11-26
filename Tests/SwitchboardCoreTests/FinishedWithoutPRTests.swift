@@ -316,6 +316,18 @@ extension FinishedWithoutPRTests {
       #expect(verdict(f) == readTheLastReply)
     }
 
+    /// The earlier count stays in `dirty` and `folderGone`, so only the reset of `headOnDefault` holds Done back.
+    @Test func acknowledgmentAfterTheNextTurnWaitsForANewCount() throws {
+      let f = try noPRFacts(then: [
+        event("UserPromptSubmit", 5, ["prompt": "one more thing"]),
+        event("Stop", 6, ["last_assistant_message": "Done."]),
+        try ackOf(7, readTheLastReply),
+      ])
+
+      #expect(f.headOnDefault == false)
+      #expect(verdict(f) == readTheLastReply)
+    }
+
     @Test func newAcknowledgmentAfterTheNextTurnIsDoneAgain() throws {
       let f = try noPRFacts(then: [
         event("UserPromptSubmit", 5, ["prompt": "one more thing"]),

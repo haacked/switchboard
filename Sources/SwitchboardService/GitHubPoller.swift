@@ -91,9 +91,9 @@ final class GitHubPoller {
     var host: String?
     var branch = Branch()
     var transcript: Transcript
-    /// When the poller last counted the uncommitted files of a finished PR's
-    /// folder, and the session's last activity at that time.
-    var counted: (at: Int64, activity: Int64, prId: String)?
+    /// When the poller last counted the folder's uncommitted files, the session's last activity at that time, and
+    /// the count's key: the finished PR's id, or "" for a work session without a PR.
+    var counted: (at: Int64, activity: Int64, key: String)?
     /// The PR that the event log held when this sbd first saw the session. It
     /// keeps a restart from losing the PR of a session whose HEAD is detached
     /// or whose conversation `/clear` replaced. The poller drops it when the
@@ -780,7 +780,8 @@ final class GitHubPoller {
 
   /// Records the folder's branch when it differs from the branch that sbd
   /// shows. Once the PR has merged or closed, it records the folder's count of
-  /// uncommitted files and whether the folder is gone. It records the
+  /// uncommitted files and whether the folder is gone. It counts the folder of a
+  /// work session without a PR once `Attention.awaitsFolderCheck` holds. It records the
   /// session's PR when the PR changed. The count comes before the PR, so the
   /// attention rules never judge a finished PR by the count of the session's
   /// previous PR. Returns whether it recorded a `pr` event.
@@ -805,15 +806,25 @@ final class GitHubPoller {
       $0.state != .open && s.facts.cleanedUp == nil ? $0 : nil
     }
     // An empty key marks the count of a session without a PR, so a PR that the session opens later gets its own count.
-    let countKey =
-      finished?.id ?? (t.prId == nil && Attention.awaitsFolderCheck(kind: s.kind, s.facts, now: now) ? "" : nil)
+    let countKey: String? =
+      if let finished {
+        finished.id
+      } else if t.prId == nil, Attention.awaitsFolderCheck(kind: s.kind, s.facts, now: now) {
+        ""
+      } else { nil }
     if let key = countKey, shouldCount(t, s, key, all, now), let (dirty, gone) = worktreeCount(s),
       let extra = folderExtra(s, finished: finished, dirty: dirty)
     {
       t.counted = (now, s.facts.lastActivity, key)
       if dirty != s.facts.dirty || gone != s.facts.folderGone || extra.changed {
         let data: [String: JSON] = ["dirty": dirty.map { .number(Double($0)) } ?? .null, "gone": .bool(gone)]
-        event(s.id, "worktree", .object(data.merging(extra.data) { $1 }))
+        let payload = JSON.object(data.merging(extra.data) { $1 })
+        // A finished PR's count must land before its `pr` event, so only a count without a PR waits for the next poll.
+        if key.isEmpty {
+          event(s.id, "worktree", payload, ifNoActivitySince: s.facts.lastActivity)
+        } else {
+          event(s.id, "worktree", payload)
+        }
       }
     }
     var changed = false
@@ -859,18 +870,25 @@ final class GitHubPoller {
   /// A finished PR's folder is counted when the PR finishes, after the
   /// session's next activity, and once per idle interval while it is dirty.
   /// `git status` takes 0.1 to 0.3 s in a large repo, so a clean or missing
-  /// folder isn't counted again on its own. The folder of a session without a PR, whose `prId` is empty, is also
-  /// counted after a newer acknowledgment, which moves no activity.
-  private func shouldCount(_ t: Tracked, _ s: Watched, _ prId: String, _ all: Bool, _ now: Int64) -> Bool {
-    guard !all, let counted = t.counted, counted.prId == prId else { return true }
+  /// folder isn't counted again on its own.
+  private func shouldCount(_ t: Tracked, _ s: Watched, _ key: String, _ all: Bool, _ now: Int64) -> Bool {
+    guard !all, let counted = t.counted, counted.key == key else { return true }
     if s.facts.lastActivity > counted.activity { return true }
-    if prId.isEmpty, let at = s.facts.acknowledgment?.at, at > counted.at { return true }
     return (s.facts.dirty ?? 0) > 0 && GitHub.elapsed(since: counted.at, settings.idleMs, now: now)
   }
 
   func event(_ id: String, _ kind: String, _ data: JSON) {
     service.queue.sync {
       guard service.entries[id] != nil else { return }
+      service.record(id, kind, data)
+    }
+  }
+
+  /// Records the event unless the session had activity after `activity`, as when a turn started after the poller
+  /// read the facts that the event's data came from. `shouldCount` then counts again at the next poll.
+  private func event(_ id: String, _ kind: String, _ data: JSON, ifNoActivitySince activity: Int64) {
+    service.queue.sync {
+      guard let e = service.entries[id], e.facts.lastActivity <= activity else { return }
       service.record(id, kind, data)
     }
   }
