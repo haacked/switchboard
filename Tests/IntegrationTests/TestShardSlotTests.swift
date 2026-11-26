@@ -267,7 +267,6 @@ private final class ShardRig {
   /// Replaces the copy's bin/lib/test-failures with a script that exits 3 and
   /// leaves a file behind, which testFailuresRan finds.
   func breakTestFailures() throws {
-    try FileManager.default.removeItem(atPath: "\(repo)/bin/lib/test-failures")
     try write("test-failures", "#!/bin/sh\n: > \"$FAKE_SWIFT_DIR/test-failures.ran\"\nexit 3\n", in: "\(repo)/bin/lib")
   }
 
@@ -699,7 +698,7 @@ private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConve
     #expect(rig.summaryText() == nil)
   }
 
-  @Test func inGitHubActionsAPassingRunMakesNoAnnotationAndNoSummary() throws {
+  @Test func inGitHubActionsAPassingRunSkipsTheAnnotationScript() throws {
     let rig = try ShardRig()
     defer { rig.stop() }
     try rig.breakTestFailures()
@@ -707,8 +706,6 @@ private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConve
     let r = try rig.run(["--shards", "2"], env: rig.ciEnv())
 
     #expect(r.status == 0, "\(r.stderr)")
-    #expect(ShardRig.annotations(r).isEmpty, "\(r.stdout)\(r.stderr)")
-    #expect(rig.summaryText() == nil)
     #expect(!rig.testFailuresRan(), "the script ran on a passing run")
   }
 

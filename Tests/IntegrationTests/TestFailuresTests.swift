@@ -15,8 +15,12 @@ private final class FailureRig {
 
   /// Writes the lines to a log in the temp folder and returns the log's path.
   func log(_ name: String, _ lines: [String]) throws -> String {
+    try log(name, Data(lines.map { "\($0)\n" }.joined().utf8))
+  }
+
+  func log(_ name: String, _ data: Data) throws -> String {
     let path = "\(scratch.root)/\(name).log"
-    try Data(lines.map { "\($0)\n" }.joined().utf8).write(to: URL(fileURLWithPath: path))
+    try data.write(to: URL(fileURLWithPath: path))
     return path
   }
 
@@ -90,11 +94,10 @@ private struct Misuse: Sendable, CustomTestStringConvertible {
 
   @Test func anInvalidUTF8ByteDoesNotHideTheIssueLinesAfterIt() throws {
     let rig = try FailureRig()
-    let path = "\(rig.scratch.root)/0.log"
     var data = Data("\(issue("a"))\n".utf8)
     data.append(contentsOf: [0xFF, 0xFE, 0x0A])
     data.append(Data("\(issue("b"))\n".utf8))
-    try data.write(to: URL(fileURLWithPath: path))
+    let path = try rig.log("0", data)
 
     let r = try rig.run(["0=\(path)"])
 
@@ -224,7 +227,7 @@ private struct Misuse: Sendable, CustomTestStringConvertible {
     #expect(r.status == 0, "\(r.stderr)")
     #expect(payloads(r).count == 1, "\(r.stdout)")
     let payload = try #require(payloads(r).first, "\(r.stdout)")
-    #expect(payload.count <= "[0] ".count + 1000, "\(payload.count)")
+    #expect(payload.count == "[0] ".count + 1000, "\(payload.count)")
     #expect(payload.hasPrefix("[0] ✘ Test l() recorded an issue at L.swift:1:1: " + String(repeating: "x", count: 900)))
   }
 
