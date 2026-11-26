@@ -501,4 +501,11 @@ func groupConversation(
     #expect(model.selection == "z")
     #expect(!model.showingArchive)
   }
+
+  @Test func theOpenRenameSheetCountsAsASheet() {
+    let model = offlineModel()
+    #expect(!model.presentingSheet)
+    model.renaming = "s1"
+    #expect(model.presentingSheet)
+  }
 }

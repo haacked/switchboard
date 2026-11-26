@@ -124,6 +124,8 @@ extension Service {
       id = found
     } else if args["manager"]?.bool == true {
       id = try managerConversation(args["session"]?.string)
+    } else if let ref = args["session"]?.string, args["group"] != nil {
+      id = try groupChat(ref, of: try lookupGroup(args))
     } else if args["session"] != nil {
       id = try lookup(args)
     } else {

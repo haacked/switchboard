@@ -6,8 +6,10 @@ import SwitchboardCore
 /// `--new` or `--session` it opens the group's most recent chat.
 func chat(_ a: Args) {
   guard let group = a.positional.first else { die("chat needs a group") }
-  if a.switches.contains("--log") { return printChatLog(a, ["group": .string(group)]) }
-  if a.switches.contains("--read") { return markRead(a, ["group": .string(group)]) }
+  var target: [String: JSON] = ["group": .string(group)]
+  if let ref = a.values["--session"] { target["session"] = .string(ref) }
+  if a.switches.contains("--log") { return printChatLog(a, target) }
+  if a.switches.contains("--read") { return markRead(a, target) }
   if a.switches.contains("--ls") {
     let result = call("chat-ls", ["group": .string(group)])
     return a.json ? printJSON(result) : printConversations(result)

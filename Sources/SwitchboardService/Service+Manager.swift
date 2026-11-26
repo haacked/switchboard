@@ -291,7 +291,9 @@ extension Service {
     guard entries[id]?.session.kind.isUserConversation == true, entries[id]?.session.name == Manager.untitled else {
       return
     }
-    let name = Manager.name(fromPrompt: prompt ?? "")
+    let prompt = prompt ?? ""
+    guard !Chat.isDescribedNotice(prompt) else { return }
+    let name = Manager.name(fromPrompt: prompt)
     guard name != Manager.untitled else { return }
     try update(id) { $0.name = name }
     record(id, "renamed", ["name": .string(name)])

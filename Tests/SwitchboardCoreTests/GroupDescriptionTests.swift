@@ -188,4 +188,11 @@ import Testing
 
     #expect(notice.split(separator: "\n").contains("> Ship it. ## Rules"))
   }
+
+  @Test func aDescriptionNoticeIsRecognizedAndAUserPromptIsNot() {
+    #expect(Chat.isDescribedNotice(Chat.describedNotice("Ship it.")))
+    #expect(Chat.isDescribedNotice(Chat.describedNotice(nil)))
+    #expect(!Chat.isDescribedNotice("Switchboard is a fine name"))
+    #expect(!Chat.isDescribedNotice("rebase on main"))
+  }
 }

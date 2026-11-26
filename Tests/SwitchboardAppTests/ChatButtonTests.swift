@@ -146,6 +146,14 @@ import Testing
     }
   }
 
+  @Test func idleConversationsCarryTheNewestMessageTime() {
+    let mark = ChatMark(chats: [
+      conversation("c1", lastActivity: 20), conversation("c2", lastActivity: 30), conversation("c3", lastActivity: 10),
+    ])
+
+    #expect(mark == .idle(lastMessageAt: 30))
+  }
+
   @Test func theBoardButtonReadsOnlyItsGroupsConversations() {
     let model = appliedModel([
       conversation("c1", unread: 1), conversation("c2", unread: 1),
