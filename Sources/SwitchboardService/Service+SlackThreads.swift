@@ -43,11 +43,13 @@ extension Service {
   /// Whether sbd reads Slack threads: `slack.pollSeconds` is above 0.
   var slackPollOn: Bool { config.slack.pollSeconds > 0 }
 
-  /// The refusal of a reply wait or a Check now while the poll is off.
-  var slackPollOff: APIError {
-    APIError(
-      "sbd doesn't read Slack threads while slack.pollSeconds is 0 in \(home.config), so a reply wait would never "
-        + "resolve")
+  /// Refuses a reply wait or a Check now while the poll is off.
+  func requireSlackPoll() throws {
+    guard slackPollOn else {
+      throw APIError(
+        "sbd doesn't read Slack threads while slack.pollSeconds is 0 in \(home.config), so a reply wait would never "
+          + "resolve")
+    }
   }
 
   /// The URL of the one Slack thread among the session's listed links, for a reply wait set without a target. A
@@ -80,7 +82,7 @@ extension Service {
   func waitCheckRequest(_ args: JSON, origin: RequestOrigin) throws -> JSON {
     let id = try lookup(args)
     try requireUser(args, "Only you can check a reply wait's thread now.")
-    guard slackPollOn else { throw slackPollOff }
+    try requireSlackPoll()
     let wait = try openWait(id, args["wait"]?.string).wait
     guard wait.kind == .reply, let target = wait.replyThread else {
       throw APIError("wait \(wait.id) isn't a reply wait on a Slack thread")

@@ -51,7 +51,7 @@ extension Service {
     if request.kind == Wait.Kind.reply.rawValue && request.target == nil { request.target = try replyTarget(of: named) }
     // The checks run against `named`, so a conversation still can't wait on itself.
     var wait = try request.makeWait(id: "", waiter: named, now: nowMs(), findSession: waitTarget)
-    if wait.kind == .reply && !slackPollOn { throw slackPollOff }
+    if wait.kind == .reply { try requireSlackPoll() }
     if case .remote(let host) = origin { try requireGitHubWait(wait, on: named, from: host) }
     if wait.action != nil { try armAction(&wait, args, origin: origin, caller: caller) }
     if wait.kind == .ci && wait.pr == nil {

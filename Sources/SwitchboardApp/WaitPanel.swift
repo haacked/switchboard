@@ -171,13 +171,14 @@ private struct WaitPanelRow: View {
             .help("Open \(pr.repo) #\(pr.number) on GitHub")
         }
         if case .thread(let url, _)? = row.target {
+          let title = LinkTarget.parse(url)?.title ?? "Slack thread"
           Button("Check now") { model.checkWait(session: session.id, wait: row.id) }
             .help(WaitPanel.threadCheckHelp)
-            .accessibilityLabel("Check now: Slack thread")
+            .accessibilityLabel("Check now: \(title)")
           if let link = URL(string: url) {
             Button("Open thread") { openURL(link) }
               .help("Open the thread in Slack")
-              .accessibilityLabel("Open thread: \(LinkTarget.parse(url)?.title ?? "Slack thread")")
+              .accessibilityLabel("Open thread: \(title)")
           }
         }
       }
