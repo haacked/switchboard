@@ -25,16 +25,18 @@ enum SlashSelfTest {
     var field: NSTextField!
     var editor: NSTextView!
     func reveal() async -> Bool {
-      // The old field can stay in the window for a moment after the view hides it, and `waitForField` would return
-      // it. Keys typed into it never reach the draft.
+      // After a send or an Esc hides the field, the terminal takes focus first. SwiftUI removes the old field from
+      // the window a moment later. Until then, `waitForField` returns it. A field that leaves the window loses focus.
       if let old = field, model.revealedMessageField != session {
         for _ in 0..<120 where old.window != nil { await pause() }
       }
       guard let shown = await DraftSelfTest.waitForField(model, session, reveal: true) else { return false }
-      shown.window?.makeFirstResponder(shown)
+      let window = shown.window
+      window?.makeFirstResponder(shown)
       await pause()
       guard let shownEditor = shown.currentEditor() as? NSTextView else {
-        log("no focus")
+        let responder = window?.firstResponder.map { "\(Swift.type(of: $0))" } ?? "none"
+        log("no focus: old field \(shown === field) in window \(shown.window != nil) first responder \(responder)")
         return false
       }
       (field, editor) = (shown, shownEditor)
