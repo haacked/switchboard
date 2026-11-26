@@ -42,13 +42,16 @@ extension Service {
   /// on the session that holds the wait, with `from` for a handed-off wait,
   /// and returns the id of that session. The caller holds the state queue.
   /// A wait from a host must pass `requireGitHubWait`. A wait with an action must pass `armAction`. A merge wait must
-  /// land on the operator, because only the operator approves a merge.
+  /// land on the operator, because only the operator approves a merge. A reply wait without a target takes the
+  /// session's one Slack thread. A reply wait needs the Slack poll on.
   func setWait(_ args: JSON, waiter named: String, from origin: RequestOrigin, caller: Caller) throws -> String {
     let session = entries[named]!.session
     try refuseNotStarted(session)
-    let request = try JSONCoding.convert(args, to: WaitRequest.self)
+    var request = try JSONCoding.convert(args, to: WaitRequest.self)
+    if request.kind == Wait.Kind.reply.rawValue && request.target == nil { request.target = try replyTarget(of: named) }
     // The checks run against `named`, so a conversation still can't wait on itself.
     var wait = try request.makeWait(id: "", waiter: named, now: nowMs(), findSession: waitTarget)
+    if wait.kind == .reply { try requireSlackPoll() }
     if case .remote(let host) = origin { try requireGitHubWait(wait, on: named, from: host) }
     if wait.action != nil { try armAction(&wait, args, origin: origin, caller: caller) }
     if wait.kind == .ci && wait.pr == nil {
@@ -251,13 +254,18 @@ extension Service {
     }
   }
 
-  /// Resolves the waits that sbd watches itself: dates, rechecks, and other
-  /// sessions' states. `tick` calls it after it records each session's state.
+  /// Resolves the waits that sbd watches itself: dates, rechecks, other
+  /// sessions' states, and Slack replies in the rows that the poll stored.
+  /// `tick` calls it after it records each session's state.
   func resolveDueWaits(now: Int64) {
     for (session, wait) in waitsToResolve() {
-      guard let settlement = wait.settlement(now: now, stateOf: lastState) else { continue }
+      guard
+        let settlement = wait.settlement(now: now, stateOf: lastState)
+          ?? wait.settlement(thread: { slackThreads[$0] })
+      else { continue }
       do {
-        try resolve(session.id, wait, outcome: settlement.outcome, met: settlement.met)
+        try resolve(
+          session.id, wait, outcome: settlement.outcome, changedAt: settlement.changedAt, met: settlement.met)
       } catch {
         logLine("can't resolve wait \(wait.id) of \(session.id): \(error)")
       }

@@ -65,6 +65,7 @@ func minimalRequest(_ kind: Wait.Kind) -> WaitRequest {
   case .review: WaitRequest(kind: "review", who: "alex")
   case .session: WaitRequest(kind: "session", target: "flag-cache")
   case .date: WaitRequest(kind: "date", until: "2h")
+  case .reply: WaitRequest(kind: "reply", target: LinkFixtures.slackRoot)
   default: WaitRequest(kind: kind.rawValue)
   }
 }
@@ -74,7 +75,7 @@ enum WaitField: CaseIterable {
 }
 
 let kindsThatUse: [WaitField: Set<Wait.Kind>] = [
-  .target: Set(prKinds + [.session]), .who: [.review, .botReview, .approval], .environment: [.deploy],
+  .target: Set(prKinds + [.session, .reply]), .who: [.review, .botReview, .approval], .environment: [.deploy],
   .service: [.deploy], .state: [.session], .until: [.date, .manual], .since: sinceKinds,
 ]
 let kindFields = Wait.Kind.allCases.flatMap { kind in WaitField.allCases.map { (kind, $0) } }
@@ -85,7 +86,7 @@ let unusedFields = kindFields.filter { !kindsThatUse[$0.1]!.contains($0.0) }
 func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   var r = minimalRequest(kind)
   switch field {
-  case .target: r.target = kind == .session ? "flag-cache" : "1204"
+  case .target: r.target = kind == .session ? "flag-cache" : kind == .reply ? LinkFixtures.slackRoot : "1204"
   case .who: r.who = "alex"
   case .environment: r.environment = "prod-us"
   case .service: r.service = "feature-flags"
@@ -100,7 +101,7 @@ func request(_ kind: Wait.Kind, adding field: WaitField) -> WaitRequest {
   @Test(arguments: [
     (Wait.Kind.ci, "ci"), (.review, "review"), (.botReview, "bot-review"), (.approval, "approval"),
     (.queue, "queue"), (.merge, "merge"), (.deploy, "deploy"), (.session, "session"), (.date, "date"),
-    (.manual, "manual"),
+    (.manual, "manual"), (.reply, "reply"),
   ])
   func kindsUseTheirWireNames(_ kind: Wait.Kind, _ name: String) {
     #expect(kind.rawValue == name)

@@ -863,6 +863,8 @@ public final class Service {
       return try sessionLinkRequest(op, args, origin: origin)
     case "link-open":
       return try linkOpenRequest(args, origin: origin)
+    case "wait-check":
+      return try waitCheckRequest(args, origin: origin)
     case "resolved-todos":
       return try resolvedTodos(args)
     case "rm-retry", "rm-keep", "rm-cancel", "removal-notices", "removal-notice-dismiss":
@@ -2971,8 +2973,8 @@ public final class Service {
 
   /// The summary of session `id` as a request from `origin` may read it. A request from a host reads the GitHub
   /// data only where `showsGitHub` allows it. `watchedSlack` is `watchedSlackKeys`, which it computes when it is nil
-  /// and the session lists a Slack link. A caller that builds many summaries computes the set once and passes it to
-  /// each call.
+  /// and the session lists a Slack link or has a reply wait. A caller that builds many summaries computes the set once
+  /// and passes it to each call. Each reply wait gets its thread's status, which no stored wait has.
   func summary(
     _ id: String, rowFollowups: PlanRowFollowups? = nil, watchedSlack: Set<String>? = nil,
     for origin: RequestOrigin = .mac
@@ -3034,9 +3036,11 @@ public final class Service {
     out.plans = planSummaries(session: s, rowFollowups: rowFollowups)
     if !facts.artifacts.isEmpty { out.artifacts = facts.artifacts }
     let listed = s.links(found: facts.links)
-    let watched = watchedSlack ?? (listed.contains { $0.kind == .slack } ? watchedSlackKeys(now: now) : [])
+    let readsSlack = listed.contains { $0.kind == .slack } || out.waits.contains { $0.kind == .reply }
+    let watched = watchedSlack ?? (readsSlack ? watchedSlackKeys(now: now) : [])
     let links = listed.map { withSlackStatus($0, facts: facts, watched: watched) }
     if !links.isEmpty { out.links = links }
+    out.waits = out.waits.map { withThreadStatus($0, watched: watched) }
     out.conversationStarted = facts.conversationStarted
     out.docket = s.docket.map { DocketSummary($0, facts.docket) }
     out.mergeError = facts.mergeError

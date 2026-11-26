@@ -38,10 +38,16 @@ public enum SlackPoll {
   /// The most threads that one poll reads.
   public static let maxThreads = 20
 
-  /// The threads that one poll reads: up to `maxThreads`, the ones never asked for first and then the ones asked
-  /// for longest ago. A failed read counts as asked, so threads whose reads always fail can't take every slot.
-  public static func batch(_ refs: [SlackThreadRef], rows: [String: SlackThread]) -> [SlackThreadRef] {
-    Array(refs.sorted { (rows[$0.key]?.tried ?? -1) < (rows[$1.key]?.tried ?? -1) }.prefix(maxThreads))
+  /// The threads that one poll reads: up to `maxThreads`, the ones whose keys `first` holds first, then the ones
+  /// never asked for, and then the ones asked for longest ago. Threads in the same place keep the order of `refs`.
+  /// A failed read counts as asked, so threads whose reads always fail can't take every slot.
+  public static func batch(_ refs: [SlackThreadRef], rows: [String: SlackThread], first: Set<String> = [])
+    -> [SlackThreadRef]
+  {
+    let order = refs.enumerated().map { i, ref in
+      (ref: ref, place: (first.contains(ref.key) ? 0 : 1, rows[ref.key]?.tried ?? -1, i))
+    }
+    return Array(order.sorted { $0.place < $1.place }.map(\.ref).prefix(maxThreads))
   }
 
   /// The settings that override what `--setting-sources user` loads: no hooks, no memory, no CLAUDE.md, and no
@@ -244,6 +250,9 @@ public enum SlackPoll {
     public var lastReplyTs: String?
     public var lastReplyUser: String?
     public var lastReplyName: String?
+    /// The newest reply in the read whose author is neither you nor a bot id, from sbd's own parse of the message
+    /// headers.
+    public var lastOther: Header? = nil
   }
 
   /// Why sbd didn't accept a thread's answer.
@@ -331,21 +340,31 @@ public enum SlackPoll {
   /// The result of each asked thread, in the order of `asked`. An answer is accepted only when a `slack_read_thread`
   /// call for exactly the asked channel, ts, and oldest got a result that isn't an error, and the answer says `ok`
   /// with a whole count from 0 to 10000. A count of 0 needs a result that shows no replies. With replies, the last
-  /// reply's ts and user id must be well formed, the ts must come after the root and the oldest, and one message
+  /// reply's ts and author id must be well formed, the ts must come after the root and the oldest, and one message
   /// header in that call's result must hold both. An answer for a thread that wasn't asked is dropped. A last reply
   /// more than an hour after `now`, the scan's time, is refused, because a made-up ts would become the oldest of
   /// every later read. It throws when the call failed as a whole.
-  public static func parseThreads(_ output: String, asked: [Ask], now: Int64) throws
+  ///
+  /// An accepted read with replies also gives `lastOther`: among the message headers of the whole-thread results,
+  /// the one with the greatest ts whose author is neither `you` nor a bot id and whose ts is after the root, after
+  /// the oldest, and at most an hour after `now`. sbd takes it from the headers, not from the answer, so the model
+  /// can't leave a reply out. A message's text can still hold a made-up header. A bot whose id starts with U looks
+  /// like a person to sbd, so its reply can be `lastOther`.
+  public static func parseThreads(_ output: String, asked: [Ask], you: String, now: Int64) throws
     -> [Result<ThreadRead, ReadError>]
   {
     let stream = Stream(output)
     let answers = try stream.answer()["threads"]?.array ?? []
     return asked.map { ask in
-      Result { () throws(ReadError) -> ThreadRead in try read(ask, stream: stream, answers: answers, now: now) }
+      Result { () throws(ReadError) -> ThreadRead in
+        try read(ask, stream: stream, answers: answers, you: you, now: now)
+      }
     }
   }
 
-  private static func read(_ ask: Ask, stream: Stream, answers: [JSON], now: Int64) throws(ReadError) -> ThreadRead {
+  private static func read(_ ask: Ask, stream: Stream, answers: [JSON], you: String, now: Int64) throws(ReadError)
+    -> ThreadRead
+  {
     let calls = stream.calls.filter { $0.name == readTool && $0.input == ask.input }
     guard !calls.isEmpty else { throw ReadError("claude didn't read the thread as asked") }
     let answered = calls.filter { $0.raw != nil }
@@ -371,20 +390,32 @@ public enum SlackPoll {
     guard let ts = answer["last_reply_ts"]?.string, let last = tsValue(ts), let root = tsValue(ask.thread),
       last > root
     else { throw ReadError("claude's last reply ts is not a ts after the thread's") }
-    guard last <= (now + 3_600_000) * 1000 else { throw ReadError("claude's last reply ts is in the future") }
+    let ceiling = (now + 3_600_000) * 1000
+    guard last <= ceiling else { throw ReadError("claude's last reply ts is in the future") }
+    var floor = root
     if let oldest = ask.oldest {
-      guard let floor = tsValue(oldest), last > floor else {
+      guard let value = tsValue(oldest), last > value else {
         throw ReadError("claude's last reply ts is not after the oldest that sbd asked")
       }
+      floor = max(root, value)
     }
-    guard let user = answer["last_reply_user_id"]?.string, isUserId(user) else {
-      throw ReadError("claude's last reply user is not a Slack user id")
+    guard let user = answer["last_reply_user_id"]?.string, isAuthorId(user) else {
+      throw ReadError("claude's last reply user is not a Slack user or bot id")
     }
-    guard results.contains(where: { hasHeader($0, user: user, ts: ts) }) else {
+    let all = results.flatMap(headers(in:))
+    guard hasHeader(all, user: user, ts: ts) else {
       throw ReadError("no message in the thread's read is from claude's last reply user at its ts")
     }
-    let name = answer["last_reply_user_name"]?.string.map { oneLine($0, max: 80) }.flatMap { $0.isEmpty ? nil : $0 }
-    return ThreadRead(count: count, lastReplyTs: ts, lastReplyUser: user, lastReplyName: name)
+    let name = answer["last_reply_user_name"]?.string.flatMap(displayName)
+    let others = all.compactMap { header -> (header: Header, ts: Int64)? in
+      guard header.user != you, !isBotId(header.user), let value = tsValue(header.ts), value > floor,
+        value <= ceiling
+      else { return nil }
+      return (header, value)
+    }
+    return ThreadRead(
+      count: count, lastReplyTs: ts, lastReplyUser: user, lastReplyName: name,
+      lastOther: others.max { $0.ts < $1.ts }?.header)
   }
 
   /// Whether a `slack_read_thread` result holds the whole thread after `oldest`. The connector's result is a JSON
@@ -421,6 +452,11 @@ public enum SlackPoll {
 
   static func isUserId(_ text: String) -> Bool { text.wholeMatch(of: #/[UW][A-Z0-9]{2,}/#) != nil }
 
+  /// Whether the text is the id of a message's author: a user id, or a bot id, which starts with B.
+  static func isAuthorId(_ text: String) -> Bool { text.wholeMatch(of: #/[UWB][A-Z0-9]{2,}/#) != nil }
+
+  static func isBotId(_ text: String) -> Bool { text.first == "B" && isAuthorId(text) }
+
   /// A Slack ts of the form `1794965246.462679` in microseconds.
   static func tsValue(_ ts: String) -> Int64? {
     guard let m = ts.wholeMatch(of: #/([0-9]{10})\.([0-9]{6})/#), let s = Int64(m.1), let us = Int64(m.2) else {
@@ -438,16 +474,52 @@ public enum SlackPoll {
     }
   }
 
-  /// Whether one message header in the text holds the user and the ts. The connector writes a header as a
-  /// `From: Name <email> (U0123)` line, a `Time:` line, and a `Message TS:` line. So the user must close a `From:`
-  /// line, and the next line that isn't a `Time:` line must be the ts's `Message TS:` line. A mention of the user
-  /// in a message's text doesn't count. A message's text can still hold a made-up header.
-  static func hasHeader(_ text: String, user: String, ts: String) -> Bool {
+  /// One message header of a `slack_read_thread` result.
+  public struct Header: Codable, Equatable, Sendable {
+    public var user: String
+    /// The text of the `From:` line before the id, without a trailing `<email>`, or nil when nothing is left.
+    public var name: String?
+    public var ts: String
+  }
+
+  /// The message headers in the text, in its order. The connector writes a header as a `From: Name <email> (U0123)`
+  /// line, a `Time:` line, and a `Message TS:` line. So a valid author id must close a `From:` line, and the next
+  /// line that isn't a `Time:` line must be a `Message TS:` line with a well formed ts. A mention of a user in a
+  /// message's text doesn't count. A message's text can still hold a made-up header.
+  static func headers(in text: String) -> [Header] {
+    // A Swift string treats CRLF as one character, so this split leaves a CRLF line whole.
     let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
-    for (i, line) in lines.enumerated() where line.hasPrefix("From: ") && line.hasSuffix(" (\(user))") {
-      let next = lines[(i + 1)...].first { !$0.hasPrefix("Time: ") }
-      if next.map(String.init) == "Message TS: \(ts)" { return true }
+    var out: [Header] = []
+    for (i, line) in lines.enumerated() where line.hasPrefix("From: ") {
+      // An author id holds no parenthesis, so the last one opens the only id that can close the line.
+      guard let paren = line.lastIndex(of: "("), line.hasSuffix(")") else { continue }
+      let user = String(line[line.index(after: paren)..<line.index(before: line.endIndex)])
+      guard isAuthorId(user), line.hasSuffix(" (\(user))"),
+        let next = lines[(i + 1)...].first(where: { !$0.hasPrefix("Time: ") }), next.hasPrefix("Message TS: ")
+      else { continue }
+      let ts = String(next.dropFirst("Message TS: ".count))
+      guard tsValue(ts) != nil else { continue }
+      // In `From: (U0123)`, the space after `From:` is also the space before the id.
+      let start = line.index(line.startIndex, offsetBy: "From: ".count)
+      let space = line.index(before: paren)
+      var name = start < space ? String(line[start..<space]) : ""
+      name = name.trimmingCharacters(in: .whitespaces)
+      if name.hasSuffix(">"), let email = name.lastIndex(of: "<") {
+        name = String(name[..<email])
+      }
+      out.append(Header(user: user, name: displayName(name), ts: ts))
     }
-    return false
+    return out
+  }
+
+  /// Whether one of the message headers holds the user and the ts.
+  static func hasHeader(_ headers: [Header], user: String, ts: String) -> Bool {
+    headers.contains { $0.user == user && $0.ts == ts }
+  }
+
+  /// A user's name on one line and cut to 80 characters, or nil when nothing is left.
+  private static func displayName(_ text: String) -> String? {
+    let name = oneLine(text, max: 80)
+    return name.isEmpty ? nil : name
   }
 }

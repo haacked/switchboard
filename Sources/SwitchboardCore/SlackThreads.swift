@@ -14,6 +14,11 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// Whether the last reply's user is the user's own Slack id. sbd decides it when it reads the reply, so the mark
   /// never needs the id later.
   public var lastReplyYou: Bool
+  /// The newest reply whose author is neither the user's own Slack id nor a bot id, as sbd parsed it from a read's
+  /// message headers.
+  /// sbd decides "not you" when it reads the reply, as for `lastReplyYou`. The last reply can be yours while this
+  /// one is someone else's.
+  public var lastOther: SlackPoll.Header?
   /// When the last successful read ended, in ms since the epoch.
   public var read: Int64?
   /// When sbd last asked for the thread, whether or not the read succeeded, in ms since the epoch.
@@ -30,13 +35,28 @@ public struct SlackThread: Codable, Equatable, Sendable {
   /// The `oldest` of the next read: none before the first successful read, then the last reply's ts, or the root's
   /// when the thread had no replies. `slack_read_thread` returns only the messages after it.
   public var oldest: String? { replies == nil ? nil : lastReplyTs ?? thread }
+
+  /// Stores the header as the newest reply that isn't yours, unless the stored one has the same ts or a later one.
+  public mutating func record(other header: SlackPoll.Header) {
+    guard let value = SlackPoll.tsValue(header.ts) else { return }
+    if let stored = lastOther.flatMap({ SlackPoll.tsValue($0.ts) }), stored >= value { return }
+    lastOther = header
+  }
 }
 
-/// A Slack thread that a session's links watch.
+/// A Slack thread that sbd reads: one that a session's links watch, or one that an open `reply` wait names.
 public struct SlackThreadRef: Equatable, Sendable {
   public var key: String
   public var channel: String
   public var thread: String
+}
+
+extension SlackThreadRef {
+  /// The thread of a Slack target, or nil for a target without a channel and a thread.
+  public init?(target: LinkTarget) {
+    guard target.kind == .slack, let channel = target.channel, let thread = target.thread else { return nil }
+    self.init(key: target.key, channel: channel, thread: thread)
+  }
 }
 
 /// Which Slack links sbd reads.
@@ -50,17 +70,27 @@ public enum SlackWatch {
     target.kind == .slack && (now < link.t + windowMs || replyWaits.contains(target.key))
   }
 
-  /// The threads that the links watch, one per thread key, in the order of their first watched link.
-  public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: Set<String>) -> [SlackThreadRef] {
-    var seen = Set<String>()
-    var refs: [SlackThreadRef] = []
-    for link in links {
-      guard let target = link.linkTarget, isWatched(link, target: target, now: now, replyWaits: replyWaits),
-        let channel = target.channel, let thread = target.thread, seen.insert(target.key).inserted
-      else { continue }
-      refs.append(SlackThreadRef(key: target.key, channel: channel, thread: thread))
+  /// The threads that sbd reads, one per thread key: the links' threads in the order of their first watched link,
+  /// then the open reply waits' threads that no link gives, in the order of `replyWaits`.
+  public static func threads(_ links: [ExternalLink], now: Int64, replyWaits: [SlackThreadRef]) -> [SlackThreadRef] {
+    let waitKeys = Set(replyWaits.map(\.key))
+    let watched = links.filter { link in
+      link.linkTarget.map { isWatched(link, target: $0, now: now, replyWaits: waitKeys) } ?? false
     }
-    return refs
+    let refs = uniqueThreads(watched).map(\.ref)
+    var seen = Set(refs.map(\.key))
+    return refs + replyWaits.filter { seen.insert($0.key).inserted }
+  }
+
+  /// The links that name a Slack thread, each with its thread, keeping only the first link of each thread key.
+  public static func uniqueThreads(_ links: [ExternalLink]) -> [(link: ExternalLink, ref: SlackThreadRef)] {
+    var seen = Set<String>()
+    return links.compactMap { link in
+      guard let ref = link.linkTarget.flatMap(SlackThreadRef.init(target:)), seen.insert(ref.key).inserted else {
+        return nil
+      }
+      return (link, ref)
+    }
   }
 }
 
@@ -108,7 +138,7 @@ public struct SlackThreadStatus: Codable, Equatable, Sendable {
 
   /// The text on one line with control characters escaped, then cut to `max`. Escaping first keeps the cut a bound
   /// on what the row shows, because an escape is several characters long.
-  private static func clipped(_ text: String, max: Int) -> String {
+  static func clipped(_ text: String, max: Int) -> String {
     truncated(oneLine(text, max: .max).printable, max: max)
   }
 

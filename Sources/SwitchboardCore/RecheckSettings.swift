@@ -19,6 +19,7 @@ public struct RecheckSettings: Codable, Equatable, Sendable {
     Wait.Kind.deploy.rawValue: 14400,
     Wait.Kind.session.rawValue: 86400,
     Wait.Kind.manual.rawValue: 86400,
+    Wait.Kind.reply.rawValue: 86400,
     acknowledged: 3600,
     requested: 3600,
   ]

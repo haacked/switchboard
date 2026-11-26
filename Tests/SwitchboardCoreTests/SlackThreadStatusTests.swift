@@ -378,3 +378,46 @@ private enum StatusFx {
     #expect(added.allSatisfy { $0.object?.keys.contains("status") == false })
   }
 }
+
+/// The `slack_threads` row's fields for the newest reply that isn't yours (#504 D2, D20).
+@Suite struct SlackThreadRowTests {
+  /// A row that #503 stored has no `lastOther` key.
+  @Test func aRowWithoutTheOtherReplyKeyDecodesWithoutAnOtherReply() throws {
+    let row = try StatusFx.readRow()
+
+    #expect(row.lastOther == nil)
+  }
+
+  @Test func aRowWithTheOtherReplyKeyDecodesIt() throws {
+    let row = try StatusFx.row([
+      "lastOther": ["user": "U0OTHER", "name": "Alice", "ts": .string(StatusFx.replyTs)]
+    ])
+
+    #expect(row.lastOther == SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: StatusFx.replyTs))
+  }
+
+  static let alice = SlackPoll.Header(user: "U0OTHER", name: "Alice", ts: "1794965246.462679")
+  static let carolEarlier = SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: "1794965200.000000")
+  static let carolLater = SlackPoll.Header(user: "U0CAROL", name: nil, ts: "1794965300.000300")
+  static let carolSameTs = SlackPoll.Header(user: "U0CAROL", name: "Carol", ts: alice.ts)
+
+  static func recorded(_ headers: SlackPoll.Header...) -> SlackThread {
+    var row = SlackThread(channel: "C0EXAMPLE01", thread: "1794965000.000100")
+    for header in headers { row.record(other: header) }
+    return row
+  }
+
+  @Test func theFirstOtherReplyIsStored() {
+    #expect(Self.recorded(Self.alice).lastOther == Self.alice)
+  }
+
+  /// A newer reply replaces the stored one, including a name that is now nil.
+  @Test func aNewerOtherReplyReplacesTheStoredOne() {
+    #expect(Self.recorded(Self.alice, Self.carolLater).lastOther == Self.carolLater)
+  }
+
+  @Test(arguments: [carolEarlier, carolSameTs])
+  func anOtherReplyThatIsNotNewerKeepsTheStoredOne(_ header: SlackPoll.Header) {
+    #expect(Self.recorded(Self.alice, header).lastOther == Self.alice)
+  }
+}

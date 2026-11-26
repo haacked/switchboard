@@ -74,7 +74,9 @@ extension WaitActionTests {
   }
   static let kindShapes = actions.flatMap { a in
     Wait.Kind.allCases.filter { $0 != .session }.flatMap { kind -> [KindShape] in
-      let targets: [String?] = prKinds.contains(kind) ? [nil, "PostHog/posthog#1204"] : [nil]
+      // A reply wait needs its Slack target, so each of its shapes names one.
+      let targets: [String?] =
+        prKinds.contains(kind) ? [nil, "PostHog/posthog#1204"] : kind == .reply ? [LinkFixtures.slackRoot] : [nil]
       return targets.map { KindShape(action: a, kind: kind, target: $0) }
     }
   }

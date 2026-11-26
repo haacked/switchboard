@@ -37,7 +37,7 @@ extension Wait.Kind {
     case .merge: [.state]
     case .queue: [.comments, .mergeQueue, .state]
     case .deploy: [.comments, .state]
-    case .session, .date, .manual: .all
+    case .session, .date, .manual, .reply: .all
     }
   }
 }

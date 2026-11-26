@@ -24,6 +24,8 @@ public struct LinkTarget: Equatable, Sendable {
   public var thread: String?
   /// A Slack link's message ts.
   public var messageTs: String?
+  /// A Slack link's workspace: the host's label before `.slack.com`, in lowercase.
+  public var workspace: String?
 
   /// The target of a link of a known kind, or nil for any other link. The URL can come from pasted text or from a
   /// tool that the model drives, so each kind checks the scheme, the host, and the whole path, and refuses what
@@ -69,7 +71,7 @@ public struct LinkTarget: Equatable, Sendable {
 
   private init(
     _ kind: LinkKind, key: String, title: String, channel: String? = nil, thread: String? = nil,
-    messageTs: String? = nil
+    messageTs: String? = nil, workspace: String? = nil
   ) {
     self.kind = kind
     self.key = key
@@ -77,6 +79,14 @@ public struct LinkTarget: Equatable, Sendable {
     self.channel = channel
     self.thread = thread
     self.messageTs = messageTs
+    self.workspace = workspace
+  }
+
+  /// The link of the reply `ts` in the thread whose root is `thread`, in the form that Slack's Copy link gives. The
+  /// link reaches a session's prompt, so callers pass only parts that sbd parsed and checked.
+  public static func slackReplyURL(workspace: String, channel: String, thread: String, ts: String) -> String {
+    let digits = ts.replacingOccurrences(of: ".", with: "")
+    return "https://\(workspace).slack.com/archives/\(channel)/p\(digits)?thread_ts=\(thread)&cid=\(channel)"
   }
 
   /// `/archives/<channel>/p<16 digits>`, with an optional `thread_ts` that names the thread of a reply.
@@ -95,7 +105,7 @@ public struct LinkTarget: Equatable, Sendable {
     let channel = segments[1]
     return LinkTarget(
       .slack, key: "slack:\(workspace)/\(channel)/\(thread)", title: "Slack thread in \(channel)", channel: channel,
-      thread: thread, messageTs: messageTs)
+      thread: thread, messageTs: messageTs, workspace: workspace)
   }
 
   /// `/<workspace>/issue/<KEY>`, with an optional slug after the key.

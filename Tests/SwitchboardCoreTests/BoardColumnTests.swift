@@ -511,7 +511,7 @@ private let holderOfWait: [(Wait.Kind, BoardHolder?)] = Wait.Kind.allCases.map {
   switch kind {
   case .session: return (kind, .session)
   case .manual: return (kind, .you)
-  case .review, .approval: return (kind, nil)
+  case .review, .approval, .reply: return (kind, nil)
   case .ci, .queue, .merge, .deploy, .date, .botReview: return (kind, .machine)
   }
 }
@@ -588,6 +588,14 @@ extension BoardColumnTests {
     /// Kanban decision 7: the app shows the session's reason there.
     @Test func inProgressCardHasNoLine() throws {
       #expect(try place(.working, pr: awaitingReviewPR()).line == nil)
+    }
+
+    /// A reply wait waits on a person in Slack, as a review wait waits on a reviewer.
+    @Test func aReplyWaitGivesNoHolder() {
+      let p = place(.waiting, waits: [wait(.reply)])
+
+      #expect(p.column == .waiting)
+      #expect(p.holder == nil)
     }
 
     @Test(arguments: holderOfWait)
