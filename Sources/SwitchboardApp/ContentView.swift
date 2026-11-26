@@ -179,6 +179,11 @@ struct ContentView: View {
         ShortcutsOverlay(request: request).environmentObject(model)
       }
     }
+    .sheet(isPresented: model.isPresent(\.renaming)) {
+      if let id = model.renaming {
+        RenameSheet(id: id) { model.renaming = nil }.environmentObject(model)
+      }
+    }
     .sheet(isPresented: model.isPresent(\.loopEditor)) {
       if let request = model.loopEditor {
         LoopEditor(

@@ -54,3 +54,44 @@ import Testing
     #expect(!hosted.buttons(naming: "Pin m").isEmpty)
   }
 }
+
+/// Where a group chat shows its conversations (Decision 9): a column beside the terminals when the detail has room
+/// for both, else a Conversations menu in the chat's header.
+@Suite struct ConversationsSectionTestsColumnFit {
+  /// The two terminals' minimum widths with the shell open.
+  static let terminals = SessionView.claudeMinWidth + SessionView.shellMinWidth
+  /// A 1024 pt window leaves this much for the detail with the widest and the narrowest sidebar.
+  static let detailAt1024: [CGFloat] = [724, 784]
+
+  @Test func theColumnIs200PointsWide() {
+    #expect(GroupConversationsColumn.width == 200)
+  }
+
+  @Test(arguments: detailAt1024)
+  func theColumnFitsBesideBothTerminalsAt1024(_ width: CGFloat) {
+    #expect(GroupConversationsColumn.fits(width: width, beside: Self.terminals))
+  }
+
+  @Test func theColumnFitsAtExactlyItsWidthPlusTheTerminals() {
+    #expect(
+      GroupConversationsColumn.fits(width: GroupConversationsColumn.width + Self.terminals, beside: Self.terminals))
+  }
+
+  @Test func aDetailOnePointTooNarrowShowsTheMenu() {
+    #expect(
+      !GroupConversationsColumn.fits(width: GroupConversationsColumn.width + Self.terminals - 1, beside: Self.terminals)
+    )
+  }
+
+  @Test func withTheShellClosedTheColumnFitsInANarrowerDetail() {
+    #expect(GroupConversationsColumn.fits(width: 560, beside: SessionView.claudeMinWidth))
+    #expect(!GroupConversationsColumn.fits(width: 560, beside: Self.terminals))
+  }
+
+  /// The column takes room before the side panel. At 1024 pt the side panel no longer fits beside the column and
+  /// both terminals.
+  @Test(arguments: detailAt1024)
+  func theSidePanelDoesNotFitBesideTheColumnAndBothTerminalsAt1024(_ width: CGFloat) {
+    #expect(!SidePanel.fits(width: width - GroupConversationsColumn.width, beside: Self.terminals))
+  }
+}

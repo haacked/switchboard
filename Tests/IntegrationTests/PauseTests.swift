@@ -167,6 +167,27 @@ extension Instance {
     #expect(pause["from"]?["id"]?.string == from)
   }
 
+  /// A group chat conversation other than the group's first one names itself as `Triage.inboxName` names it: the
+  /// group's chat, then the conversation's own name.
+  @Test func claudeInASecondGroupConversationPausesWithTheGroupAndTheConversationsName() throws {
+    let sbd = try Instance()
+    let s = try sbd.liveIdle()
+    _ = try sbd.sb("group", "add", "--json", "Flags", s.id)
+    _ = try sbd.chatOf("Flags")
+    let billing = try sbd.id(
+      of: try #require(JSON.parse(try sbd.sb("chat", "Flags", "--new", "--name", "Billing", "--json"))))
+
+    let printed = try sbd.pauseJSON(s.id, env: sbd.inside(billing))
+
+    let reason = try sbd.get(s.id).reason
+    #expect(reason.hasPrefix("Paused by"), "\(reason)")
+    #expect(reason.contains("Flags"), "\(reason)")
+    #expect(reason.contains("Billing"), "\(reason)")
+    #expect(!reason.contains("chat chat"), "\(reason)")
+    #expect(printed["reason"]?.string?.contains("Billing") == true, "\(printed.text)")
+    #expect(try sbd.pauseField(s.id)?["from"]?["id"]?.string == billing)
+  }
+
   @Test func theReasonShowsInTheReasonInLsAndInGet() throws {
     let sbd = try Instance()
     let s = try sbd.liveIdle()

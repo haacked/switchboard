@@ -22,7 +22,7 @@ extension Wait.Then {
 
 /// What the session view's side panel shows: the session's open waits, its schedules, its notes, its artifacts, and
 /// its links.
-struct SidePanel {
+struct SidePanel: SideColumn {
   static let width: CGFloat = 240
   static let noWaits = "No open waits."
   static let noNotes = "No notes."
@@ -61,9 +61,16 @@ struct SidePanel {
     artifactsCount = artifacts.count(where: { $0.removed == nil })
     links = LinkRows(session: s, now: now).rows
   }
+}
 
-  /// True when `width` holds the panel beside content that needs `beside` points.
-  /// The panel hides otherwise, so it never makes a terminal narrower than its minimum.
+/// A column of fixed width that a session's view shows beside its terminals only while it fits. A column that does
+/// not fit hides, so it never makes a terminal narrower than its minimum.
+protocol SideColumn {
+  static var width: CGFloat { get }
+}
+
+extension SideColumn {
+  /// True when `width` holds the column beside content that needs `beside` points.
   static func fits(width: CGFloat, beside: CGFloat) -> Bool { width >= beside + Self.width }
 }
 

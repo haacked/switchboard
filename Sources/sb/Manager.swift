@@ -10,16 +10,7 @@ func manager(_ a: Args) {
   case "ls":
     let result = call("manager-ls")
     if a.json { return printJSON(result) }
-    for s in decode(result, as: [SessionSummary].self) {
-      var marks: [String] = []
-      if let unread = s.activity?.unread, unread > 0 { marks.append("\(unread) unread") }
-      if s.pinned == true { marks.append("pinned") }
-      if s.activity?.archived == true { marks.append("archived") }
-      if s.endHint != nil { marks.append("suggest ending") }
-      let extra = marks.map { "  \($0)" }.joined()
-      print("\(s.id)  \(s.name)  \(s.state.title)  \(Manager.serversText(s.mcp))\(extra)".printable)
-    }
-    return
+    return printConversations(result)
   case "mcp":
     words.removeFirst()
     return managerMCP(a, Array(words))
@@ -38,7 +29,8 @@ func manager(_ a: Args) {
     return print("\(s.name): \(s.pinned == true ? "pinned" : "not pinned")".printable)
   case "end":
     words.removeFirst()
-    return managerEnd(a, Array(words))
+    guard let ref = words.first else { die("manager end needs a conversation") }
+    return endConversation(a, ref, command: "sb manager end")
   case "hint":
     words.removeFirst()
     return managerHint(a, Array(words))
@@ -62,14 +54,25 @@ func manager(_ a: Args) {
   printOpenOrSend(a, call("manager", args, timeout: 300))
 }
 
-/// `sb manager end <conv> [--drop <id>]… [--new [--name N]]`. Only the user ends a conversation, so it refuses
-/// inside Claude Code, and sbd refuses a session caller.
-private func managerEnd(_ a: Args, _ words: [String]) {
+/// Prints each conversation of a `manager-ls` or `chat-ls` answer on a line.
+func printConversations(_ result: JSON) {
+  for s in decode(result, as: [SessionSummary].self) {
+    var marks: [String] = []
+    if let unread = s.activity?.unread, unread > 0 { marks.append("\(unread) unread") }
+    if s.pinned == true { marks.append("pinned") }
+    if s.activity?.archived == true { marks.append("archived") }
+    if s.endHint != nil { marks.append("suggest ending") }
+    let extra = marks.map { "  \($0)" }.joined()
+    print("\(s.id)  \(s.name)  \(s.state.title)  \(Manager.serversText(s.mcp))\(extra)".printable)
+  }
+}
+
+/// `sb manager end <conv> [--drop <id>]… [--new [--name N]]`, or `sb chat <group> --end <conv> …` with `group` in
+/// `scope`. Only the user ends a conversation, so it refuses inside Claude Code, and sbd refuses a session caller.
+func endConversation(_ a: Args, _ ref: String, scope: [String: JSON] = [:], command: String) {
   refuseInsideClaudeCode(
-    "only the user ends a Manager conversation, so sb manager end doesn't run inside Claude Code. Run it from a terminal"
-  )
-  guard let ref = words.first else { die("manager end needs a conversation") }
-  var args = callerArg
+    "only the user ends a conversation, so \(command) doesn't run inside Claude Code. Run it from a terminal")
+  var args = callerArg.merging(scope) { $1 }
   args["session"] = .string(ref)
   args["drop"] = .array((a.allValues["--drop"] ?? []).map(JSON.string))
   if a.switches.contains("--new") {

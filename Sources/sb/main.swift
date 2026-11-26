@@ -81,8 +81,9 @@ let usage = """
     manager ls                    list the conversations, newest activity first
     manager <conv> --log          the conversation's last messages
     manager <conv> --read         mark the conversation's replies read
-    manager pin|unpin <conv>      pin the conversation to the top of the
-                                  app's Conversations list, or unpin it
+    manager pin|unpin <conv>      pin the conversation, or a group chat's
+                                  conversation, to the top of its list in the
+                                  app, or unpin it
     manager end <conv> [--drop <id>]… [--new [--name N]]
                                   end the conversation: stop its claude and remove
                                   it. Its transcript stays on disk. Its own waits
@@ -471,11 +472,28 @@ let usage = """
                                   --declined lists the declined ids, and
                                   --undecline lets one be suggested again
     chat <group> [<text> | --send <text>]
-                                  open the group's chat, a session that manages
-                                  the group's sessions, starting it the first
-                                  time. With text, send it a message
-    chat <group> --log            the chat's last messages
-    chat <group> --read           mark the chat's replies read
+                                  open the group's most recent chat
+                                  conversation, a session that manages the
+                                  group's sessions, starting it the first time.
+                                  With text, send it a message
+    chat <group> --new [--name N] [<text>]
+                                  start another conversation in the group chat,
+                                  named N, or for the first line of the text,
+                                  or "New conversation" until its first prompt
+                                  names it
+    chat <group> --session <conv> [<text>]
+                                  open that conversation of the group, or send
+                                  it the text
+    chat <group> --ls             list the group's conversations, newest first
+    chat <group> --end <conv> [--drop <id>]… [--new [--name N]]
+                                  remove a conversation of the group, as sb
+                                  manager end does, and with --new start
+                                  another in its place
+    chat <group> --log [--session <conv>]
+                                  the last messages of that conversation, or of
+                                  the most recent one
+    chat <group> --read [--session <conv>]
+                                  mark its replies read
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]
@@ -648,7 +666,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent",
+      "--reason", "--message", "--drop", "--end", "--template-file", "--rubric-file", "--input", "--agent",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {

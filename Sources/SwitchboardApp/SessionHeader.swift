@@ -5,6 +5,9 @@ import SwitchboardCore
 /// the window toolbar, which `SessionToolbarItems` fills.
 struct SessionHeader: View {
   let session: SessionSummary
+  /// The group whose conversations a Conversations menu lists, for a group chat whose view has no room for the
+  /// conversations column. Nil shows no menu.
+  let conversationsMenu: String?
 
   var body: some View {
     VStack(alignment: .leading, spacing: 4) {
@@ -26,6 +29,7 @@ struct SessionHeader: View {
         SessionAccountControl(session: session).lineLimit(1)
         if session.kind.runsInManagerFolder { MCPServerMenu(session: session) }
         if session.kind == .manager { ManagerHeaderControls(session: session) }
+        if let group = conversationsMenu { GroupConversationsMenu(group: group, current: session.id) }
       }
       InlineText(plain: session.reason).foregroundStyle(.secondary)
         .lineLimit(1)

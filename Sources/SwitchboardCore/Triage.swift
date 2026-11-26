@@ -928,13 +928,13 @@ public enum Triage {
     }
   }
 
-  /// How the Inbox, the menu bar, and a notification name the session. A
-  /// group chat goes by its group's current name, and a Manager conversation
-  /// says that it is one.
+  /// How the Inbox, the menu bar, and a notification name the session. A group chat with the default name of its
+  /// group goes by that name. Another chat of the group adds its own name after it. A Manager conversation says that
+  /// it is one.
   public static func inboxName(_ s: SessionSummary, groupName: String?) -> String {
     switch s.kind {
     case .work: s.name
-    case .chat: groupName.map { Chat.name(group: $0) } ?? s.name
+    case .chat: groupName.map { Chat.title(group: $0, name: s.name) } ?? s.name
     case .manager: s.name == Manager.name ? s.name : "Manager: \(s.name)"
     case .operator: "Background follow-through"
     }

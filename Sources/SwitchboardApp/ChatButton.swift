@@ -1,16 +1,16 @@
 import SwiftUI
 import SwitchboardCore
 
-/// The Chat button in a group lane's label. It shows the state of the
-/// group's chat, and its help names the time of the last message.
+/// The Chat button in a group lane's label, which opens the group's most recent conversation. Its mark sums up
+/// every conversation of the group, and its help names the time of the last message.
 struct GroupChatButton: View {
   @EnvironmentObject var model: BoardModel
   let group: GroupSummary
 
   var body: some View {
-    let chat = model.chat(of: group.id)
-    let mark = ChatMark(chat)
-    let text = ChatButtonText(mark, lastMessageAt: chat?.activity?.lastMessageAt)
+    let chats = model.chats(of: group.id)
+    let mark = ChatMark(chats: chats)
+    let text = ChatButtonText(mark, lastMessageAt: ChatMark.lastMessageAt(chats))
     Button {
       model.openChat(group.id)
     } label: {

@@ -10,7 +10,8 @@ public struct ChatActivity: Codable, Equatable, Sendable {
   public var unread: Int
   /// The time of the last reply or of the last prompt that the user sent.
   public var lastMessageAt: Int64?
-  /// True for a Manager conversation in the sidebar's archive.
+  /// True for a conversation in its list's archive: the sidebar's for a Manager conversation, the group column's for a
+  /// group chat.
   public var archived: Bool?
 
   public init(replies: Int, unread: Int, lastMessageAt: Int64? = nil, archived: Bool? = nil) {
@@ -63,6 +64,33 @@ public enum ChatMark: Equatable, Sendable {
     }
   }
 
+  /// The mark of a group's Chat button, which sums up the group's conversations. The first conversation that waits on
+  /// the user wins. Else the unread counts add up, and the mark says working when any conversation is in a turn.
+  public init(chats: [SessionSummary]) {
+    guard !chats.isEmpty else {
+      self = .none
+      return
+    }
+    if let needsMe = chats.lazy.map(ChatMark.init).first(where: { $0.needsMeReason != nil }) {
+      self = needsMe
+      return
+    }
+    let unread = chats.reduce(0) { $0 + ($1.activity?.unread ?? 0) }
+    let working = chats.contains { $0.state == .working }
+    if unread > 0 {
+      self = .unread(unread, working: working)
+    } else if working {
+      self = .working
+    } else {
+      self = .idle(lastMessageAt: ChatMark.lastMessageAt(chats))
+    }
+  }
+
+  /// The time of the newest message among the conversations.
+  public static func lastMessageAt(_ chats: [SessionSummary]) -> Int64? {
+    chats.compactMap { $0.activity?.lastMessageAt }.max()
+  }
+
   /// Whether the chat waits on the user. It counts send cards, which
   /// `Triage.hasBlockingPrompt` leaves out to keep them out of the Inbox.
   public static func needsMe(cards: [Card], openPrompt: Bool) -> Bool {
@@ -81,8 +109,8 @@ public enum ChatMark: Equatable, Sendable {
   }
 }
 
-/// The sidebar's Manager conversations: pinned first, then the others, then
-/// the archive. Each group is newest activity first.
+/// A list of conversations, the sidebar's Manager conversations or a group chat's: pinned first, then the others,
+/// then the archive. Each group is newest activity first.
 public enum Conversations {
   /// How long a conversation that needs nothing stays out of the archive.
   public static let archiveAfterMs: Int64 = 3 * 24 * 60 * 60 * 1000

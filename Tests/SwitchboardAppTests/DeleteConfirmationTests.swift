@@ -106,7 +106,7 @@ private let twoTodos = [todoFixture("n3", "tell Alex in #flags"), todoFixture("n
 @Suite struct DeleteConfirmationKindParity {
   /// The op that each kind's Delete sends, or nil when the kind offers no Delete.
   nonisolated static let expectedOp: [(String, String?)] = [
-    ("a", "rm-queue"), ("m", "manager-end"), ("c", nil), ("op", nil),
+    ("a", "rm-queue"), ("m", "manager-end"), ("c", "manager-end"), ("op", nil),
   ]
 
   @Test(arguments: expectedOp.indices)

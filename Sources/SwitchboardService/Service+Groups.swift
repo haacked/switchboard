@@ -196,9 +196,9 @@ extension Service {
     return try JSON(encoding: groupSummary(id))
   }
 
-  /// Deletes the group, detaches its plans, and marks its chat done.
+  /// Deletes the group, detaches its plans, and marks its chats done.
   private func deleteGroup(_ id: String) throws {
-    try retireChat(of: id)
+    try retireChats(of: id)
     try store.delete(group: id)
     try detachPlans { $0.group == id }
     groups[id] = nil

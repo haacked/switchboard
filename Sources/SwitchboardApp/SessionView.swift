@@ -11,6 +11,8 @@ final class SessionViewState: ObservableObject {
   @Published var shellAttach = 0
   /// False while the view is too narrow to hold the side panel beside the terminals.
   @Published var sidePanelFits = true
+  /// False while a group chat's view is too narrow to hold its conversations column beside the terminals.
+  @Published var conversationsColumnFits = true
 }
 
 /// One session of any kind: its state and actions, and the Claude terminal and the shell side by side. The user
@@ -28,7 +30,7 @@ struct SessionView: View {
 
   var body: some View {
     VStack(spacing: 0) {
-      SessionHeader(session: session)
+      SessionHeader(session: session, conversationsMenu: ui.conversationsColumnFits ? nil : conversationsGroup)
       if session.kind == .manager { ManagerStatusStrip(session: session) }
       if session.kind.isConversation { SchedulesStrip(session: session) }
       // The Inbox lists every proposal above the item that nests this view.
@@ -44,20 +46,33 @@ struct SessionView: View {
       }
       CardList(cards: session.cards)
       GeometryReader { geometry in
-        let fits = SidePanel.fits(width: geometry.size.width, beside: SessionView.terminalsMinWidth(session))
+        let terminals = SessionView.terminalsMinWidth(session)
+        let group = conversationsGroup
+        let columnFits = group != nil && GroupConversationsColumn.fits(width: geometry.size.width, beside: terminals)
+        let column = columnFits ? GroupConversationsColumn.width : 0
+        let fits = SidePanel.fits(width: geometry.size.width - column, beside: terminals)
         let showsPanel = showsSidePanel && fits
+        let limited = showsPanel || columnFits
         HStack(spacing: 0) {
+          if columnFits, let group {
+            GroupConversationsColumnView(group: group)
+            Divider()
+          }
           // On macOS 26, a split view that holds only the Claude pane grows past the width it is offered once the
           // terminal attaches, which pushes the panel past the window's edge. The width limit stops it. Without
-          // the panel, the frame sets no limit, so the terminals keep their own sizes.
+          // the panel or the column, the frame sets no limit, so the terminals keep their own sizes.
           terminalArea.frame(
-            minWidth: showsPanel ? 0 : nil, maxWidth: showsPanel ? geometry.size.width - SidePanel.width : nil)
+            minWidth: limited ? 0 : nil,
+            maxWidth: limited ? geometry.size.width - column - (showsPanel ? SidePanel.width : 0) : nil)
           if showsPanel {
             Divider()
             SidePanelView(session: session)
           }
         }
         .onChange(of: fits, initial: true) { if ui.sidePanelFits != fits { ui.sidePanelFits = fits } }
+        .onChange(of: columnFits, initial: true) {
+          if ui.conversationsColumnFits != columnFits { ui.conversationsColumnFits = columnFits }
+        }
       }
       // A GeometryReader accepts any width. Without this, the layout above gives the terminals less than
       // their minimum widths, and the shell pane is laid out past the trailing edge.
@@ -172,8 +187,14 @@ struct SessionView: View {
     revealed || !draft.isEmpty || draft.error != nil
   }
 
-  static let claudeMinWidth: CGFloat = 320
-  static let shellMinWidth: CGFloat = 200
+  nonisolated static let claudeMinWidth: CGFloat = 320
+  nonisolated static let shellMinWidth: CGFloat = 200
+
+  /// The group whose conversations this view lists, for a group chat that is the selection. The Inbox shows a
+  /// chat's terminal without selecting it, and lists no conversations there.
+  private var conversationsGroup: String? {
+    session.kind == .chat && model.selection == session.id ? session.chat : nil
+  }
 
   /// The sum of the minimum widths of the terminal panes that `terminalArea` shows for `session`.
   static func terminalsMinWidth(_ session: SessionSummary) -> CGFloat {
