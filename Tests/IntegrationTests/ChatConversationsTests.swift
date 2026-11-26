@@ -272,6 +272,26 @@ import Testing
     #expect(try sbd.events(c.id).contains { $0.kind == "renamed" })
   }
 
+  @Test func aMessageFromSbdLeavesAConversationUntitledAndTheUsersFirstPromptNamesIt() throws {
+    let sbd = try Instance()
+    _ = try chats.addGroup(sbd, "Flags")
+    _ = try chats.chat(sbd, "Flags")
+    let c = try newChat(sbd, "Flags")
+    try sbd.waitFor(c.id, "the stub") { $0.live }
+
+    _ = try descriptions.describe(sbd, "Flags", "Ship the cache.")
+
+    try sbd.waitFor(c.id, "the reply to the description notice", timeout: 30) {
+      $0.lastReply?.hasPrefix("Done: Switchboard: the user changed") == true
+    }
+    #expect(try sbd.get(c.id).name == Manager.untitled)
+    #expect(try !sbd.events(c.id).contains { $0.kind == "renamed" })
+
+    try sbd.sb("send", c.id, "Fix the cache")
+
+    try sbd.waitFor(c.id, "the name from the user's first prompt", timeout: 30) { $0.name == "Fix the cache" }
+  }
+
   @Test func newWithTextIsNamedForTheFirstLineOfTheText() throws {
     let sbd = try Instance()
     _ = try chats.addGroup(sbd, "Flags")

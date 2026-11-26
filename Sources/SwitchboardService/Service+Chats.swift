@@ -19,13 +19,7 @@ extension Service {
       let isNew = args["new"]?.bool == true
       let ref = args["session"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       if isNew, ref != nil { throw APIError("pass session or new, not both") }
-      if !isNew {
-        let found = try queue.sync { () -> String? in
-          if let ref { return try groupChat(ref, of: group) }
-          return mostRecentChat(of: group)
-        }
-        if let id = found { return try openOrSend(id, text) }
-      }
+      if !isNew, let id = try queue.sync(execute: { try groupChat(ref, of: group) }) { return try openOrSend(id, text) }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
@@ -124,13 +118,11 @@ extension Service {
       id = found
     } else if args["manager"]?.bool == true {
       id = try managerConversation(args["session"]?.string)
-    } else if let ref = args["session"]?.string, args["group"] != nil {
-      id = try groupChat(ref, of: try lookupGroup(args))
-    } else if args["session"] != nil {
+    } else if args["session"] != nil, args["group"] == nil {
       id = try lookup(args)
     } else {
       let group = try lookupGroup(args)
-      guard let chat = mostRecentChat(of: group) else {
+      guard let chat = try groupChat(args["session"]?.string, of: group) else {
         throw APIError("group \(groups[group]!.name) has no chat. Start it with: sb chat \(group)")
       }
       id = chat
@@ -163,6 +155,13 @@ extension Service {
   /// of the group is an error.
   func groupChat(_ ref: String, of group: String) throws -> String {
     try resolveSession(ref, noun: "chat of group \(groups[group]?.name ?? group)") { $0.chat == group }
+  }
+
+  /// The chat of the group that `ref` names, or the group's most recent chat without a ref. It is nil when the
+  /// group has no chat.
+  func groupChat(_ ref: String?, of group: String) throws -> String? {
+    if let ref, !ref.isEmpty { return try groupChat(ref, of: group) as String }
+    return mostRecentChat(of: group)
   }
 
   func ensureChatFolder(_ group: String, description: String?) throws {

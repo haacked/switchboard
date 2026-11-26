@@ -1080,7 +1080,11 @@ public final class Service {
         answer = block
         break
       }
-      try nameConversation(id, prompt: payload["prompt"]?.string)
+      // The facts count only the user's prompts. A message that sbd sent on its own, such as a wait's outcome, names
+      // no conversation.
+      if let after = entries[id]?.facts, after.prompts > before.prompts {
+        try nameConversation(id, prompt: payload["prompt"]?.string)
+      }
       // A host's hook answer never reaches claude, so a host session keeps its digest, its replies, and its group's
       // changes unheard.
       let digestText = stamp == nil ? digest(id, now: event.t) : nil

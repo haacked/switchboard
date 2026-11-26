@@ -489,8 +489,11 @@ let usage = """
                                   remove a conversation of the group, as sb
                                   manager end does, and with --new start
                                   another in its place
-    chat <group> --log            the most recent conversation's last messages
-    chat <group> --read           mark its replies read
+    chat <group> --log [--session <conv>]
+                                  the last messages of that conversation, or of
+                                  the most recent one
+    chat <group> --read [--session <conv>]
+                                  mark its replies read
 
   Plan documents:
     plan attach <doc> (--group G | --session S) [--path P]

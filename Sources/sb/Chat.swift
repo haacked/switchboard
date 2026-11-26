@@ -2,8 +2,9 @@ import Foundation
 import SwitchboardCore
 
 /// `sb chat <group> [--new [--name N] | --session <conv>] [text]`, `sb chat <group> --ls`,
-/// `sb chat <group> --end <conv> [--drop <id>]… [--new [--name N]]`, or `sb chat <group> --log | --read`. Without
-/// `--new` or `--session` it opens the group's most recent chat.
+/// `sb chat <group> --end <conv> [--drop <id>]… [--new [--name N]]`, or
+/// `sb chat <group> --log | --read [--session <conv>]`. Without `--new` or `--session` it opens the group's most
+/// recent chat.
 func chat(_ a: Args) {
   guard let group = a.positional.first else { die("chat needs a group") }
   var target: [String: JSON] = ["group": .string(group)]
@@ -17,12 +18,11 @@ func chat(_ a: Args) {
   if let ref = a.values["--end"] {
     return endConversation(a, ref, scope: ["group": .string(group)], command: "sb chat \(group) --end")
   }
-  var args: [String: JSON] = ["group": .string(group)]
+  var args = target
   if a.switches.contains("--new") {
     args["new"] = true
     if let name = a.values["--name"] { args["name"] = .string(name) }
   }
-  if let ref = a.values["--session"] { args["session"] = .string(ref) }
   let words = a.positional.dropFirst().joined(separator: " ")
   if let text = a.values["--send"] ?? (words.isEmpty ? nil : words) {
     if text.isEmpty { die("--send needs text") }
