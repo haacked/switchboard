@@ -104,11 +104,14 @@ extension GitHubPoller {
         !service.queue.sync(execute: { service.entries[s.session]?.session.done ?? true })
       else { continue }
       do {
-        _ = try service.resolveWait(
+        let summary = try service.resolveWait(
           session: s.session, wait: s.wait.id, outcome: s.settlement.outcome, changedAt: s.settlement.changedAt,
           met: s.settlement.met)
         stats.resolved += 1
-        hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
+        // A wait's action can keep the wait open, as one that awaits the Operator's judgment does.
+        if !summary.waits.contains(where: { $0.id == s.wait.id }) {
+          hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
+        }
       } catch {
         logLine("github: can't resolve wait \(s.wait.id) of \(s.session): \(error)")
       }
