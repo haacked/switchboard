@@ -53,6 +53,8 @@ final class GitHubPoller {
   private var readTimer: DispatchSourceTimer?
   /// Schedules `readWake` at a time in ms, in place of the one scheduled before. Tests replace it.
   lazy var scheduleWake: (Int64) -> Void = { [unowned self] at in armReadTimer(at: at) }
+  /// Turns what the sources of PR changes report into reads. Without a provider it does nothing.
+  let hub: PRChangeHub
   /// What the poller knows about each plan document, by plan id.
   var trackedPlans: [String: TrackedPlan] = [:]
   var codeOwners = CodeOwnerReads()
@@ -202,15 +204,22 @@ final class GitHubPoller {
     var issueReads = 0
   }
 
-  init(service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings) {
+  init(
+    service: Service, settings: GitHubSettings, depot: DepotSettings, trunk: TrunkSettings,
+    providers: [any PRChangeProvider] = []
+  ) {
     self.service = service
     self.settings = settings
     self.client = GitHubClient(settings: settings)
     self.depot = depot.enabled ? DepotPoller(settings: depot) : nil
     self.trunk = TrunkPoller(settings: trunk, intervalMs: settings.pendingMs)
+    self.hub = PRChangeHub(providers: providers, queue: queue)
+    hub.reader = self
   }
 
+  /// Starts the providers, and the poll timer unless `pollSeconds` is 0. A provider runs without the timer.
   func start() {
+    hub.start()
     guard settings.pollSeconds > 0 else { return }
     let t = DispatchSource.makeTimerSource(queue: queue)
     t.schedule(deadline: .now() + settings.pollSeconds, repeating: settings.pollSeconds)
@@ -225,6 +234,18 @@ final class GitHubPoller {
   func requestRead(_ ids: some Sequence<String>, after: Int64, trigger: ReadTrigger) {
     dispatchPrecondition(condition: .onQueue(queue))
     if let at = readRequests.request(ids, at: nowMs() + after, trigger: trigger) { scheduleWake(at) }
+  }
+
+  /// Reads the PRs at the next poll, whenever that runs, whether or not they are due. It runs on `queue`.
+  func readAtNextPoll(_ ids: some Sequence<String>, trigger: ReadTrigger) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    readRequests.readAtNextPoll(ids, trigger: trigger)
+  }
+
+  /// Withdraws the PR's timed read when it was requested with `trigger`. It runs on `queue`.
+  func cancelRead(_ id: String, trigger: ReadTrigger) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    readRequests.cancel(id, trigger: trigger)
   }
 
   /// Runs the poll that a request scheduled, unless an earlier poll read every due request. Then it schedules a
@@ -269,6 +290,12 @@ final class GitHubPoller {
   /// looks up every branch, and counts every finished PR's folder, due or not.
   func poll(all: Bool) -> JSON {
     queue.sync { cycle(all: all) }
+  }
+
+  /// The sources of PR changes, for `sb sources`.
+  func sources() -> PRSources {
+    guard !hub.providers.isEmpty else { return PRSources(providers: []) }
+    return queue.sync { hub.report() }
   }
 
   /// The GitHub requests and points since sbd started, without polling.
@@ -349,6 +376,7 @@ final class GitHubPoller {
     pruneMergeDetails()
     let comments = Set(prs.values.flatMap { $0.comments.map(\.id) })
     bodies = bodies.filter { comments.contains($0.key) }
+    feedHub(sessions, interest)
     var result = (try? JSON(encoding: stats).object) ?? [:]
     if let failure { result["error"] = .string(failure) }
     if let depotError { result["depotError"] = .string(depotError) }
@@ -597,9 +625,9 @@ final class GitHubPoller {
     for id in namedPRIds {
       candidates[id] = ReadCandidate(
         pr: prs[id]?.pr, lastPolled: prs[id]?.polled, waitedAt: waited.created[id], requested: requested[id],
-        needs: waited.needs[id, default: []].union(queued.contains(id) ? .trunkQueue : []))
+        needs: waited.needs(of: id, queued: queued))
     }
-    let triggers = GitHub.dueReads(candidates, all: all, now: now, policy: settings.pollPolicy)
+    let triggers = GitHub.dueReads(candidates, all: all, now: now, policy: pollPolicy())
     let ids = triggers.keys.sorted()
     // A request's cost goes to its PRs after the request returns, because a PR's repo is known only after its first read.
     func count(_ prIds: [String], from before: Stats, to after: Stats, countsReads: Bool) {

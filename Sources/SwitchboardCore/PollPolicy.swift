@@ -41,10 +41,11 @@ public struct PollPolicy: Sendable {
 }
 
 extension GitHubSettings {
-  /// Every PR polls at `pendingMs` and `idleMs`, because no source of PR changes reports any PR's changes.
-  public var pollPolicy: PollPolicy {
+  /// The rates from `pendingMs` and `idleMs`, given the signals of the source of PR changes that covers each PR,
+  /// by node id.
+  public func pollPolicy(covered: [String: ChangeSignals] = [:]) -> PollPolicy {
     let base = PollRates(pendingMs: pendingMs, idleMs: idleMs)
-    return PollPolicy { pr, needs in .of(pr, needs: needs, signals: nil, base: base) }
+    return PollPolicy { pr, needs in .of(pr, needs: needs, signals: pr.flatMap { covered[$0.id] }, base: base) }
   }
 }
 

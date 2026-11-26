@@ -146,7 +146,7 @@ public struct PullRequest: Codable, Equatable, Sendable {
   public var depot: DepotRun?
   /// The PRs that the body's `Depends on` lines name. The poller keeps these
   /// and not the body. nil in events that an older sbd recorded.
-  public var dependsOn: [PRRef]?
+  public var dependsOn: [DependencyRef]?
   /// The issues that the body's closing keywords name. The poller keeps
   /// these and not the body. nil when the body names none, and in events
   /// that an older sbd recorded.
@@ -186,7 +186,8 @@ public struct PullRequest: Codable, Equatable, Sendable {
     defaultBranch: String? = "main", mergeable: Mergeable? = .mergeable, reviewDecision: ReviewDecision? = nil,
     verdicts: [Review] = [], reviews: [Review] = [], labels: [String] = [], checks: String? = nil,
     mergedBase: Int? = nil, mergedAt: String? = nil, closedAt: String? = nil, queue: TrunkQueueState? = nil,
-    reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil, dependsOn: [PRRef]? = nil,
+    reviewRequests: [String]? = nil, mergeCommit: String? = nil, depot: DepotRun? = nil,
+    dependsOn: [DependencyRef]? = nil,
     trunkConfig: Bool? = nil, reviewDecisionRead: Bool? = nil, mergeQueue: Bool? = nil, inMergeQueue: Bool? = nil,
     author: String? = nil, codeOwnerRequests: [String]? = nil, closesIssues: [IssueRef]? = nil
   ) {
@@ -351,6 +352,9 @@ public struct PullRequest: Codable, Equatable, Sendable {
   /// not yet satisfy it. A PR whose review decision the poll did not read
   /// awaits a review.
   public var awaitsReview: Bool { ready && !reviewSatisfied }
+
+  /// Whether the PR polls at the pending rate. `needed` says whether an open wait or a queue needs the pending rate.
+  public func pollsAtPendingRate(needed: Bool) -> Bool { needed || isPending || awaitsReview }
 
   /// Whether the head commit's checks have not finished.
   public var checksRunning: Bool { ChecksRollup(checks) == .running }

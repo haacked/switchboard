@@ -34,7 +34,7 @@ import Testing
     let expected = PollRates(pendingMs: settings.pendingMs, idleMs: settings.idleMs)
     for pr in [nil, Self.pending, Self.inRepo(Self.settled, "haacked/switchboard")] as [PullRequest?] {
       for needs in [[], Wait.Kind.ci.needs, .all] as [ChangeSignals] {
-        #expect(settings.pollPolicy.rates(pr, needs) == expected)
+        #expect(settings.pollPolicy().rates(pr, needs) == expected)
       }
     }
   }

@@ -52,6 +52,11 @@ extension GitHubPoller {
   struct Waited {
     var created: [String: Int64] = [:]
     var needs: [String: ChangeSignals] = [:]
+
+    /// What the PR's open waits need, and what Trunk's queue needs when `queued` holds the PR.
+    func needs(of id: String, queued: Set<String>) -> ChangeSignals {
+      needs[id, default: []].union(queued.contains(id) ? .trunkQueue : [])
+    }
   }
 
   func waitedOn(_ interest: Interest) -> Waited {

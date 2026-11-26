@@ -163,7 +163,7 @@ public enum GitHub {
     if (waitedAt ?? 0) > (lastPolled ?? 0) { return .wait }
     if let requested { return requested }
     guard let pr else { return .first }
-    let pending = pendingRate || pr.isPending || pr.awaitsReview
+    let pending = pr.pollsAtPendingRate(needed: pendingRate)
     guard elapsed(since: lastPolled, pending ? pendingMs : idleMs, now: now) else { return nil }
     return pending ? .pending : .idle
   }
