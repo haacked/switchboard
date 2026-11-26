@@ -55,7 +55,9 @@ has() {
 }
 
 # Prints the lines on stdin without ANSI escapes, cut to max_line_length.
-plain() { sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | cut -c "1-$max_line_length"; }
+# BSD sed and cut stop at the first invalid UTF-8 byte. So iconv -c drops those
+# bytes first.
+plain() { iconv -c -f UTF-8 -t UTF-8 | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | cut -c "1-$max_line_length"; }
 
 lines=() tails=()
 for i in ${labels[@]+"${!labels[@]}"}; do

@@ -116,6 +116,8 @@ private final class ShardRig {
       if [ -e "$FAKE_SWIFT_DIR/fail.$id" ]; then
         if [ -z "${FAKE_SWIFT_NO_ISSUE-}" ]; then
           echo "✘ Test t() recorded an issue at $id.swift:9:5: Expectation failed: (x → 1) == 2"
+        else
+          echo "fake swift: $id failed quietly"
         fi
         exit 1
       fi
@@ -146,8 +148,8 @@ private final class ShardRig {
       """)
   }
 
-  private func write(_ name: String, _ script: String) throws {
-    let path = "\(bin)/\(name)"
+  private func write(_ name: String, _ script: String, in folder: String? = nil) throws {
+    let path = "\(folder ?? bin)/\(name)"
     guard
       FileManager.default.createFile(
         atPath: path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o755])
@@ -261,6 +263,15 @@ private final class ShardRig {
     }
     p.waitUntilExit()
   }
+
+  /// Replaces the copy's bin/lib/test-failures with a script that exits 3 and
+  /// leaves a file behind, which testFailuresRan finds.
+  func breakTestFailures() throws {
+    try FileManager.default.removeItem(atPath: "\(repo)/bin/lib/test-failures")
+    try write("test-failures", "#!/bin/sh\n: > \"$FAKE_SWIFT_DIR/test-failures.ran\"\nexit 3\n", in: "\(repo)/bin/lib")
+  }
+
+  func testFailuresRan() -> Bool { FileManager.default.fileExists(atPath: "\(queue.root)/test-failures.ran") }
 
   /// The file that the tests pass as GITHUB_STEP_SUMMARY.
   var summary: String { "\(queue.root)/summary.md" }
@@ -644,9 +655,9 @@ private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConve
     #expect(rig.summaryText()?.contains(issue) == true, "\(rig.summaryText() ?? "no summary")")
   }
 
-  /// Without an issue line, only the record of the failed shard makes the
-  /// annotation. bin/test records the parallel shards and MeasureTests in
-  /// different places.
+  /// Without an issue line, the annotation comes from the `--failed` label that
+  /// bin/test passes for the failed shard. bin/test adds that label after `wait`
+  /// for a parallel shard and after the MeasureTests run.
   @Test(arguments: ["AlphaTests", "MeasureTests"])
   func inGitHubActionsAFailingShardWithNoIssueLineGetsOneAnnotation(_ shard: String) throws {
     let rig = try ShardRig()
@@ -657,7 +668,9 @@ private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConve
 
     #expect(r.status == 1, "\(r.stderr)")
     #expect(ShardRig.annotations(r).count == 1, "\(r.stdout)\(r.stderr)")
-    #expect(rig.summaryText()?.contains("Test run with 1 tests passed") == true, "\(rig.summaryText() ?? "no summary")")
+    #expect(
+      rig.summaryText()?.contains("fake swift: \(shard) failed quietly") == true, "\(rig.summaryText() ?? "no summary")"
+    )
   }
 
   @Test func inGitHubActionsTheShardsRanNOfMLineStaysOnStderrAndBecomesAnAnnotation() throws {
@@ -689,30 +702,26 @@ private enum ShardFailure: String, CaseIterable, Sendable, CustomTestStringConve
   @Test func inGitHubActionsAPassingRunMakesNoAnnotationAndNoSummary() throws {
     let rig = try ShardRig()
     defer { rig.stop() }
+    try rig.breakTestFailures()
 
     let r = try rig.run(["--shards", "2"], env: rig.ciEnv())
 
     #expect(r.status == 0, "\(r.stderr)")
     #expect(ShardRig.annotations(r).isEmpty, "\(r.stdout)\(r.stderr)")
     #expect(rig.summaryText() == nil)
+    #expect(!rig.testFailuresRan(), "the script ran on a passing run")
   }
 
-  /// The fake bin/lib/test-failures exits 3 and leaves a file behind. The file
-  /// shows that bin/test ran it.
   @Test(arguments: ShardFailure.allCases)
   fileprivate func aFailingAnnotationScriptLeavesTheExitStatusAlone(_ failure: ShardFailure) throws {
     let rig = try ShardRig()
     defer { rig.stop() }
     failure.arrange(rig)
-    let path = "\(rig.repo)/bin/lib/test-failures"
-    try FileManager.default.removeItem(atPath: path)
-    let script = "#!/bin/sh\n: > \"$FAKE_SWIFT_DIR/test-failures.ran\"\nexit 3\n"
-    try #require(
-      FileManager.default.createFile(atPath: path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o755]))
+    try rig.breakTestFailures()
 
     let r = try rig.run(["--shards", "2"], env: rig.ciEnv(failure.env))
 
     #expect(r.status == 1, "\(r.stderr)")
-    #expect(FileManager.default.fileExists(atPath: "\(rig.queue.root)/test-failures.ran"), "\(r.stderr)")
+    #expect(rig.testFailuresRan(), "\(r.stderr)")
   }
 }
