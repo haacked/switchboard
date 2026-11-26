@@ -22,6 +22,13 @@ extension Service {
         "the command has \(length) characters. The user's card shows the whole command, so a proposed script has at most \(ScriptProposal.maxCommand)"
       )
     }
+    let hidden: Set<Unicode.GeneralCategory> = [.format, .lineSeparator, .paragraphSeparator]
+    let isHidden = { (text: String) in text.unicodeScalars.contains { hidden.contains($0.properties.generalCategory) } }
+    guard !isHidden(schedule.prompt), !isHidden(reason ?? "") else {
+      throw APIError(
+        "the command or the reason holds a right-to-left override, a zero-width character, or a line or paragraph separator. The user's card can't show those, so a proposed script has none"
+      )
+    }
     let session = entries[target]!.session
     let proposal = ScriptProposal(
       target: target, targetName: session.name, folder: session.cwd, every: schedule.every, command: schedule.prompt,

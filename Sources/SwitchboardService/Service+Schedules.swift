@@ -166,7 +166,7 @@ extension Service {
     if kind == .operator {
       throw APIError("the Operator can't add a script schedule or change a script's command or timeout")
     }
-    return isKind(inside, in: [.manager]) && args["group"] == nil ? .manager(inside) : .propose(inside)
+    return kind == .manager && args["group"] == nil ? .manager(inside) : .propose(inside)
   }
 
   /// Refuses a request that adds a headless schedule to a Manager conversation or the Operator, or changes such a
@@ -391,6 +391,7 @@ extension Service {
         == nil
     else { return }
     if schedule.isDetached {
+      if beingDeletedRefusal(id) != nil { return }
       dispatchRun(id, schedule, now: now)
       return
     }

@@ -16,7 +16,7 @@ struct LoopOutput: Equatable {
   var error: String?
 
   static func printableLines(_ text: String) -> [String] {
-    var lines = text.split(separator: "\n", omittingEmptySubsequences: false)
+    var lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
     if lines.last?.isEmpty == true { lines.removeLast() }
     return lines.map(\.printable)
   }

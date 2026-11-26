@@ -39,7 +39,8 @@ public enum ScheduleRun {
   /// job-control warnings into the log. No shell, or an empty one, falls back to `fallback`.
   public static func scriptArguments(command: String, shell: String?, fallback: String) -> [String] {
     let shell = shell.flatMap { $0.isEmpty ? nil : $0 } ?? fallback
-    return [shell, "-l", "-c", command]
+    // fish reads the word after -c as the command, so `--` goes in only when the command would read as an option.
+    return [shell, "-l", "-c"] + (command.hasPrefix("-") ? ["--"] : []) + [command]
   }
 }
 

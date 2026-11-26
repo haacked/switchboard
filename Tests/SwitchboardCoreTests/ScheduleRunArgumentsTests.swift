@@ -272,7 +272,7 @@ private let shapes = kinds.flatMap { kind in StartMode.allCases.map { ScheduleRu
   @Test func aCommandThatStartsWithADashIsTheArgumentOfDashC() {
     #expect(
       ScheduleRun.scriptArguments(command: "-x", shell: "/bin/zsh", fallback: "/bin/sh") == [
-        "/bin/zsh", "-l", "-c", "-x",
+        "/bin/zsh", "-l", "-c", "--", "-x",
       ])
   }
 }
