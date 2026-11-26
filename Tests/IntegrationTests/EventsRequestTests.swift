@@ -41,8 +41,7 @@ extension Instance {
   /// The `data` of each of the session's events as sbd's database holds it, by event id. It stops sbd first.
   func storedEventData(_ id: String) throws -> [Int64: JSON] {
     stopSbd()
-    let r = try runCommand(
-      "/usr/bin/sqlite3", ["-json", home.database, "SELECT id, data FROM events WHERE session = '\(id)'"])
+    let r = try sqlite("SELECT id, data FROM events WHERE session = '\(id)'", "-json")
     try #require(r.status == 0, Comment(rawValue: r.stderr))
     let rows = try #require(JSON.parse(r.stdout)?.array)
     return try Dictionary(

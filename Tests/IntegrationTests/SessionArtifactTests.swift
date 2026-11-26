@@ -96,7 +96,7 @@ extension Instance {
 
 /// The JSON of every group row in sbd's database, read with sqlite3 after sbd stopped.
 private func storedGroupsJSON(_ sbd: Instance) throws -> String {
-  let r = try runCommand("/usr/bin/sqlite3", [sbd.home.database, "SELECT json FROM groups"])
+  let r = try sbd.sqlite("SELECT json FROM groups")
   try #require(r.status == 0, Comment(rawValue: r.stderr))
   return r.stdout
 }

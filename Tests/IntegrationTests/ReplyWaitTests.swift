@@ -73,8 +73,7 @@ import Testing
 
   /// The session's row as sbd stored it, read with sqlite3 while sbd runs.
   func storedSession(_ sbd: Instance, _ id: String) throws -> JSON {
-    let r = try runCommand(
-      "/usr/bin/sqlite3", ["-cmd", ".timeout 5000", sbd.home.database, "SELECT json FROM sessions WHERE id = '\(id)'"])
+    let r = try sbd.sqlite("SELECT json FROM sessions WHERE id = '\(id)'")
     try #require(r.status == 0, "\(r.stderr)")
     return try #require(JSON.parse(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)), "\(r.stdout)")
   }
