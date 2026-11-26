@@ -28,7 +28,9 @@ private struct ShardCall: Equatable, CustomStringConvertible {
 /// creates go.<id> or go.all, and then exits 1 when fail.<id> exists. It
 /// writes its SB_BUILD_SLOT_HELD to held.<id> and its parent's pid to
 /// ppid.<id>. The fake sysctl reports no load, because bin/test waits for the
-/// load to drop below the CPU count before it runs MeasureTests.
+/// load to drop below the CPU count before it runs MeasureTests. The fake cp
+/// copies and then logs "cloned <destination>". It first sleeps
+/// FAKE_CP_DELAY seconds. With FAKE_CP_FAIL set, it fails without copying.
 private final class ShardRig {
   static let tests = [
     "IntegrationTests.AlphaTests/a()",
@@ -102,6 +104,19 @@ private final class ShardRig {
       echo "end $id" >> "$FAKE_SWIFT_EVENTS"
       if [ -e "$FAKE_SWIFT_DIR/fail.$id" ]; then exit 1; fi
       exit 0
+      """)
+    try write(
+      "cp",
+      """
+      #!/bin/sh
+      sleep "${FAKE_CP_DELAY:-0}"
+      if [ -n "${FAKE_CP_FAIL-}" ]; then
+        echo "fake cp failed" >&2
+        exit 1
+      fi
+      /bin/cp "$@" || exit
+      for last; do :; done
+      echo "cloned $last" >> "$FAKE_SWIFT_EVENTS"
       """)
     try write(
       "sysctl",
@@ -384,6 +399,36 @@ private struct WarningCase: Sendable, CustomTestStringConvertible {
 
     #expect(p.terminationStatus != 0, "\(rig.output())")
     #expect(Set(rig.shardCalls().map(\.id)) == Set(ShardRig.shardIds), "\(rig.swiftCalls())")
+  }
+
+  /// A copy of .build that overlaps a running swift test can fail. The fake cp
+  /// sleeps before it copies. A clone made beside the first shard would then
+  /// end after that shard started.
+  @Test func everyCloneEndsBeforeTheFirstShardStarts() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(["--shards", "2"], env: ["SB_BUILD_SLOTS": "0", "FAKE_CP_DELAY": "1"])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    let events = rig.queue.logLines()
+    let clones = events.indices.filter { events[$0].hasPrefix("cloned ") }
+    let firstShard = try #require(
+      events.firstIndex { $0.hasPrefix("start ") && !$0.hasPrefix("start build ") }, "\(events)")
+    #expect(clones.count == ShardRig.parallelShards.count - 1, "\(events)")
+    #expect(clones.allSatisfy { $0 < firstShard }, "\(events)")
+  }
+
+  @Test func aFailedCloneStopsBinTestBeforeAnyShardStarts() throws {
+    let rig = try ShardRig()
+    defer { rig.stop() }
+
+    let r = try rig.run(["--shards", "2"], env: ["FAKE_CP_FAIL": "1"])
+
+    #expect(r.status != 0)
+    #expect(rig.shardCalls().isEmpty, "\(rig.swiftCalls())")
+    #expect(r.stderr.contains("fake cp failed"), "\(r.stderr)")
+    #expect(!r.stderr.contains("sed:"), "\(r.stderr)")
   }
 
   /// With one slot and H holding it, a shard that took a ticket of its own

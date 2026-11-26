@@ -111,13 +111,22 @@ shards() {
     bin/lib/swiftpm test --skip-build --scratch-path "$2" --filter "${patterns[$1]}" 2>&1 |
       tee "$clones/$1.log" | awk -v p="[$1] " '{ print p $0; fflush() }'
   }
-  local pids=() scratch
+  # A running swift test writes temporary files into its build folder. cp fails
+  # when one of them disappears during the copy. So every clone exists before
+  # the first shard starts.
+  local scratch=()
   for i in "${!patterns[@]}"; do
     [ "$i" -le "$n" ] || continue
-    scratch=.build
-    [ "${#pids[@]}" -eq 0 ] || scratch="$clones/$i"
-    (if [ "$scratch" != .build ]; then cp -c -R .build "$scratch"; fi
-      run_shard "$i" "$scratch") &
+    if [ "${#scratch[@]}" -eq 0 ]; then
+      scratch[i]=.build
+    else
+      scratch[i]=$clones/$i
+      cp -c -R .build "${scratch[i]}"
+    fi
+  done
+  local pids=()
+  for i in "${!scratch[@]}"; do
+    run_shard "$i" "${scratch[i]}" &
     pids[i]=$!
   done
   local status=0
