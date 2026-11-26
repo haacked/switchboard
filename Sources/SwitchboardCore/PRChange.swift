@@ -201,11 +201,15 @@ public struct PRSources: Codable, Equatable, Sendable {
   public var pendingReads: Int
   /// The pending reads of PRs that only await a review, which a source that reports reviews could slow.
   public var reviewOnlyReads: Int
+  /// The value of `github.pollSeconds`, which sets how often sbd polls a pending PR. It is 0 when only `sb poll`
+  /// polls. It is nil from an sbd that doesn't report it.
+  public var pollSeconds: Double?
 
-  public init(providers: [Source], pendingReads: Int = 0, reviewOnlyReads: Int = 0) {
+  public init(providers: [Source], pendingReads: Int = 0, reviewOnlyReads: Int = 0, pollSeconds: Double? = nil) {
     self.providers = providers
     self.pendingReads = pendingReads
     self.reviewOnlyReads = reviewOnlyReads
+    self.pollSeconds = pollSeconds
   }
   /// The lines of `sb sources`: one line for each source, or one line that says sbd polls every PR. A source adds a
   /// line of what it measured: in shadow mode the matches, outside it the misses. The time to `wait-resolved` adds a

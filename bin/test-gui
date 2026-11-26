@@ -42,8 +42,9 @@
 # row to the selection as a ⌘-click does, checks that the detail pane shows "2 sessions selected", clicks
 # Delete 2 Sessions…, and checks that the confirmation opens and that sbd still lists both sessions.
 # The settings check sends ⌘, through the app's ShellSelfTest commands and checks that it runs Settings… and
-# shows the Settings window at General. It then opens Settings at Issues the way the Issues view's gear button
-# does and checks that the window shows the Issues tab.
+# shows the Settings window at General. It checks the text of General's GitHub row, which says where PR updates come
+# from, and that the row lies inside the window with the main window at 1024 pt. It then opens Settings at Issues the
+# way the Issues view's gear button does and checks that the window shows the Issues tab.
 # The shortcuts check walks the menu bar and checks that every key it finds is the key of the AppShortcut entry
 # that names the item. It then posts ? to the Inbox, checks that the overlay opens, posts ? to the overlay's sheet,
 # and checks that it closes. Help > Keyboard Shortcuts opens and closes it the same way.
@@ -908,9 +909,17 @@ check_settings() {
   # The hidden test app may not refresh a menu item's state, so an enabled Settings… that owns ⌘, also counts.
   [[ $result == ", ran Settings…" || $result == *"(Settings… is enabled)" ]] || fail "⌘, did not run Settings…: $result"
   wait_for 10 settings_is "shown general" || fail "⌘, did not show Settings at General: $(app settings)"
+  # This sbd runs with github.pollSeconds 0 and github.events.mode off.
+  local updates='PR updates: polling GitHub only when `sb poll` runs | GitHub Event Streams is off. Set `github.events.mode` to `read` in config.json to turn it on.'
+  pr_updates_read() { [ "$(app pr-updates)" = "$updates" ]; }
+  pinned
+  wait_for 10 pr_updates_read || fail "the GitHub row does not say that sbd polls with Event Streams off: $(app pr-updates)"
+  result=$(app anchors settings-pr-updates)
+  [ "$result" = "settings-pr-updates:in" ] || fail "the GitHub row does not lie inside the Settings window: $result"
+  app width restore >/dev/null
   end_app
   save_shots
-  echo "ok: settings (⌘, runs Settings…, the window shows General, the gear's path shows Issues)"
+  echo "ok: settings (⌘, runs Settings…, the window shows General and its GitHub row, the gear's path shows Issues)"
 }
 
 if wants settings; then check_settings; fi

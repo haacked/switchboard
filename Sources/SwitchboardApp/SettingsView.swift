@@ -98,6 +98,9 @@ struct GeneralSettings: View {
         )
         .font(.caption).foregroundStyle(.secondary)
       }
+      if !offline {
+        Section("GitHub") { PRUpdatesView(text: PRUpdatesRow.text(model.prSources, now: nowMs())) }
+      }
       if let error = model.settingsError {
         Text(error).font(.caption).foregroundStyle(.red)
       }
@@ -109,6 +112,38 @@ struct GeneralSettings: View {
     .onAppear { model.loadSettings() }
     // A read while sbd was down left the cap and the toggle disabled.
     .onChange(of: offline) { if !offline { model.loadSettings() } }
+    .task {
+      while !Task.isCancelled {
+        if model.unreachable == nil { model.loadPRSources() }
+        try? await Task.sleep(for: BoardModel.prSourcesInterval)
+      }
+    }
+  }
+}
+
+/// Where sbd learns of PR changes. The texts mark config keys and commands with backticks, which draw as code.
+struct PRUpdatesView: View {
+  let text: PRUpdatesRow.Text
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 4) {
+      InlineText(Self.codeSpans(text.title), links: false)
+      if let detail = text.detail {
+        InlineText(Self.codeSpans(detail), links: false).font(.caption).foregroundStyle(.secondary)
+      }
+    }
+    .fixedSize(horizontal: false, vertical: true)
+    .textSelection(.enabled)
+    .clickAnchor("settings-pr-updates")
+  }
+
+  /// The text with each part between backticks styled as code. Nothing else in it is parsed, so Markdown in GitHub's
+  /// reason draws as plain text.
+  private static func codeSpans(_ s: String) -> MarkdownText {
+    MarkdownText(
+      s.split(separator: "`", omittingEmptySubsequences: false).enumerated().compactMap { i, part in
+        part.isEmpty ? nil : MarkdownText.Run(String(part), i.isMultiple(of: 2) ? [] : .code)
+      })
   }
 }
 

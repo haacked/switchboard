@@ -248,3 +248,63 @@ private func item(_ kind: SessionHeaderLine.Item.Kind, of s: SessionSummary) -> 
     #expect(kinds(s).last == .folder)
   }
 }
+
+/// The PR link says how sbd learns of the PR's changes, as `sb get` does. With no source running it says nothing.
+@Suite struct SessionHeaderLinePRSource {
+  private func session(source: String?) throws -> SessionSummary {
+    var s = try linkedWork()
+    s.pr?.source = source
+    return s
+  }
+
+  @Test func withoutASourceTheLinkShowsOnlyTheStatusLine() throws {
+    let s = try session(source: nil)
+
+    #expect(item(.pr, of: s)?.text == s.pr?.line)
+  }
+
+  @Test func withoutASourceTheHelpNamesOnlyTheRepoAndTitle() throws {
+    let s = try session(source: nil)
+
+    #expect(item(.pr, of: s)?.help == "PostHog/posthog: Fix the flags API")
+  }
+
+  @Test func anEventsSourceFollowsTheStatusLine() throws {
+    let s = try session(source: "events")
+    let line = try #require(s.pr?.line)
+
+    #expect(item(.pr, of: s)?.text == line + " (events)")
+  }
+
+  @Test func anEventsSourceExplainsItselfInTheHelp() throws {
+    let s = try session(source: "events")
+
+    #expect(
+      item(.pr, of: s)?.help
+        == "PostHog/posthog: Fix the flags API\nsbd learns of this PR's changes from GitHub Event Streams.")
+  }
+
+  @Test func aPollingSourceFollowsTheStatusLine() throws {
+    let s = try session(source: "polling")
+    let line = try #require(s.pr?.line)
+
+    #expect(item(.pr, of: s)?.text == line + " (polling)")
+  }
+
+  @Test func aPollingSourceExplainsItselfInTheHelp() throws {
+    let s = try session(source: "polling")
+
+    #expect(item(.pr, of: s)?.help == "PostHog/posthog: Fix the flags API\nsbd polls GitHub for this PR's changes.")
+  }
+
+  /// The source changes only the PR's item.
+  @Test(arguments: ["events", "polling"])
+  func theSourceLeavesTheOtherLinksAsTheyWere(_ source: String) throws {
+    let plain = try session(source: nil)
+    let sourced = try session(source: source)
+
+    #expect(
+      SessionHeaderLine.links(for: sourced).filter { $0.kind != .pr }.map(\.text)
+        == SessionHeaderLine.links(for: plain).filter { $0.kind != .pr }.map(\.text))
+  }
+}

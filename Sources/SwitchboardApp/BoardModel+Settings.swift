@@ -23,6 +23,31 @@ extension BoardModel {
     }
   }
 
+  /// How often Settings ▸ General asks sbd for its sources while it shows. sbd pushes no change, so the row learns of
+  /// a change only at the next read.
+  static let prSourcesInterval: Duration = .seconds(5)
+
+  /// Reads sbd's sources for the GitHub row. At most one read runs at a time. An sbd without the op, or with a report
+  /// that this app can't decode, reads as older. Any other failure keeps the last answer.
+  func loadPRSources() {
+    guard !prSourcesLoading else { return }
+    prSourcesLoading = true
+    let send = send
+    sourcesWork.async {
+      let read: PRUpdatesRow.Read?
+      do {
+        let reply = try send("sources", [:])
+        read = (try? JSONCoding.convert(reply, to: PRSources.self)).map { .report($0.rowFields) } ?? .olderSbd
+      } catch {
+        read = "\(error)".contains("unknown request sources") ? .olderSbd : nil
+      }
+      Task { @MainActor in
+        self.prSourcesLoading = false
+        if let read, self.prSources != read { self.prSources = read }
+      }
+    }
+  }
+
   /// Sets this Mac's live cap.
   func setLiveCap(_ cap: Int) {
     guard cap != liveCap else { return }

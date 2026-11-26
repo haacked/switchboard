@@ -363,6 +363,13 @@ final class BoardModel: ObservableObject {
   @Published var openShellByDefault: Bool?
   /// sbd's refusal of the last change in Settings ▸ General. The tab shows it instead of the main window's banner.
   @Published var settingsError: String?
+  /// Where sbd learns of PR changes, for the GitHub row of Settings ▸ General.
+  @Published var prSources: PRUpdatesRow.Read = .loading
+  /// Whether a read of sbd's sources runs.
+  var prSourcesLoading = false
+  /// `sources` waits for sbd's GitHub poll to finish, which can take seconds. Its reads therefore run apart from the
+  /// session list and the Settings writes.
+  let sourcesWork = DispatchQueue(label: "switchboard.sources")
   /// The Settings ▸ General writes that sbd hasn't answered yet, by op. A reply applies only when no newer write of
   /// its op is pending, so an older answer doesn't undo a newer click.
   var pendingSettingWrites: [String: Int] = [:]
