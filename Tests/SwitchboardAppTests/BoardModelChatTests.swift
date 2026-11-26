@@ -363,6 +363,53 @@ func groupConversation(
     }
   }
 
+  // MARK: A refresh that moves only lastActivity
+
+  /// sbd bumps `lastActivity` on every hook event, and it orders a group's conversations, so a refresh that moves
+  /// only one chat's `lastActivity` ahead makes that chat the group's most recent.
+  @Test func aRefreshThatMovesOnlyAChatsActivityAheadMakesItTheGroupsChat() throws {
+    let old = groupConversation("old", lastActivity: 10)
+    let new = groupConversation("new", lastActivity: 20)
+    let model = appliedModel([old, new])
+    try #require(model.chat(of: "g1")?.id == "new")
+    var moved = old
+    moved.lastActivity = 30
+
+    model.apply(.success([moved, new]), followups: nil)
+
+    #expect(model.chat(of: "g1")?.id == "old")
+    #expect(model.chats(of: "g1").map(\.id) == ["old", "new"])
+  }
+
+  @Test func aRefreshThatMovesOnlyAManagerConversationsActivityAheadReordersTheSidebar() throws {
+    var older = needsItem("older", manager: true)
+    older.lastActivity = 10
+    var newer = needsItem("newer", manager: true)
+    newer.lastActivity = 20
+    let model = appliedModel([older, newer])
+    try #require(model.conversations.active.map(\.id) == ["newer", "older"])
+    var moved = older
+    moved.lastActivity = 30
+
+    model.apply(.success([moved, newer]), followups: nil)
+
+    #expect(model.conversations.active.map(\.id) == ["older", "newer"])
+  }
+
+  /// A refresh that moves only a work session's `lastActivity` leaves the list as it was, so the views don't redraw
+  /// on each of its hook events.
+  @Test func aRefreshThatMovesOnlyAWorkSessionsActivityKeepsTheList() {
+    var work = needsItem("w")
+    work.lastActivity = 10
+    let model = appliedModel([work])
+    var moved = work
+    moved.lastActivity = 30
+
+    model.apply(.success([moved]), followups: nil)
+
+    #expect(model.allSessions.first?.lastActivity == 10)
+  }
+
   // MARK: New conversation
 
   @Test func newChatSendsChatWithTheGroupAndNew() async {

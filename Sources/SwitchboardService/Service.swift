@@ -800,37 +800,7 @@ public final class Service {
       if args["terminals"]?.bool == true { return try JSON(encoding: terminals(id)) }
       return try JSON(encoding: summary(id, for: origin))
     case "send":
-      let id = try lookup(args)
-      guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
-      let runHere = args["runHere"]?.bool == true
-      if runHere { try refuseRunHere(id, args) }
-      // The `sent` event names a session that messages itself as the sender. Its launch trigger stays `send`.
-      // A sender that sbd no longer knows goes unrecorded.
-      let sender = try? lookup(["session": args["from"] ?? .null])
-      let author = Service.author(args)
-      // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
-      let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
-        .trimmingCharacters(in: .whitespacesAndNewlines)
-      // A message from a Claude Code, such as the Manager's, doesn't hold the session for the user.
-      let request = author == .claude ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
-      let trigger: LaunchTrigger = sender == nil || sender == id ? .send : .session
-      // Only the user's message closes the operator's reports, so `reports` from a Claude Code is dropped.
-      var extra: [String: JSON] = [:]
-      if let reports = args["reports"] {
-        // A dropped `reports` would make the `sent` event close every open report.
-        guard let list = reports.array, list.allSatisfy({ $0.int != nil }) else {
-          throw APIError("send's reports must be an array of integer report ids")
-        }
-        if author == .you, id == operatorID() { extra["reports"] = .array(list) }
-      }
-      let delivery = try send(id, text, by: author, trigger: trigger, from: sender, runHere: runHere, extra: extra)
-      if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
-      var reply: [String: JSON] = ["delivery": .string(delivery.rawValue)]
-      if let session = entries[id]?.session, let pause = session.pause {
-        reply["held"] = .string(pause.line)
-        reply["name"] = .string(session.name)
-      }
-      return .object(reply)
+      return try sendRequest(args, by: Service.author(args))
     case "dependency-resolved":
       return try dependencyResolved(args)
     case "pause":
@@ -1751,6 +1721,42 @@ public final class Service {
   }
 
   private var pasteSettleMs: Int64 { Int64(config.pasteSettleSeconds * 1000) }
+
+  /// Handles the `send` request with `author` as the writer of the text. `Service.author` derives the author of a
+  /// request from its `from` and `insideClaude`. sbd's own callers pass `sbd`, which no request field can set. It runs
+  /// on the state queue.
+  func sendRequest(_ args: JSON, by author: MessageAuthor) throws -> JSON {
+    let id = try lookup(args)
+    guard let text = args["text"]?.string, !text.isEmpty else { throw APIError("send needs text") }
+    let runHere = args["runHere"]?.bool == true
+    if runHere { try refuseRunHere(id, args) }
+    // The `sent` event names a session that messages itself as the sender. Its launch trigger stays `send`.
+    // A sender that sbd no longer knows goes unrecorded.
+    let sender = try? lookup(["session": args["from"] ?? .null])
+    // claude's prompt shows an attached image as `[Image #n]` after the text, so the request keeps the text alone.
+    let typed = (Attachments.split(text, folder: home.attachmentsFolder(id))?.text ?? text)
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+    // A message from a Claude Code, such as the Manager's, doesn't hold the session for the user.
+    let request = author == .claude ? nil : args["ref"]?.string.flatMap { inboxRequest(id, ref: $0, message: typed) }
+    let trigger: LaunchTrigger = sender == nil || sender == id ? .send : .session
+    // Only the user's message closes the operator's reports, so `reports` from a Claude Code is dropped.
+    var extra: [String: JSON] = [:]
+    if let reports = args["reports"] {
+      // A dropped `reports` would make the `sent` event close every open report.
+      guard let list = reports.array, list.allSatisfy({ $0.int != nil }) else {
+        throw APIError("send's reports must be an array of integer report ids")
+      }
+      if author == .you, id == operatorID() { extra["reports"] = .array(list) }
+    }
+    let delivery = try send(id, text, by: author, trigger: trigger, from: sender, runHere: runHere, extra: extra)
+    if let request { record(id, InboxRequest.event, try JSON(encoding: request)) }
+    var reply: [String: JSON] = ["delivery": .string(delivery.rawValue)]
+    if let session = entries[id]?.session, let pause = session.pause {
+      reply["held"] = .string(pause.line)
+      reply["name"] = .string(session.name)
+    }
+    return .object(reply)
+  }
 
   /// `by` is who wrote the message, which the `sent` event records. With `launchesWithPrompt` false, a stopped
   /// claude starts without a prompt and gets the message as a paste, which

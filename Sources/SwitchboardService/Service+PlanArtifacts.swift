@@ -207,7 +207,7 @@ extension Service {
       try (plan.artifact?.proposal?.text ?? "").write(toFile: proposedFile, atomically: true, encoding: .utf8)
       text = Plans.artifactTask(.publish, plan: id, url: url, publish: proposedFile)
     }
-    let response = chatRequest(["group": .string(group), "text": .string(text)])
+    let response = chatRequest(["group": .string(group), "text": .string(text)], by: .sbd)
     if let error = response.error { throw APIError(error) }
   }
 }

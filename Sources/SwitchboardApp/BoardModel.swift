@@ -813,15 +813,16 @@ final class BoardModel: ObservableObject {
     return (Result { try sessions() }, more)
   }
 
-  /// Whether two lists differ only in `lastActivity`, which sbd bumps on every
-  /// hook event. Publishing for it would redraw every view each second. The
-  /// hover card shows `lastActivity`, so its "active" time can lag until
-  /// another shown field changes.
+  /// Whether two lists differ only in the `lastActivity` of sessions other than Manager conversations and group
+  /// chats. sbd bumps `lastActivity` on every hook event, and publishing for it would redraw every view each second.
+  /// The hover card shows `lastActivity`, so a work session's "active" time can lag until another shown field
+  /// changes. A conversation's `lastActivity` orders its group's chats and the Manager sidebar, so a change to it
+  /// counts.
   private func sameShown(_ a: [SessionSummary], _ b: [SessionSummary]) -> Bool {
     a.count == b.count
       && zip(a, b).allSatisfy { old, new in
         var old = old
-        old.lastActivity = new.lastActivity
+        if !new.kind.isUserConversation { old.lastActivity = new.lastActivity }
         return old == new
       }
   }

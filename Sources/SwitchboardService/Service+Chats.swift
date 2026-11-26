@@ -7,8 +7,9 @@ extension Service {
   /// prompt, named `name`, else the first line of `text`, else `Manager.untitled`. With `session`, it sends
   /// `text` to that chat of the group, or without text opens it. With neither, it does the same for the group's
   /// most recent chat, and starts one named `Chat.name(group:)` when the group has none. The answer is the chat's
-  /// summary, with `delivery` when it took text.
-  func chatRequest(_ args: JSON) -> Response {
+  /// summary, with `delivery` when it took text. `author` is who wrote `text` that goes to a chat that exists, as
+  /// `openOrSend` takes it.
+  func chatRequest(_ args: JSON, by author: MessageAuthor? = nil) -> Response {
     do {
       let group = try queue.sync {
         let group = try lookupGroup(args)
@@ -19,7 +20,9 @@ extension Service {
       let isNew = args["new"]?.bool == true
       let ref = args["session"]?.string.flatMap { $0.isEmpty ? nil : $0 }
       if isNew, ref != nil { throw APIError("pass session or new, not both") }
-      if !isNew, let id = try queue.sync(execute: { try groupChat(ref, of: group) }) { return try openOrSend(id, text) }
+      if !isNew, let id = try queue.sync(execute: { try groupChat(ref, of: group) }) {
+        return try openOrSend(id, text, by: author)
+      }
       awaitMCPServers()
       // Another request can create the chat or remove the group while this one
       // waits off the queue, so the checks run again on it.
@@ -30,7 +33,7 @@ extension Service {
         let chat = try createConversation(chat: group, name: name, prompt: text, mcp: nil)
         return (chat.id, chat, entries[chat.id]?.queuedSince != nil)
       }
-      guard let created else { return try openOrSend(id, text) }
+      guard let created else { return try openOrSend(id, text, by: author) }
       return try createdAnswer(created, text: text, queued: queued)
     } catch {
       return .failure("\(error)")
@@ -38,15 +41,20 @@ extension Service {
   }
 
   /// Sends `text` to the chat, or without text opens it. `sender` holds the `from` and `insideClaude` of the
-  /// request that carried the text, which say who wrote it.
-  func openOrSend(_ id: String, _ text: String?, sender: JSON = [:]) throws -> Response {
-    var request: [String: JSON] = ["session": .string(id)]
-    request["text"] = text.map(JSON.string)
-    request["from"] = sender["from"]
-    request["insideClaude"] = sender["insideClaude"]
-    let response = handle(Request(op: text == nil ? "open" : "send", args: .object(request)))
-    guard text != nil, let delivery = response.result?["delivery"] else { return response }
-    return .success(try queue.sync { try withDelivery(summary(id), delivery) })
+  /// request that carried the text, which say who wrote it. A non-nil `author` says who wrote it instead. sbd's own
+  /// messages pass `sbd`, which no request field can set.
+  func openOrSend(_ id: String, _ text: String?, sender: JSON = [:], by author: MessageAuthor? = nil) throws
+    -> Response
+  {
+    guard let text else { return handle(Request(op: "open", args: ["session": .string(id)])) }
+    var args: [String: JSON] = ["session": .string(id), "text": .string(text)]
+    args["from"] = sender["from"]
+    args["insideClaude"] = sender["insideClaude"]
+    let request = Request(op: "send", args: .object(args))
+    let reply = try prepared(request, origin: .mac) {
+      try sendRequest(request.args, by: author ?? Service.author(request.args))
+    }
+    return .success(try queue.sync { try withDelivery(summary(id), reply["delivery"] ?? .null) })
   }
 
   /// The answer for a session that a request just created, with `text` as
