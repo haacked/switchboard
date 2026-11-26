@@ -158,8 +158,9 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     let keep = Set(wanted)
     for (ref, sub) in subscriptions where !keep.contains(ref) {
       close(ref, reason: "sbd no longer wants the PR")
-      subscriptions[ref] = nil
-      delete(sub, of: ref)
+      // A delete that fails keeps the subscription, so the next update tries it again.
+      if delete(sub, of: ref) { subscriptions[ref] = nil }
+      guard availability == .available else { return }
     }
     createFailures = createFailures.filter { keep.contains($0.key) }
     limited = []
@@ -253,15 +254,18 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
   /// Deletes a subscription that sbd no longer wants. GitHub ends every stream of the subscription, including a
   /// `gh event listen` that uses the same one. A delete frees a place under the account's limit, so the next update
   /// tries the creates that the limit refused.
-  private func delete(_ sub: String, of ref: PRRef) {
+  /// Returns whether GitHub no longer has the subscription.
+  private func delete(_ sub: String, of ref: PRRef) -> Bool {
     do {
-      guard let (status, json) = try rest("DELETE", "event-subscriptions/\(sub)") else { return }
+      guard let (status, json) = try rest("DELETE", "event-subscriptions/\(sub)") else { return false }
       guard status == 204 || status == 404 else {
         throw APIError("GitHub answered \(status) \(GitHub.message(json))")
       }
       limitedUntil = 0
+      return true
     } catch {
       logLine("github: \(id) can't delete the subscription of \(ref.repo)#\(ref.number): \(error)")
+      return false
     }
   }
 

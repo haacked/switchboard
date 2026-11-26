@@ -87,6 +87,9 @@ final class PRChangeHub {
     var ref: PRRef
     var snapshot: ShadowTally.Snapshot
     var previous: (snapshot: ShadowTally.Snapshot, polled: Int64)?
+    /// When each provider went live for the PR, by provider id, as the poll ended. A provider that drops the PR
+    /// after the poll, as after a merge, still counts its miss.
+    var liveSince: [String: Int64]
   }
 
   private var heldReads: [HeldRead] = []
@@ -182,7 +185,10 @@ final class PRChangeHub {
       let old = known[id]
       guard let snapshot = pr.snapshot, old.map({ pr.polled > $0.polled }) ?? true else { return nil }
       let previous = old.flatMap { o in o.snapshot.map { (snapshot: $0, polled: o.polled) } }
-      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, previous: previous)
+      let liveSince = Dictionary(providers.compactMap { p in live(p.id, for: pr.ref)?.since.map { (p.id, $0) } }) {
+        a, _ in a
+      }
+      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, previous: previous, liveSince: liveSince)
     }.sorted { $0.id < $1.id }
   }
 
@@ -196,7 +202,7 @@ final class PRChangeHub {
       for read in heldReads {
         let missed = t.read(
           read.id, previous: read.previous, now: read.snapshot, polled: heldAt,
-          liveSince: live(p.id, for: read.ref)?.since)
+          liveSince: read.liveSince[p.id])
         if !missed.isEmpty {
           logLine(
             "github: \(p.id) sent no signal for \(read.ref.repo)#\(read.ref.number) before a poll showed its "

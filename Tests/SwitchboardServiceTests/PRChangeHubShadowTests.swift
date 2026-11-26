@@ -354,6 +354,25 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
     #expect(h.source?.unmatched == 0)
   }
 
+  /// A merge ends the PR's subscription before the next poll tallies the read that showed the merge. The miss still
+  /// counts, because the hub keeps the coverage that held when that poll ended.
+  @Test func aChangeWhoseStreamClosesBeforeTheTallyIsStillAMiss() {
+    let h = ShadowHarness()
+    h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
+    h.read(at: t0 + 10_000)
+    var merged = ShadowHarness.base
+    merged.state = "MERGED"
+    h.setNow(t0 + 200_000)
+    h.known["PR_7"]?.polled = t0 + 200_000
+    h.known["PR_7"]?.snapshot = merged
+    h.endCycle()
+
+    h.coverage(.down(.pr(prRef(7)), reason: "sbd no longer wants the PR"))
+    h.endCycle()
+
+    #expect(h.source?.misses == 1)
+  }
+
   @Test func countPendingReadsAddsUpInTheReport() {
     let h = ShadowHarness()
 

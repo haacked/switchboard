@@ -296,6 +296,40 @@ extension FakeGitHub {
     #expect(github.restRequests(to: "event-subscriptions/\(id)").map(\.method) == ["DELETE"])
   }
 
+  @Test func aFailedDeleteIsTriedAgainAtTheNextPoll() throws {
+    let (github, sbd) = try enabled()
+    let id = try sbd.waitForStream(github)
+    github.change(EventStreamsTests.number) { $0["state"] = "MERGED" }
+    github.failNextEventRequest(500, body: #"{"message":"Server Error"}"#)
+    try sbd.poll(all: true)
+    try sbd.waitFor("the failed delete") { github.restRequests(to: "event-subscriptions/\(id)").count == 1 }
+    #expect(github.subscriptions.count == 1)
+
+    try sbd.poll()
+
+    try sbd.waitFor("the subscription's deletion") { github.subscriptions.isEmpty }
+    #expect(github.restRequests(to: "event-subscriptions/\(id)").map(\.method) == ["DELETE", "DELETE"])
+  }
+
+  /// A 403 on a delete makes the source unavailable, so the same update opens no other stream.
+  @Test func aRefusedDeleteSendsNoOtherRequest() throws {
+    let github = try FakeGitHub()
+    github.eventsEnabled = true
+    let sbd = try Instance.withGitHub(github)
+    for pr in [StatsPR.charts, StatsPR.haacked] { _ = try sbd.session(in: pr.repo, branch: pr.branch) }
+    try sbd.poll()
+    _ = try sbd.waitForStream(github, StatsPR.charts.number)
+    let other = try sbd.waitForStream(github, StatsPR.haacked.number)
+    github.change(StatsPR.charts.number) { $0["state"] = "MERGED" }
+    github.failNextEventRequest(403, body: FakeGitHub.eventsDisabled.body)
+
+    try sbd.poll(all: true)
+
+    try sbd.waitForEventSource("github-events to be unavailable") { $0["state"]?.string == "unavailable" }
+    usleep(1_000_000)
+    #expect(github.streamRequests(other).count == 1)
+  }
+
   @Test func aRestartReusesTheListedSubscription() throws {
     let (github, sbd) = try enabled()
     let id = try sbd.waitForStream(github)
