@@ -93,6 +93,9 @@ final class PRChangeHub {
   }
 
   private var heldReads: [HeldRead] = []
+  /// When each provider's coverage of a scope went down in the last `dedupeMs`, by provider id. A down that a poll
+  /// held on the queue reaches the hub after the poll, so the tally checks these times.
+  private var downs: [String: [(scope: CoverageChange.Scope, at: Int64)]] = [:]
   /// When the poll that made `heldReads` ended, in ms.
   private var heldAt: Int64 = 0
   private var pendingReads = 0
@@ -123,15 +126,21 @@ final class PRChangeHub {
       self.hub = hub
     }
 
-    /// Stamps the signal's arrival here, because the poller's queue can hold it until a poll ends.
+    /// Each report is stamped with its arrival here, because the poller's queue can hold it until a poll ends.
     func signal(_ s: PRSignal) {
       guard let hub else { return }
       let at = hub.now()
       hub.onQueue { $0.receive(s, from: self.provider, at: at) }
     }
-    func coverage(_ change: CoverageChange) { hub?.onQueue { $0.receive(change, from: self.provider) } }
+    func coverage(_ change: CoverageChange) {
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(change, from: self.provider, at: at) }
+    }
     func availability(_ provider: String, _ a: Availability) {
-      hub?.onQueue { $0.receive(a, from: self.provider) }
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(a, from: self.provider, at: at) }
     }
   }
 
@@ -202,7 +211,7 @@ final class PRChangeHub {
       for read in heldReads {
         let missed = t.read(
           read.id, previous: read.previous, now: read.snapshot, polled: heldAt,
-          liveSince: read.liveSince[p.id])
+          liveSince: liveSince(read, of: p.id))
         if !missed.isEmpty {
           logLine(
             "github: \(p.id) sent no signal for \(read.ref.repo)#\(read.ref.number) before a poll showed its "
@@ -213,6 +222,18 @@ final class PRChangeHub {
       tallies[p.id] = t
     }
     heldReads = []
+    downs = downs.compactMapValues { d in
+      let kept = d.filter { now - $0.at < Self.dedupeMs }
+      return kept.isEmpty ? nil : kept
+    }
+  }
+
+  /// When the provider went live for the held read's PR, unless its coverage of the PR went down between then and
+  /// the end of the read's poll.
+  private func liveSince(_ read: HeldRead, of provider: String) -> Int64? {
+    guard let since = read.liveSince[provider] else { return nil }
+    let dropped = (downs[provider] ?? []).contains { $0.scope.contains(read.ref) && $0.at >= since && $0.at <= heldAt }
+    return dropped ? nil : since
   }
 
   /// The signals of the provider that covers each covered PR, by node id. The poll rates read it.
@@ -321,7 +342,7 @@ final class PRChangeHub {
     }
   }
 
-  private func receive(_ change: CoverageChange, from provider: String) {
+  private func receive(_ change: CoverageChange, from provider: String, at arrived: Int64) {
     reports += 1
     switch change {
     case .live(let scope, let since, let gap):
@@ -331,6 +352,7 @@ final class PRChangeHub {
       }
     case .down(let scope, _):
       set(scope, Coverage(since: nil, gap: false, order: reports), for: provider)
+      if shadow { downs[provider, default: []].append((scope, arrived)) }
     }
   }
 
@@ -341,7 +363,7 @@ final class PRChangeHub {
     coverage[provider] = scopes
   }
 
-  private func receive(_ a: Availability, from provider: String) {
+  private func receive(_ a: Availability, from provider: String, at arrived: Int64) {
     guard counts[provider]?.reported != a else { return }
     counts[provider, default: Counts()].reported = a
     counts[provider]?.changedAt = now()
@@ -351,7 +373,10 @@ final class PRChangeHub {
     case .off: logLine("github: \(provider) is off")
     }
     // A provider that can't report covers nothing until it reports `live` again.
-    if a != .available { coverage[provider] = nil }
+    if a != .available {
+      coverage[provider] = nil
+      if shadow { downs[provider, default: []].append((.everything, arrived)) }
+    }
   }
 
   // MARK: Coverage
