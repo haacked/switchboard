@@ -105,6 +105,29 @@ private struct Misuse: Sendable, CustomTestStringConvertible {
     #expect(payloads(r) == ["[0] \(issue("a"))", "[0] \(issue("b"))"], "\(r.stdout)")
   }
 
+  @Test func aNulByteDoesNotHideTheLinesAfterIt() throws {
+    let rig = try FailureRig()
+    let path = try rig.log("0", Data("raw output\0\n\(issue("a"))\n".utf8))
+
+    let r = try rig.run(["0=\(path)"])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(payloads(r) == ["[0] \(issue("a"))"], "\(r.stdout)")
+  }
+
+  /// The script matches the whole line and only then cuts it.
+  @Test func anIssueMarkerPastTheCutStillMatches() throws {
+    let rig = try FailureRig()
+    let name = String(repeating: "a", count: 1000)
+    let log = try rig.log("0", [issue(name)])
+
+    let r = try rig.run(["0=\(log)"])
+
+    #expect(r.status == 0, "\(r.stderr)")
+    #expect(payloads(r).count == 1, "\(r.stdout)")
+    #expect(payloads(r).first?.hasPrefix("[0] ✘ Test " + name.prefix(900)) == true, "\(r.stdout)")
+  }
+
   @Test(arguments: crashLines)
   func aCrashLineBecomesAnAnnotation(_ line: String) throws {
     let rig = try FailureRig()

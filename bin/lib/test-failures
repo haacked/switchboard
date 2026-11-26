@@ -56,10 +56,12 @@ has() {
   return 1
 }
 
-# Prints the lines on stdin without ANSI escapes, cut to max_line_length.
-# BSD sed and cut stop at the first invalid UTF-8 byte. So iconv -c drops those
-# bytes first.
-plain() { iconv -c -f UTF-8 -t UTF-8 | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | cut -c "1-$max_line_length"; }
+# Prints the lines on stdin as text without ANSI escapes. BSD sed and cut stop
+# at the first invalid UTF-8 byte, so iconv -c drops those bytes first. grep
+# reads a NUL as binary input, so tr drops each NUL.
+plain() { iconv -c -f UTF-8 -t UTF-8 | tr -d '\000' | sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g'; }
+
+shorten() { cut -c "1-$max_line_length"; }
 
 lines=() tails=()
 for i in ${labels[@]+"${!labels[@]}"}; do
@@ -68,7 +70,7 @@ for i in ${labels[@]+"${!labels[@]}"}; do
     while IFS= read -r line; do
       lines+=("[$label] $line")
       found=1
-    done < <(plain <"$log" | grep -v -E "$progress" | grep -i -E "$pattern" | awk '!seen[$0]++')
+    done < <(plain <"$log" | grep -v -E "$progress" | grep -i -E "$pattern" | shorten | awk '!seen[$0]++')
   fi
   if [ -z "$found" ] && has "$label" ${failed[@]+"${failed[@]}"}; then
     if [ -f "$log" ]; then
@@ -110,6 +112,6 @@ block() { sed 's/^/    /'; echo; }
   for i in ${tails[@]+"${tails[@]}"}; do
     echo "The end of the log of shard ${labels[i]}:"
     echo
-    tail -n "$tail_lines" "${logs[i]}" | plain | block
+    tail -n "$tail_lines" "${logs[i]}" | plain | shorten | block
   done
 } >>"$GITHUB_STEP_SUMMARY"
