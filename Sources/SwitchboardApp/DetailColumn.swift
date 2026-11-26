@@ -15,6 +15,10 @@ enum DetailColumn {
     case .main(.board), .multiSelection, .followup, .docket, .session: false
     }
   }
+
+  var isSession: Bool {
+    if case .session = self { true } else { false }
+  }
 }
 
 extension BoardModel {

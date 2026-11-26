@@ -189,6 +189,18 @@ enum DetailColumnShape: String, CaseIterable, Sendable, CustomTestStringConverti
   }
 }
 
+/// The view picker leaves the toolbar only where a session view shows its toolbar items.
+@MainActor
+@Suite struct DetailColumnIsSession {
+  @Test(arguments: DetailColumnShape.allCases, MainView.allCases)
+  func holdsOnlyForASessionView(_ shape: DetailColumnShape, _ view: MainView) throws {
+    let model = try shape.model(view)
+
+    let expected = if case .session = shape.expected(view) { true } else { false }
+    #expect(model.detailColumn.isSession == expected)
+  }
+}
+
 /// The sidebar rule reads `showsListDetail`, which also requires that no session is selected.
 @MainActor
 @Suite struct ShowsListDetail {
