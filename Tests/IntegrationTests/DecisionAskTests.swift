@@ -824,9 +824,7 @@ enum InsideClaudeCode: String, CaseIterable, CustomStringConvertible {
 
     #expect(try sbd.run(["decide", "--json", s.id]).status != 0)
     sbd.stopSbd()
-    let r = try runCommand(
-      "/usr/bin/sqlite3",
-      [sbd.home.database, "SELECT COUNT(*) FROM events WHERE session = '\(s.id)' AND kind LIKE 'decision%'"])
+    let r = try sbd.sqlite("SELECT COUNT(*) FROM events WHERE session = '\(s.id)' AND kind LIKE 'decision%'")
     #expect(r.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "0", "\(text(r))")
     try sbd.startSbd()
     #expect(try sbd.run(["decide", "--json", s.id]).status != 0)

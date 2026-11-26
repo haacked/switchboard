@@ -92,8 +92,7 @@ extension Instance {
 
   /// The thread's `slack_threads` row as sbd stored it, read with sqlite3 while sbd runs.
   func slackThreadRow(channel: String = SlackExample.channel, thread: String = SlackExample.rootTs) throws -> JSON? {
-    let r = try runCommand(
-      "/usr/bin/sqlite3", ["-cmd", ".timeout 5000", home.database, "SELECT json FROM slack_threads"])
+    let r = try sqlite("SELECT json FROM slack_threads")
     try #require(r.status == 0, "\(r.stderr)")
     return r.stdout.split(separator: "\n").compactMap { JSON.parse(String($0)) }.first {
       $0["channel"]?.string == channel && $0["thread"]?.string == thread

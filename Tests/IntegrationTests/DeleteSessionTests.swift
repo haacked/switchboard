@@ -72,13 +72,9 @@ extension Instance {
   /// Makes every `statement`, such as `DELETE` or `INSERT`, on `table` abort, as a constraint on the store would.
   func block(_ statement: String, on table: String) throws {
     let trigger = "block_\(statement.lowercased())_\(table)"
-    let r = try runCommand(
-      "/usr/bin/sqlite3",
-      [
-        home.database,
-        "CREATE TRIGGER \(trigger) BEFORE \(statement) ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;",
-      ])
-    try #require(r.status == 0)
+    let r = try sqlite(
+      "CREATE TRIGGER \(trigger) BEFORE \(statement) ON \(table) BEGIN SELECT RAISE(ABORT, 'store is read-only'); END;")
+    try #require(r.status == 0, Comment(rawValue: r.stderr))
   }
 }
 
@@ -354,8 +350,8 @@ extension Instance {
     #expect(try sbd.intact(s))
     #expect(try sbd.get(s.id).live)
     #expect(try sbd.git(repo, "branch", "--list", Self.mergedBranch) != "")
-    // sqlite3 has no busy timeout, so this fails while sbd's connection still holds the write lock.
-    #expect(try runCommand("/usr/bin/sqlite3", [sbd.home.database, "BEGIN IMMEDIATE; ROLLBACK;"]).status == 0)
+    // A write lock that sbd's connection never releases outlasts the busy timeout, so this fails.
+    #expect(try sbd.sqlite("BEGIN IMMEDIATE; ROLLBACK;").status == 0)
   }
 
   @Test func refusesBeforeRemovingTheWorktreeWhenTheStoreCannotDeleteTheSession() throws {

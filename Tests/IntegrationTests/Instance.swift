@@ -1386,12 +1386,16 @@ extension Instance {
       repo: "\(boxHome)/\(folder)")
   }
 
-  /// The sessions of `host` that the store lists in `removed_host_sessions`. sqlite3 reads the file without
-  /// writing to it, so the read can't contend with sbd's writes.
+  /// Runs `sql` with sqlite3 on sbd's database. `options` go before the database path.
+  /// sqlite3 sets no busy timeout of its own. Without one, a statement that meets sbd's write lock fails at once with
+  /// SQLITE_BUSY.
+  func sqlite(_ sql: String, _ options: String...) throws -> CommandResult {
+    try runCommand("/usr/bin/sqlite3", ["-cmd", ".timeout 5000"] + options + [home.database, sql])
+  }
+
+  /// The sessions of `host` that the store lists in `removed_host_sessions`.
   func removedHostSessions(_ host: String = "mini") throws -> [String] {
-    let r = try runCommand(
-      "/usr/bin/sqlite3",
-      ["-readonly", home.database, "SELECT id FROM removed_host_sessions WHERE host = '\(host)' ORDER BY id"])
+    let r = try sqlite("SELECT id FROM removed_host_sessions WHERE host = '\(host)' ORDER BY id", "-readonly")
     guard r.status == 0 else { throw TestError(description: "sqlite3 read removed_host_sessions: \(r.stderr)") }
     return r.stdout.split(separator: "\n").map(String.init)
   }
