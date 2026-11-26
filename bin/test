@@ -129,25 +129,32 @@ shards() {
     run_shard "$i" "${scratch[i]}" &
     pids[i]=$!
   done
-  local status=0
+  local status=0 failed=()
   for i in "${!pids[@]}"; do
-    wait "${pids[i]}" || status=$?
+    wait "${pids[i]}" || { status=$?; failed+=(--failed "$i"); }
   done
   if [ -n "${patterns[n + 1]:-}" ]; then
     for _ in {1..36}; do
       sysctl -n vm.loadavg | awk -v c="$(sysctl -n hw.activecpu)" '{ exit !($2 > c) }' || break
       sleep 5
     done
-    run_shard $((n + 1)) .build || status=$?
+    run_shard $((n + 1)) .build || { status=$?; failed+=(--failed $((n + 1))); }
   fi
-  local ran=0 count
+  local ran=0 count messages=() logs=()
   for i in "${!patterns[@]}"; do
+    logs+=("$i=$clones/$i.log")
     count=$(sed -n -E 's/.*Test run with ([0-9]+) tests?.*/\1/p' "$clones/$i.log" | tail -1) || count=
     ran=$((ran + ${count:-0}))
   done
   if [ "$status" -eq 0 ] && [ "$ran" -ne "$total" ]; then
-    echo "bin/test: the shards ran $ran of $total tests" >&2
+    local message="bin/test: the shards ran $ran of $total tests"
+    echo "$message" >&2
+    messages=(--message "$message")
     status=1
+  fi
+  # The EXIT trap deletes the logs. So bin/test reads them here, before it exits.
+  if [ "$status" -ne 0 ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+    bin/lib/test-failures ${failed[@]+"${failed[@]}"} ${messages[@]+"${messages[@]}"} "${logs[@]}" || true
   fi
   exit "$status"
 }

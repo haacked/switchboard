@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# Prints the lines of failed test logs that say why the tests failed, as
+# GitHub Actions error annotations, and appends them to $GITHUB_STEP_SUMMARY
+# when it is set. bin/test --shards runs it in CI when a shard fails.
+#
+#   bin/lib/test-failures [--failed <label>]... [--message <text>]... [<label>=<log>]...
+#
+# GitHub's job log API and `gh run view --log-failed` stop at about 1 MiB of a
+# job's log, and a swift-test part prints more than that. The run page and the
+# check run's annotations show these lines without the log.
+#
+# From each log it takes the lines that record a test issue or a crash, with
+# "[<label>] " in front. A --failed label whose log has none of those lines
+# gets a line that says so, and the summary shows the end of its log. Each
+# --message text follows the logs' lines as it is. A missing log counts as an
+# empty one.
+set -euo pipefail
+
+# GitHub keeps 10 error annotations per step and drops the rest. The runner's
+# own "Process completed with exit code 1" is one of them.
+max_annotations=8
+max_summary_lines=100
+max_line_length=1000
+tail_lines=20
+pattern='recorded an issue|exited with unexpected signal code|Terminating app due to uncaught exception|Fatal error:'
+# Swift Testing's started and passed lines quote a test's arguments, which can
+# hold the text that pattern matches.
+progress='^(◇|✔) '
+
+usage() {
+  echo "usage: bin/lib/test-failures [--failed <label>]... [--message <text>]... [<label>=<log>]..." >&2
+  exit 2
+}
+
+failed=() messages=() labels=() logs=()
+while [ $# -gt 0 ]; do
+  case $1 in
+  --failed) [ $# -ge 2 ] || usage; failed+=("$2"); shift 2 ;;
+  --message) [ $# -ge 2 ] || usage; messages+=("$2"); shift 2 ;;
+  ?*=*) labels+=("${1%%=*}"); logs+=("${1#*=}"); shift ;;
+  *) usage ;;
+  esac
+done
+
+# has <label> <item>...
+# Succeeds when <label> is one of the items.
+has() {
+  local label=$1
+  shift
+  while [ $# -gt 0 ]; do
+    [ "$1" != "$label" ] || return 0
+    shift
+  done
+  return 1
+}
+
+# Prints the lines on stdin without ANSI escapes, cut to max_line_length.
+plain() { sed -E $'s/\x1b\\[[0-9;]*[A-Za-z]//g' | cut -c "1-$max_line_length"; }
+
+lines=() tails=()
+for i in ${labels[@]+"${!labels[@]}"}; do
+  label=${labels[i]} log=${logs[i]} found=
+  if [ -f "$log" ]; then
+    while IFS= read -r line; do
+      lines+=("[$label] $line")
+      found=1
+    done < <(plain <"$log" | grep -v -E "$progress" | grep -i -E "$pattern" | awk '!seen[$0]++')
+  fi
+  if [ -z "$found" ] && has "$label" ${failed[@]+"${failed[@]}"}; then
+    if [ -f "$log" ]; then
+      lines+=("[$label] The shard failed, and its log has no test issue or crash line. The job summary shows the end of its log.")
+      tails+=("$i")
+    else
+      lines+=("[$label] The shard failed and left no log.")
+    fi
+  fi
+done
+lines+=(${messages[@]+"${messages[@]}"})
+[ ${#lines[@]} -gt 0 ] || exit 0
+
+annotate() {
+  local text=${1//\%/%25}
+  text=${text//$'\r'/%0D}
+  text=${text//$'\n'/%0A}
+  printf '::error::%s\n' "$text"
+}
+
+count=${#lines[@]}
+for line in "${lines[@]:0:max_annotations}"; do annotate "$line"; done
+if [ "$count" -gt "$max_annotations" ]; then
+  annotate "$((count - max_annotations)) more failure lines are in the job summary."
+fi
+
+[ -n "${GITHUB_STEP_SUMMARY:-}" ] || exit 0
+# An indented code block shows its text as it is. No line in the text can end
+# the block.
+block() { sed 's/^/    /'; echo; }
+{
+  echo "### Test failures"
+  echo
+  printf '%s\n' "${lines[@]:0:max_summary_lines}" | block
+  if [ "$count" -gt "$max_summary_lines" ]; then
+    echo "… $((count - max_summary_lines)) more lines"
+    echo
+  fi
+  for i in ${tails[@]+"${tails[@]}"}; do
+    echo "The end of the log of shard ${labels[i]}:"
+    echo
+    tail -n "$tail_lines" "${logs[i]}" | plain | block
+  done
+} >>"$GITHUB_STEP_SUMMARY"
