@@ -189,7 +189,7 @@ enum DetailColumnShape: String, CaseIterable, Sendable, CustomTestStringConverti
   }
 }
 
-/// The view picker leaves the toolbar only where a session view shows its toolbar items.
+/// `isSession` holds only when the detail column itself shows a session view, not a docket, a followup, or a main view.
 @MainActor
 @Suite struct DetailColumnIsSession {
   @Test(arguments: DetailColumnShape.allCases, MainView.allCases)
