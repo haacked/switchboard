@@ -11,7 +11,7 @@ struct ConversationsSection: View {
 
   var body: some View {
     ConversationListSection(
-      title: "Conversations", sessions: model.managers, activeAccount: activeAccount,
+      title: "Conversations", sessions: model.sidebarConversations, activeAccount: activeAccount,
       newHelp: AppShortcut.newConversation.help("Start a Manager conversation"), newLabel: "New Manager conversation",
       removableSelection: removableSelection, archive: $model.showingArchive
     ) {
@@ -36,6 +36,8 @@ struct ConversationListSection: View {
   let removableSelection: Int?
   /// Whether the Archive group is open.
   @Binding var archive: Bool
+  /// The title of a conversation's row.
+  var rowTitle: (SessionSummary) -> String = \.name
   let new: () -> Void
 
   var body: some View {
@@ -65,7 +67,7 @@ struct ConversationListSection: View {
   }
 
   private func row(_ s: SessionSummary) -> some View {
-    ConversationRow(session: s, activeAccount: activeAccount, hoverCard: model.hoverCard)
+    ConversationRow(session: s, title: rowTitle(s), activeAccount: activeAccount, hoverCard: model.hoverCard)
       .clickAnchor(s.id)
       .tag(s.id)
       .contextMenu {
@@ -81,10 +83,12 @@ struct ConversationListSection: View {
 struct ConversationRow: View {
   @EnvironmentObject var model: BoardModel
   let session: SessionSummary
+  var title: String? = nil
   let activeAccount: String
   var hoverCard: HoverCard<String>? = nil
 
   var body: some View {
+    let title = title ?? session.name
     let mark = ChatMark(session)
     let unread = (session.activity?.unread ?? 0) > 0
     let pinned = session.pinned == true
@@ -97,7 +101,7 @@ struct ConversationRow: View {
         .accessibilityHidden(true)
       VStack(alignment: .leading, spacing: 2) {
         HStack(spacing: 4) {
-          Text(session.name).fontWeight(unread ? .semibold : .medium).lineLimit(1)
+          Text(title).fontWeight(unread ? .semibold : .medium).lineLimit(1)
             .accessibilityValue(ChatButtonText.value(mark))
           Spacer(minLength: 4)
           if let shown = ConversationRow.trailingMark(mark) { ChatMarkView(mark: shown) }
@@ -111,7 +115,7 @@ struct ConversationRow: View {
           .buttonStyle(.borderless)
           .foregroundStyle(pinned ? .primary : .tertiary)
           .help(pinned ? "Unpin this conversation" : "Pin this conversation to the top")
-          .accessibilityLabel(pinned ? "Unpin \(session.name)" : "Pin \(session.name)")
+          .accessibilityLabel(pinned ? "Unpin \(title)" : "Pin \(title)")
         }
         if let preview = session.lastReply.flatMap(firstLine) {
           Text(verbatim: preview).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)

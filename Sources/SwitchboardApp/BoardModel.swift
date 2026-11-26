@@ -637,6 +637,11 @@ final class BoardModel: ObservableObject {
     sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
   }
 
+  /// The conversations that the sidebar's Conversations section lists, newest activity first.
+  var sidebarConversations: [SessionSummary] {
+    sessions.filter { $0.kind == .manager }.sorted(by: Manager.newestFirst)
+  }
+
   /// The Manager conversation that the toolbar's Manager icon names while one waits on the user.
   var waitingManager: SessionSummary? { managers.first { ChatMark($0).needsMeReason != nil } }
 
@@ -747,7 +752,7 @@ final class BoardModel: ObservableObject {
   /// still shows then. It is false when the filters or the search field hide
   /// every work session, because the sidebar then says so instead.
   var sidebarIsEmpty: Bool {
-    workBoard.isEmpty && managers.isEmpty && unreachable == nil && !filterHidesAllWork
+    workBoard.isEmpty && sidebarConversations.isEmpty && unreachable == nil && !filterHidesAllWork
   }
 
   /// The main view while no session is selected, else nil.

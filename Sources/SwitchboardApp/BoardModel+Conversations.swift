@@ -3,9 +3,9 @@ import SwitchboardCore
 
 /// The read state of group chats and Manager conversations.
 extension BoardModel {
-  /// The sidebar's Manager conversations: pinned, then active, then archived.
+  /// The sidebar's conversations: pinned, then active, then archived.
   var conversations: (pinned: [SessionSummary], active: [SessionSummary], archived: [SessionSummary]) {
-    Conversations.sidebar(managers)
+    Conversations.sidebar(sidebarConversations)
   }
 
   /// The conversations in the sidebar's order. The archived ones count only while the archive shows.
