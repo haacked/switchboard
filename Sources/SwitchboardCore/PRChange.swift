@@ -17,7 +17,7 @@ public struct PRRef: Hashable, Sendable {
 
 /// A report from a source of PR changes that a PR or a commit changed. A signal never changes what sbd knows about
 /// the PR. It only asks the poller to read the PR.
-public struct PRSignal: Sendable {
+public struct PRSignal: Equatable, Sendable {
   public enum Kind: String, Sendable {
     case head, checks, review, state, conflict, comment, queue, other
   }
@@ -144,11 +144,22 @@ public struct PRSources: Codable, Equatable, Sendable {
     public var lastSignalAt: Int64?
     /// The provider's own counts, such as subscriptions and open streams, by name.
     public var counts: [String: Int]
+    /// Whether the source runs in shadow mode, where its signals cause no read and its coverage changes no rate.
+    public var shadow: Bool
+    /// In shadow mode, the signals whose change a later poll showed.
+    public var matched: Int
+    /// In shadow mode, the signals whose change no poll showed within 10 minutes.
+    public var unmatched: Int
+    /// In shadow mode, the polls that showed a change of a PR that the source was live for, without a signal.
+    public var misses: Int
+    /// In shadow mode, the median time from a matched signal to the poll that showed its change, in ms.
+    public var medianLeadMs: Int64?
 
     public init(
       id: String, state: String, reason: String? = nil, retryAt: Int64? = nil, changedAt: Int64? = nil,
       wanted: Int = 0, covered: Int = 0, signals: Int = 0, reads: Int = 0, lastSignalAt: Int64? = nil,
-      counts: [String: Int] = [:]
+      counts: [String: Int] = [:], shadow: Bool = false, matched: Int = 0, unmatched: Int = 0, misses: Int = 0,
+      medianLeadMs: Int64? = nil
     ) {
       self.id = id
       self.state = state
@@ -161,17 +172,30 @@ public struct PRSources: Codable, Equatable, Sendable {
       self.reads = reads
       self.lastSignalAt = lastSignalAt
       self.counts = counts
+      self.shadow = shadow
+      self.matched = matched
+      self.unmatched = unmatched
+      self.misses = misses
+      self.medianLeadMs = medianLeadMs
     }
   }
 
   public var providers: [Source]
+  /// The PR reads at the pending rate since sbd started, counted while a source runs.
+  public var pendingReads: Int
+  /// The pending reads of PRs that only await a review, which a source that reports reviews could slow.
+  public var reviewOnlyReads: Int
 
-  public init(providers: [Source]) { self.providers = providers }
-
-  /// The lines of `sb sources`: one line for each source, or one line that says sbd polls every PR.
+  public init(providers: [Source], pendingReads: Int = 0, reviewOnlyReads: Int = 0) {
+    self.providers = providers
+    self.pendingReads = pendingReads
+    self.reviewOnlyReads = reviewOnlyReads
+  }
+  /// The lines of `sb sources`: one line for each source, or one line that says sbd polls every PR. A source in
+  /// shadow mode adds a line of what it measured, and the pending reads add a line once there are some.
   public func lines(now: Int64) -> [String] {
     guard !providers.isEmpty else { return ["no sources of PR changes: sbd polls GitHub for every PR"] }
-    return providers.map { s in
+    var lines = providers.flatMap { s -> [String] in
       var parts = ["\(s.id): \(s.state)"]
       if let reason = s.reason { parts[0] += " (\(reason))" }
       if let at = s.retryAt { parts.append("retries \(fromNow(at, now: now))") }
@@ -180,7 +204,12 @@ public struct PRSources: Codable, Equatable, Sendable {
       parts.append("\(s.signals) signals, \(s.reads) reads")
       if let at = s.lastSignalAt { parts.append("last signal \(ago(at, now: now)) ago") }
       parts += s.counts.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }
-      return parts.joined(separator: ", ")
+      guard s.shadow else { return [parts.joined(separator: ", ")] }
+      var shadow = "  shadow: \(s.matched) matched, \(s.unmatched) unmatched, \(s.misses) misses"
+      if let lead = s.medianLeadMs { shadow += ", median lead \(lead / 1000) s" }
+      return [parts.joined(separator: ", "), shadow]
     }
+    if pendingReads > 0 { lines.append("pending reads: \(reviewOnlyReads) of \(pendingReads) only await review") }
+    return lines
   }
 }

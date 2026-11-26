@@ -19,7 +19,9 @@ extension GitHubPoller {
     var candidates: [PRInterest] = []
     for (id, read) in prs {
       let ref = PRRef(repo: read.pr.repo, number: read.pr.number)
-      known[id] = PRChangeHub.KnownPR(ref: ref, headSha: read.pr.headSha, polled: read.polled)
+      known[id] = PRChangeHub.KnownPR(
+        ref: ref, headSha: read.pr.headSha, polled: read.polled,
+        snapshot: hub.shadow ? ShadowTally.Snapshot(read.pr) : nil)
       candidates.append(
         PRInterest(
           ref: ref, open: read.pr.state == .open, waitedAt: waited.created[id],

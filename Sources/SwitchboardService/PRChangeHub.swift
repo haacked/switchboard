@@ -11,6 +11,9 @@ final class PRChangeHub {
   private let byPreference: [any PRChangeProvider]
   let queue: DispatchQueue
   weak var reader: (any PRReader)?
+  /// In shadow mode a signal or a coverage change never asks for a read and never changes a poll rate. The hub only
+  /// counts what the providers report and measures it against the poller's reads.
+  let shadow: Bool
   /// The clock in ms. Tests replace it.
   var now: () -> Int64 = nowMs
 
@@ -35,6 +38,8 @@ final class PRChangeHub {
     var headSha: String
     /// When the poller last read the PR, in ms.
     var polled: Int64
+    /// The fields of the read that shadow mode compares between reads.
+    var snapshot: ShadowTally.Snapshot? = nil
   }
 
   /// The PRs of the last poll, by node id.
@@ -73,8 +78,13 @@ final class PRChangeHub {
   }
 
   private var counts: [String: Counts] = [:]
+  /// What shadow mode measured for each provider, by provider id.
+  private var tallies: [String: ShadowTally] = [:]
+  private var pendingReads = 0
+  private var reviewOnlyReads = 0
 
-  init(providers: [any PRChangeProvider], queue: DispatchQueue) {
+  init(providers: [any PRChangeProvider], queue: DispatchQueue, shadow: Bool = false) {
+    self.shadow = shadow
     self.providers = providers
     byPreference = providers.enumerated().sorted { a, b in
       let (ka, kb) = (a.element.signals.rawValue.nonzeroBitCount, b.element.signals.rawValue.nonzeroBitCount)
@@ -116,10 +126,11 @@ final class PRChangeHub {
   /// that hasn't happened.
   func cycleEnded(known: [String: KnownPR], interest: [PRRef]) {
     dispatchPrecondition(condition: .onQueue(queue))
+    if shadow { tally(known) }
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
-    settleNeededReads()
+    if !shadow { settleNeededReads() }
     signalReads = signalReads.filter { known[$0.key] != nil }
     for (provider, scopes) in coverage {
       coverage[provider] = scopes.filter { scope, _ in
@@ -132,12 +143,42 @@ final class PRChangeHub {
       counts[p.id, default: Counts()].wanted = wanted.count
       p.setInterest(wanted)
     }
-    requestCatchUps(fromPoll: true)
+    if !shadow { requestCatchUps(fromPoll: true) }
+  }
+
+  /// Adds the reads of PRs that polled at the pending rate in one poll, and how many of them only awaited a review.
+  func countPendingReads(total: Int, reviewOnly: Int) {
+    dispatchPrecondition(condition: .onQueue(queue))
+    pendingReads += total
+    reviewOnlyReads += reviewOnly
+  }
+
+  /// Gives each provider's tally the PRs that this poll read, with their last read, and logs each miss.
+  private func tally(_ reads: [String: KnownPR]) {
+    let now = now()
+    let reads = reads.sorted { $0.key < $1.key }
+    for p in providers {
+      var t = tallies.removeValue(forKey: p.id) ?? ShadowTally()
+      for (id, pr) in reads {
+        guard let snapshot = pr.snapshot, let old = known[id], pr.polled > old.polled else { continue }
+        let previous = old.snapshot.map { (snapshot: $0, polled: old.polled) }
+        let missed = t.read(
+          id, previous: previous, now: snapshot, polled: pr.polled, liveSince: live(p.id, for: pr.ref)?.since)
+        if !missed.isEmpty {
+          logLine(
+            "github: \(p.id) sent no signal for \(pr.ref.repo)#\(pr.ref.number) before a poll showed its "
+              + missed.joined(separator: ", ") + " change")
+        }
+      }
+      t.prune(now: now)
+      tallies[p.id] = t
+    }
   }
 
   /// The signals of the provider that covers each covered PR, by node id. The poll rates read it.
   func coveredSignals() -> [String: ChangeSignals] {
     dispatchPrecondition(condition: .onQueue(queue))
+    guard !shadow else { return [:] }
     return known.compactMapValues { coveringProvider(of: $0)?.signals }
   }
 
@@ -149,10 +190,12 @@ final class PRChangeHub {
       providers: providers.map { p in
         let c = counts[p.id] ?? Counts()
         let status = p.status
+        let t = tallies[p.id] ?? ShadowTally()
         var source = PRSources.Source(
           id: p.id, state: "live", changedAt: c.changedAt, wanted: c.wanted,
           covered: covering.filter { $0 == p.id }.count, signals: c.signals, reads: c.reads,
-          lastSignalAt: c.lastSignalAt, counts: status.counts)
+          lastSignalAt: c.lastSignalAt, counts: status.counts, shadow: shadow, matched: t.matched,
+          unmatched: t.unmatched, misses: t.misses, medianLeadMs: t.medianLeadMs)
         switch status.availability {
         case .available: break
         case .unavailable(let reason, let retryAt):
@@ -160,7 +203,7 @@ final class PRChangeHub {
         case .off: source.state = "off"
         }
         return source
-      })
+      }, pendingReads: pendingReads, reviewOnlyReads: reviewOnlyReads)
   }
 
   // MARK: The providers' side
@@ -172,7 +215,13 @@ final class PRChangeHub {
     let key = "\(provider) \(s.id)"
     if let at = seen[key], now - at < Self.dedupeMs { return }
     seen[key] = now
-    for id in targets(of: s.target).sorted() { requestSignalRead(id, s, provider: provider, now: now) }
+    for id in targets(of: s.target).sorted() {
+      if shadow {
+        tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: now)
+      } else {
+        requestSignalRead(id, s, provider: provider, now: now)
+      }
+    }
   }
 
   /// The node ids of the PRs that the poller tracks and that the target names.
@@ -237,7 +286,7 @@ final class PRChangeHub {
     switch change {
     case .live(let scope, let since, let gap):
       set(scope, Coverage(since: since, gap: gap, order: reports), for: provider)
-      if gap {
+      if gap && !shadow {
         counts[provider, default: Counts()].reads += requestCatchUps(fromPoll: false, in: scope, of: provider)
       }
     case .down(let scope, _):

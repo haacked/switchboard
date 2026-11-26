@@ -67,10 +67,10 @@ private struct Seen {
 }
 
 extension FakeGitHub {
-  fileprivate var mark: (Int, Int) { (requests.count, restRequests.count) }
+  fileprivate var mark: (Int, Int) { (requests.count, restRequestsWithoutEvents.count) }
 
   fileprivate func seen(since mark: (Int, Int)) -> Seen {
-    Seen(graphQL: Array(requests.dropFirst(mark.0)), rest: restRequests.count - mark.1)
+    Seen(graphQL: Array(requests.dropFirst(mark.0)), rest: restRequestsWithoutEvents.count - mark.1)
   }
 
   fileprivate func nodeId(_ number: Int) throws -> String { try #require(pr(number)["id"]?.string) }
@@ -172,10 +172,16 @@ extension FakeGitHub {
     #expect(abs(after - before - Double(seen.split)) < 1e-9, "the shares grew by \(after - before), not \(seen.split)")
   }
 
+  /// A sbd without the Event Streams provider. The totals count the provider's requests, which it sends on its own
+  /// schedule, so a test that compares totals turns it off.
+  private func withoutEvents(_ github: FakeGitHub) throws -> Instance {
+    try Instance.withGitHub(github, events: "off")
+  }
+
   @Test(arguments: [StatsPR.haacked, StatsPR.charts])
   func theTotalsCountEveryRequestGitHubSaw(_ w: StatsPR) throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
+    let sbd = try withoutEvents(github)
     _ = try sbd.session(in: w.repo, branch: w.branch)
     let before = try sbd.pollStats()
     let mark = github.mark
@@ -188,7 +194,7 @@ extension FakeGitHub {
 
   @Test func theTotalsMatchWhatEachPollReported() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
+    let sbd = try withoutEvents(github)
     _ = try sbd.session(in: StatsPR.charts.repo, branch: StatsPR.charts.branch)
     let before = try sbd.pollStats()
 
@@ -275,7 +281,7 @@ extension FakeGitHub {
 
   @Test func statsDoNotChangeTheCounts() throws {
     let github = try FakeGitHub()
-    let sbd = try Instance.withGitHub(github)
+    let sbd = try withoutEvents(github)
     _ = try sbd.session(in: StatsPR.haacked.repo, branch: StatsPR.haacked.branch)
     try sbd.poll(all: true)
 

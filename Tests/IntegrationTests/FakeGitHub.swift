@@ -8,7 +8,9 @@ import SwitchboardCore
 /// sets, and its reference queries from the items that a test puts. It
 /// answers a REST GET from the routes that a test sets, and 404 for any other
 /// path. It also serves issues and contents files that GET, PATCH, and PUT
-/// change, as GitHub does. It records each request.
+/// change, as GitHub does. It serves the Event Streams API under
+/// /event-subscriptions, which answers 403 until a test sets
+/// `eventsEnabled`. It records each request.
 final class FakeGitHub {
   struct Request {
     /// lookup, status, base, bodies, codeowners, files, approvals, actions,
@@ -37,6 +39,7 @@ final class FakeGitHub {
     var query: [String: String]
     var ifNoneMatch: String?
     var body: String
+    var authorization: String?
   }
 
   /// An issue that a PATCH of its body changes. Each change moves
@@ -124,6 +127,16 @@ final class FakeGitHub {
   private var changedFiles: [Int: (paths: [String], totalCount: Int?)] = [:]
   /// What to run after the next files query.
   private var afterFiles: (() -> Void)?
+  private var eventsOn = false
+  private var limit = 100
+  private var eventSubscriptions: [EventSubscription] = []
+  /// The answer to the next request to an event-subscriptions path.
+  private var failingEventRequest: Reply?
+  /// Guards `streams` and `keepAlives`, and serializes every write to a stream so that two writers' chunks never
+  /// interleave. A holder of `lock` may take `streamLock`. A holder of `streamLock` never takes `lock`.
+  private let streamLock = NSLock()
+  private var streams: [EventStream] = []
+  private var keepAlives = true
 
   /// An issue that the issues query reads.
   struct FakeIssue {
@@ -282,6 +295,7 @@ final class FakeGitHub {
     for node in try FakeGitHub.recorded("github-bodies.json") {
       if let id = node["id"]?.string { bodies[id] = node }
     }
+    _ = FakeGitHub.ignoreSIGPIPE
     // The thread holds the fake weakly, so deinit closes the socket, which
     // ends the thread's accept.
     Thread.detachNewThread { [weak self] in
@@ -291,13 +305,28 @@ final class FakeGitHub {
           if errno == EINTR { continue }
           return
         }
-        self?.handle(client)
-        close(client)
+        var one: Int32 = 1
+        setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+        if self?.handle(client) != true { close(client) }
+      }
+    }
+    Thread.detachNewThread { [weak self] in
+      while true {
+        usleep(500_000)
+        guard let self else { return }
+        self.keepStreamsAlive()
       }
     }
   }
 
-  deinit { close(fd) }
+  deinit {
+    close(fd)
+    streamLock.withLock { for stream in streams { close(stream.fd) } }
+  }
+
+  /// A write to a client that closed its stream fails with EPIPE instead of ending the test process. macOS refuses
+  /// SO_NOSIGPIPE on a socket whose peer has already closed.
+  private static let ignoreSIGPIPE: Void = { signal(SIGPIPE, SIG_IGN) }()
 
   var url: String { "http://127.0.0.1:\(port)" }
 
@@ -308,6 +337,13 @@ final class FakeGitHub {
 
   /// The REST requests to `path`, whatever their query.
   func restRequests(to path: String) -> [RESTRequest] { restRequests.filter { $0.path == path } }
+
+  /// The requests to event-subscriptions paths.
+  var eventRequests: [RESTRequest] { restRequests.filter { FakeGitHub.isEventsPath($0.path) } }
+
+  /// The REST requests to other paths. sbd's Event Streams provider sends its requests on its own schedule, so a
+  /// test that counts the poller's REST requests counts these.
+  var restRequestsWithoutEvents: [RESTRequest] { restRequests.filter { !FakeGitHub.isEventsPath($0.path) } }
 
   /// Whether a status request after the first `since` GraphQL requests read the PR with this node id.
   func readStatus(of id: String, since: Int = 0) -> Bool {
@@ -696,7 +732,8 @@ final class FakeGitHub {
 
   // MARK: HTTP
 
-  private func handle(_ client: Int32) {
+  /// Answers one request on `client`. Returns true when `client` stays open as an event stream.
+  private func handle(_ client: Int32) -> Bool {
     var data = Data()
     var buffer = [UInt8](repeating: 0, count: 65536)
     let separator = Data("\r\n\r\n".utf8)
@@ -706,7 +743,7 @@ final class FakeGitHub {
     var length = 0
     while true {
       let n = recv(client, &buffer, buffer.count, 0)
-      if n <= 0 { return }
+      if n <= 0 { return false }
       data.append(buffer, count: n)
       if headerEnd == nil, let range = data.range(of: separator) {
         headerEnd = range
@@ -725,8 +762,13 @@ final class FakeGitHub {
     let method = words.first ?? ""
     let target = words.count > 1 ? words[1] : ""
     let body = String(decoding: data[headerEnd!.upperBound...], as: UTF8.self)
+    let (path, query) = FakeGitHub.split(target)
     let reply: Reply
-    if method == "POST" {
+    if FakeGitHub.isEventsPath(path) {
+      guard let events = answerEvents(client, method: method, path: path, query: query, headers: headers, body: body)
+      else { return true }
+      reply = events
+    } else if method == "POST", path == "graphql" {
       reply = answer(JSON.parse(body) ?? [:], authorization: headers["authorization"])
     } else {
       reply = answerREST(method: method, target: target, headers: headers, body: body)
@@ -738,6 +780,7 @@ final class FakeGitHub {
     head += "Content-Length: \(reply.body.utf8.count)\r\nConnection: close\r\n"
     for (k, v) in reply.headers { head += "\(k): \(v)\r\n" }
     try? UnixSocket.write(client, Data((head + "\r\n" + reply.body).utf8))
+    return false
   }
 
   /// GitHub sends this Cache-Control with an authenticated REST answer.
@@ -749,7 +792,10 @@ final class FakeGitHub {
     let (bare, query) = FakeGitHub.split(target)
     let ifNoneMatch = headers["if-none-match"]
     let (reply, after): (Reply, (() -> Void)?) = lock.withLock {
-      restLog.append(RESTRequest(method: method, path: bare, query: query, ifNoneMatch: ifNoneMatch, body: body))
+      restLog.append(
+        RESTRequest(
+          method: method, path: bare, query: query, ifNoneMatch: ifNoneMatch, body: body,
+          authorization: headers["authorization"]))
       let reply: Reply
       if method == "GET", let status = failingGETs.removeValue(forKey: bare) {
         reply = Reply(status: status, headers: [:], body: #"{"message":"Server Error"}"#)
@@ -1046,5 +1092,332 @@ final class FakeGitHub {
         "nodes": .array(changed.paths[start..<end].map { ["path": .string($0)] }),
       ],
     ]
+  }
+
+  // MARK: Event Streams
+
+  /// The five event types of a PR subscription, sorted, as GitHub lists them.
+  static let eventTypes = [checkSuiteEvent, headEvent, conflictEvent, reviewEvent, stateEvent]
+  static let checkSuiteEvent = "com.github.pull_request.check_suite.status.changed.v1"
+  static let headEvent = "com.github.pull_request.head.changed.v1"
+  static let conflictEvent = "com.github.pull_request.merge_conflict.v1"
+  static let reviewEvent = "com.github.pull_request.review.submitted.v1"
+  static let stateEvent = "com.github.pull_request.state.changed.v1"
+
+  /// GitHub's message for an account without Event Streams.
+  static let eventsDisabledMessage = "Event subscriptions are not enabled for this account."
+
+  static let eventsDisabled = Reply(
+    status: 403, headers: [:],
+    body: JSON.object([
+      "message": .string(eventsDisabledMessage), "documentation_url": "https://docs.github.com/rest", "status": "403",
+    ]).text)
+
+  static let subscriptionLimitExceeded = Reply(
+    status: 422, headers: [:],
+    body:
+      #"{"message":"Subscription limit exceeded.","documentation_url":"https://docs.github.com/rest","status":"422"}"#)
+
+  /// A subscription of the Event Streams API.
+  struct EventSubscription {
+    var id: String
+    /// The owner/name of the fake's PR.
+    var repo: String
+    var number: Int
+    /// Sorted.
+    var eventTypes: [String]
+    /// The `resource_url` of the request that created it.
+    var resourceURL: String
+    var createdAt: Date
+  }
+
+  /// A client's open stream of one subscription's events.
+  private struct EventStream {
+    var fd: Int32
+    var subscription: String
+    var number: Int
+  }
+
+  static func isEventsPath(_ path: String) -> Bool {
+    path == "event-subscriptions" || path.hasPrefix("event-subscriptions/")
+  }
+
+  /// Whether the account has Event Streams. Without it, every request to an event-subscriptions path gets GitHub's
+  /// 403.
+  var eventsEnabled: Bool {
+    get { lock.withLock { eventsOn } }
+    set { lock.withLock { eventsOn = newValue } }
+  }
+
+  /// How many subscriptions the account may hold. A create past it gets GitHub's 422.
+  var subscriptionLimit: Int {
+    get { lock.withLock { limit } }
+    set { lock.withLock { limit = newValue } }
+  }
+
+  var subscriptions: [EventSubscription] { lock.withLock { eventSubscriptions } }
+
+  /// The open streams. A stream whose client closed its end doesn't count.
+  var openStreams: Int {
+    streamLock.withLock {
+      pruneStreams()
+      return streams.count
+    }
+  }
+
+  /// The open streams of PR `number`'s subscriptions.
+  func openStreams(_ number: Int) -> Int {
+    streamLock.withLock {
+      pruneStreams()
+      return streams.filter { $0.number == number }.count
+    }
+  }
+
+  /// Writes one event of `type` to each open stream of PR `number`'s subscriptions, in the shape that GitHub
+  /// sends. A check suite event carries `conclusion`, which is success by default.
+  func emit(_ number: Int, type: String, conclusion: String? = nil) {
+    let id = UUID().uuidString.lowercased()
+    let repository = "https://api.github.com/repositories/\(number)"
+    let suite = type == FakeGitHub.checkSuiteEvent
+    var data: [String: JSON] = [:]
+    switch type {
+    case FakeGitHub.checkSuiteEvent:
+      data["api_url"] = .string("\(repository)/check-suites/\(Int.random(in: 100_000_000...999_999_999))")
+    case FakeGitHub.reviewEvent:
+      data["api_url"] = .string("\(repository)/pulls/\(number)/reviews/\(Int.random(in: 100_000_000...999_999_999))")
+    default:
+      data["api_url"] = .string("\(repository)/pulls/\(number)")
+    }
+    if let conclusion = conclusion ?? (suite ? "success" : nil) { data["conclusion"] = .string(conclusion) }
+    let schema = suite ? "pull-request-check-suite-status-changed" : "thin-resource-change"
+    let event: JSON = [
+      "specversion": "1.0", "id": .string(id), "source": .string(repository), "type": .string(type),
+      "subject": .string("pulls/\(number)"), "datacontenttype": "application/json",
+      "dataschema": .string("https://api.github.com/schemas/events/\(schema)/1.0.0/schema.json"),
+      "time": .string(FakeGitHub.eventTime(Date())), "data": .object(data),
+    ]
+    let text = "id: \(id)\nevent: \(type)\ndata: \(event.text)\n\n"
+    streamLock.withLock { writeStreams(FakeGitHub.chunk(text)) { $0.number == number } }
+  }
+
+  /// Closes every open stream without a github.stream.end, as a network failure does.
+  func dropStreams() {
+    streamLock.withLock {
+      for stream in streams {
+        shutdown(stream.fd, SHUT_RDWR)
+        close(stream.fd)
+      }
+      streams = []
+    }
+  }
+
+  /// Sends github.stream.end with `outcome` to the open streams of PR `number`, or to every open stream, and
+  /// closes them. `subscription_ended` also deletes their subscriptions.
+  func endStream(_ number: Int? = nil, outcome: String) {
+    let matches = { (stream: EventStream) in number == nil || stream.number == number }
+    lock.withLock {
+      streamLock.withLock {
+        if outcome == "subscription_ended" {
+          let ended = Set(streams.filter(matches).map(\.subscription))
+          eventSubscriptions.removeAll { ended.contains($0.id) || $0.number == number }
+        }
+        endStreams(where: matches, outcome: outcome, reason: nil)
+      }
+    }
+  }
+
+  /// Stops the keep-alive comments, so an open stream sends no bytes until an event.
+  func stopKeepAlives() {
+    streamLock.withLock { keepAlives = false }
+  }
+
+  /// Deletes PR `number`'s subscriptions, as their 24 hours running out does. Their open streams get
+  /// github.stream.end with `subscription_ended` and the reason `expired`.
+  func expire(_ number: Int) {
+    lock.withLock {
+      let ids = Set(eventSubscriptions.filter { $0.number == number }.map(\.id))
+      eventSubscriptions.removeAll { ids.contains($0.id) }
+      streamLock.withLock {
+        endStreams(where: { ids.contains($0.subscription) }, outcome: "subscription_ended", reason: "expired")
+      }
+    }
+  }
+
+  /// Answers the next request to any event-subscriptions path with this status and body.
+  func failNextEventRequest(_ status: Int, body: String) {
+    lock.withLock { failingEventRequest = Reply(status: status, headers: [:], body: body) }
+  }
+
+  /// The answer to a request to an event-subscriptions path, or nil when the request opened a stream that keeps
+  /// `client`.
+  private func answerEvents(
+    _ client: Int32, method: String, path: String, query: [String: String], headers: [String: String], body: String
+  ) -> Reply? {
+    lock.withLock { () -> Reply? in
+      restLog.append(
+        RESTRequest(
+          method: method, path: path, query: query, ifNoneMatch: headers["if-none-match"], body: body,
+          authorization: headers["authorization"]))
+      if let reply = failingEventRequest.take() { return reply }
+      guard eventsOn else { return FakeGitHub.eventsDisabled }
+      let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+      let found = parts.count > 1 ? eventSubscriptions.first(where: { $0.id == parts[1] }) : nil
+      switch (method, parts.count) {
+      case ("GET", 1):
+        let list: JSON = ["subscriptions": .array(eventSubscriptions.map(subscriptionJSON))]
+        return Reply(status: 200, headers: [:], body: list.text)
+      case ("POST", 1):
+        return createSubscription(body)
+      case ("GET", 2):
+        return found.map { Reply(status: 200, headers: [:], body: subscriptionJSON($0).text) } ?? FakeGitHub.notFound
+      case ("DELETE", 2):
+        guard let found else { return FakeGitHub.notFound }
+        eventSubscriptions.removeAll { $0.id == found.id }
+        streamLock.withLock {
+          endStreams(where: { $0.subscription == found.id }, outcome: "subscription_ended", reason: "deleted")
+        }
+        return Reply(status: 204, headers: [:], body: "")
+      case ("GET", 3) where parts[2] == "events":
+        guard let found else { return FakeGitHub.notFound }
+        openStream(client, found)
+        return nil
+      default:
+        return FakeGitHub.notFound
+      }
+    }
+  }
+
+  /// The answer to POST /event-subscriptions. The caller holds the lock.
+  private func createSubscription(_ body: String) -> Reply {
+    let request = JSON.parse(body) ?? [:]
+    let resource = request["resource_url"]?.string ?? ""
+    let types = request["event_types"]?.array?.compactMap(\.string) ?? []
+    guard let target = FakeGitHub.pullRequest(resource) else { return FakeGitHub.validationFailed("resource_url") }
+    let unsupported = types.filter { !FakeGitHub.eventTypes.contains($0) }
+    guard !types.isEmpty, unsupported.isEmpty else {
+      return FakeGitHub.validationFailed(
+        "event_types", message: "Unsupported event types: \(unsupported.joined(separator: ", "))")
+    }
+    let repo = target.repo.lowercased()
+    guard
+      let pr = prs.values.first(where: {
+        ($0["repository"]?["nameWithOwner"]?.string ?? "").lowercased() == repo && $0["number"]?.int == target.number
+      })
+    else { return FakeGitHub.notFound }
+    let sorted = Set(types).sorted()
+    let same = eventSubscriptions.first {
+      $0.repo.lowercased() == repo && $0.number == target.number && $0.eventTypes == sorted
+    }
+    if let same { return Reply(status: 200, headers: [:], body: subscriptionJSON(same).text) }
+    guard eventSubscriptions.count < limit else { return FakeGitHub.subscriptionLimitExceeded }
+    let id = "sub_" + (0..<32).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }.joined()
+    let subscription = EventSubscription(
+      id: id, repo: pr["repository"]?["nameWithOwner"]?.string ?? target.repo, number: target.number,
+      eventTypes: sorted, resourceURL: resource, createdAt: Date())
+    eventSubscriptions.append(subscription)
+    return Reply(status: 201, headers: [:], body: subscriptionJSON(subscription).text)
+  }
+
+  /// A subscription as GitHub answers it, with its URLs on the fake.
+  private func subscriptionJSON(_ s: EventSubscription) -> JSON {
+    let api = "\(url)/event-subscriptions/\(s.id)"
+    return [
+      "created_at": .string(FakeGitHub.eventTime(s.createdAt)), "event_types": .array(s.eventTypes.map(JSON.string)),
+      "events_url": .string("\(api)/events"),
+      "expires_at": .string(FakeGitHub.eventTime(s.createdAt.addingTimeInterval(86_400))), "id": .string(s.id),
+      "resource_url": .string(s.resourceURL), "url": .string(api),
+    ]
+  }
+
+  /// The owner/name and number of a PR's web URL, https://github.com/<owner>/<name>/pull/<number>.
+  static func pullRequest(_ url: String) -> (repo: String, number: Int)? {
+    let prefix = "https://github.com/"
+    guard url.hasPrefix(prefix) else { return nil }
+    let parts = url.dropFirst(prefix.count).split(separator: "/", omittingEmptySubsequences: false)
+    guard parts.count == 4, !parts[0].isEmpty, !parts[1].isEmpty, parts[2] == "pull", let number = Int(parts[3]),
+      number > 0
+    else { return nil }
+    return ("\(parts[0])/\(parts[1])", number)
+  }
+
+  private static func validationFailed(_ field: String, message: String? = nil) -> Reply {
+    var error: [String: JSON] = ["resource": "EventSubscription", "field": .string(field), "code": "invalid"]
+    if let message { error["message"] = .string(message) }
+    let body: JSON = [
+      "message": "Validation Failed", "errors": [.object(error)], "documentation_url": "https://docs.github.com/rest",
+      "status": "422",
+    ]
+    return Reply(status: 422, headers: [:], body: body.text)
+  }
+
+  /// A time as GitHub writes it in Event Streams, with nine digits of fraction.
+  static func eventTime(_ date: Date) -> String {
+    let seconds = date.timeIntervalSince1970.rounded(.down)
+    let whole = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: seconds))
+    let nanos = Int((date.timeIntervalSince1970 - seconds) * 1_000_000_000)
+    return String(whole.dropLast()) + "." + String(format: "%09d", nanos) + "Z"
+  }
+
+  /// One chunk of a chunked answer. URLSession hands each chunk to sbd when it arrives.
+  private static func chunk(_ text: String) -> Data {
+    Data((String(text.utf8.count, radix: 16) + "\r\n" + text + "\r\n").utf8)
+  }
+
+  /// Answers a stream request with the stream's headers and keeps `client` open. The stream has no
+  /// Content-Length. The caller holds the lock.
+  private func openStream(_ client: Int32, _ subscription: EventSubscription) {
+    let head =
+      "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n"
+      + "X-Content-Type-Options: nosniff\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n"
+    streamLock.withLock {
+      do {
+        try UnixSocket.write(client, Data(head.utf8))
+        streams.append(EventStream(fd: client, subscription: subscription.id, number: subscription.number))
+      } catch {
+        close(client)
+      }
+    }
+  }
+
+  /// Writes `data` to each matching stream, and closes a stream whose write fails. The caller holds `streamLock`.
+  private func writeStreams(_ data: Data, where match: (EventStream) -> Bool) {
+    var open: [EventStream] = []
+    for stream in streams {
+      if match(stream), (try? UnixSocket.write(stream.fd, data)) == nil {
+        close(stream.fd)
+      } else {
+        open.append(stream)
+      }
+    }
+    streams = open
+  }
+
+  /// Sends github.stream.end to each matching stream, ends its chunked answer, and closes it. The caller holds
+  /// `streamLock`.
+  private func endStreams(where match: (EventStream) -> Bool, outcome: String, reason: String?) {
+    var data: [String: JSON] = ["outcome": .string(outcome)]
+    if let reason { data["reason"] = .string(reason) }
+    let end = FakeGitHub.chunk("event: github.stream.end\ndata: \(JSON.object(data).text)\n\n") + Data("0\r\n\r\n".utf8)
+    for stream in streams where match(stream) {
+      try? UnixSocket.write(stream.fd, end)
+      close(stream.fd)
+    }
+    streams.removeAll(where: match)
+  }
+
+  /// Forgets the streams whose client closed its end. The caller holds `streamLock`.
+  private func pruneStreams() {
+    streams.removeAll { stream in
+      guard UnixSocket.peerClosed(stream.fd) else { return false }
+      close(stream.fd)
+      return true
+    }
+  }
+
+  private func keepStreamsAlive() {
+    streamLock.withLock {
+      pruneStreams()
+      if keepAlives { writeStreams(FakeGitHub.chunk(": keep-alive\n\n")) { _ in true } }
+    }
   }
 }

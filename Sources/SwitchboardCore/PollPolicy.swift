@@ -74,6 +74,14 @@ public struct ReadCandidate: Sendable {
 }
 
 extension GitHub {
+  /// Whether an open PR polls at the pending rate only because it awaits a review: no check runs, GitHub knows
+  /// whether it merges, the changes that its waits need are reviews and state at most, and it awaits a review or a
+  /// wait needs it. A source that reports reviews and state could slow these reads. False before the PR's first read.
+  public static func onlyAwaitsReview(_ pr: PullRequest?, needs: ChangeSignals) -> Bool {
+    guard let pr, pr.state == .open, !pr.isPending, needs.isSubset(of: [.reviews, .state]) else { return false }
+    return pr.awaitsReview || !needs.isEmpty
+  }
+
   /// Why a poll at `now` reads each due PR, by id. A PR that isn't due is left out. Each PR's intervals come from
   /// `policy`.
   public static func dueReads(_ candidates: [String: ReadCandidate], all: Bool, now: Int64, policy: PollPolicy)

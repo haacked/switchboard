@@ -81,22 +81,55 @@ final class GitHubClient {
     status: Int, headers: [String: String], body: Data, json: JSON?
   ) {
     let graphQL = request.url?.lastPathComponent == "graphql"
-    if http.withLock({ graphQL ? $0.graphQLPausedUntil : $0.restPausedUntil }) > nowMs() {
-      throw APIError("paused after a GitHub \(graphQL ? "GraphQL" : "core") rate limit")
-    }
     func attempt() throws -> (Int, [String: String], Data) {
-      var req = request
-      req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
+      let req = try authorized(request, graphQL: graphQL)
       stats.requests += 1
-      usage.withLock { $0.requests += 1 }
       return try transport(req)
     }
     var (status, headers, body) = try attempt()
     if status == 401 {
-      http.withLock { $0.token = nil }
+      dropToken()
       (status, headers, body) = try attempt()
     }
     let json = JSON.parse(String(decoding: body, as: UTF8.self))
+    if pauses(after: status, headers: headers, json: json, graphQL: graphQL) {
+      throw APIError("GitHub rate limit: \(GitHub.message(json))")
+    }
+    return (status, headers, body, json)
+  }
+
+  /// A GET of an Event Streams stream, with the token. A stream answers as it goes, so `send` can't run it: the
+  /// caller opens it and passes a failed answer to `streamFailed`. It throws while the REST quota is paused.
+  func streamRequest(_ path: String, idleTimeout: TimeInterval) throws -> URLRequest {
+    var req = try apiRequest(path)
+    req.timeoutInterval = idleTimeout
+    req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+    return try authorized(req, graphQL: false)
+  }
+
+  /// The request with the token, counted in the usage. It throws while the request's quota is paused.
+  private func authorized(_ request: URLRequest, graphQL: Bool) throws -> URLRequest {
+    if http.withLock({ graphQL ? $0.graphQLPausedUntil : $0.restPausedUntil }) > nowMs() {
+      throw APIError("paused after a GitHub \(graphQL ? "GraphQL" : "core") rate limit")
+    }
+    var req = request
+    req.setValue("bearer \(try currentToken())", forHTTPHeaderField: "Authorization")
+    usage.withLock { $0.requests += 1 }
+    return req
+  }
+
+  /// Takes a stream's answer that isn't 200. A 401 drops the token, so the next request gets a new one from gh. A
+  /// rate limit pauses the REST quota. Returns whether the answer was a rate limit.
+  func streamFailed(status: Int, headers: [String: String], json: JSON?) -> Bool {
+    if status == 401 { dropToken() }
+    return pauses(after: status, headers: headers, json: json, graphQL: false)
+  }
+
+  private func dropToken() { http.withLock { $0.token = nil } }
+
+  /// Pauses the requests to the answer's quota for as long as `GitHub.rateLimit` says, and returns whether the
+  /// answer was a rate limit.
+  private func pauses(after status: Int, headers: [String: String], json: JSON?, graphQL: Bool) -> Bool {
     let limit = GitHub.rateLimit(status: status, headers: headers, response: json, now: Date().timeIntervalSince1970)
     if let pause = limit.pause {
       let until = nowMs() + Int64(pause * 1000)
@@ -109,8 +142,7 @@ final class GitHubClient {
         }
       }
     }
-    if limit.limited { throw APIError("GitHub rate limit: \(GitHub.message(json))") }
-    return (status, headers, body, json)
+    return limit.limited
   }
 
   private func currentToken() throws -> String {
