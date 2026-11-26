@@ -611,6 +611,48 @@ private func groupedModel(_ list: [SessionSummary]) -> BoardModel {
     #expect(Array(readIDs(sent).dropFirst(first)) == ["z2"])
   }
 
+  /// Reopening ⌘K while the first open still reads starts no second read of the same conversations.
+  @Test func anOpenDuringAReadWaitsForItInsteadOfReadingAgain() async throws {
+    let model = appliedModel([
+      conversation("z1", lastActivity: 2, archived: true), conversation("z2", lastActivity: 3, archived: true),
+    ])
+    let release = DispatchSemaphore(value: 0)
+    let sent = SentRequests()
+    let held = Counter()
+    let log = try JSONCoding.convert([ChatMessage(role: .user, text: "kafka")], to: JSON.self)
+    model.send = { op, args in
+      guard op == "chat-log" else { return .null }
+      sent.append(op, args)
+      held.increment()
+      release.wait()
+      return log
+    }
+    let first = Task { await model.archivedTranscripts(for: model.board) }
+    await settle { held.value > 0 }
+    let second = Task { await model.archivedTranscripts(for: model.board) }
+    try await Task.sleep(for: .milliseconds(50))
+    release.signal()
+    release.signal()
+    let firstResult = await first.value
+    let secondResult = await second.value
+
+    #expect(readIDs(sent).sorted() == ["z1", "z2"])
+    #expect(Set(firstResult.keys) == ["z1", "z2"])
+    #expect(Set(secondResult.keys) == ["z1", "z2"])
+  }
+
+  /// A conversation that leaves the archive, for example when the user pins it, drops out of the cache.
+  @Test func aConversationThatLeftTheArchiveIsNoLongerSearchable() async {
+    let sent = SentRequests()
+    let model = model([conversation("z", lastActivity: 2, archived: true)], sent)
+    _ = await model.archivedTranscripts(for: model.board)
+    model.apply(.success([conversation("z", lastActivity: 2, pinned: true)]), followups: nil)
+
+    let transcripts = await model.archivedTranscripts(for: model.board)
+
+    #expect(transcripts["z"] == nil)
+  }
+
   // MARK: A failed read
 
   @Test func aFailedReadLeavesTheOtherConversationsSearchable() async {

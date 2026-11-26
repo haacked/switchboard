@@ -6,8 +6,6 @@ public enum SessionSearch {
   public enum Field: Sendable {
     case name, branch, pr, issue, repo, prTitle, group, reason, note, transcript
 
-    /// Every transcript match scores `substring` at weight 1. That is below the lowest score in any other field, so a
-    /// transcript match ranks last.
     var weight: Int {
       switch self {
       case .name: 10
@@ -16,6 +14,7 @@ public enum SessionSearch {
       case .prTitle, .group: 7
       case .reason: 5
       case .note: 4
+      // A transcript match scores `substring` × 1, which is below the weakest match in any other field.
       case .transcript: 1
       }
     }
@@ -181,7 +180,7 @@ public enum SessionSearch {
     return false
   }
 
-  fileprivate static func fold(_ text: String) -> String {
+  private static func fold(_ text: String) -> String {
     text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
   }
 

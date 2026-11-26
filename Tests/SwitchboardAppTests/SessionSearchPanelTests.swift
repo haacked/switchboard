@@ -69,7 +69,7 @@ import Testing
 
   // MARK: Transcripts that arrive while the panel is open
 
-  @Test func aQueryThatOnlyATranscriptMatchesHighlightsItOnArrival() throws {
+  @Test func currentGivesTheFirstResultThatOnlyATranscriptMatches() throws {
     let sessions = [needsItem("a", state: .working), needsItem("t", state: .working)]
     try #require(SessionSearch.rank(sessions, query: "lag").isEmpty)
 

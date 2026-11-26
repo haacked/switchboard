@@ -212,6 +212,8 @@ final class BoardModel: ObservableObject {
   @Published var chatLogs: [String: [ChatMessage]] = [:]
   /// The transcripts that ⌘K read, by session id, with the `lastActivity` of the session when they were read.
   private var searchTranscripts: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
+  /// The transcript reads that a ⌘K open started and that have not finished.
+  private var transcriptReads: Task<Void, Never>?
   /// Each Manager conversation's last `manager-mcp` answer, by session id, read while its pane shows.
   @Published var mcpAnswers: [String: ManagerMCPAnswer] = [:]
   /// The commands that each session's claude takes after `/`, by session id, read when a message field's list opens.
@@ -1713,8 +1715,10 @@ final class BoardModel: ObservableObject {
   /// The recent messages of the archived Manager conversations among `sessions`, for ⌘K, by session id. It reads
   /// the `searchedTranscriptCount` most recent ones. It reads a transcript again only when its session's
   /// `lastActivity` changed. A failed read leaves that conversation out. The reads run off the main thread and off
-  /// `poller`, so they never delay a refresh.
+  /// `poller`, so they never delay a refresh. A call that starts while an earlier call still reads waits for it, so
+  /// two opens never read at once.
   func archivedTranscripts(for sessions: [SessionSummary]) async -> [String: SessionSearch.Transcript] {
+    while let running = transcriptReads { await running.value }
     let archived = sessions.filter { $0.kind == .manager && $0.activity?.archived == true }
       .sorted(by: Manager.newestFirst).prefix(Self.searchedTranscriptCount)
     let current = Dictionary(uniqueKeysWithValues: archived.map { ($0.id, $0.lastActivity) })
@@ -1722,18 +1726,23 @@ final class BoardModel: ObservableObject {
     let stale = archived.filter { searchTranscripts[$0.id] == nil }.map { ($0.id, $0.lastActivity) }
     if !stale.isEmpty {
       let send = send
-      let read = await Task.detached {
-        var read: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
-        for (id, lastActivity) in stale {
-          let args: [String: JSON] = ["session": .string(id), "limit": .number(Double(Self.searchedMessageCount))]
-          guard let messages = Self.chatMessages(send, args) else { continue }
-          read[id] = (lastActivity, SessionSearch.Transcript(messages.map(\.text)))
-        }
-        return read
-      }.value
-      searchTranscripts.merge(read) { $1 }
+      let reading = Task {
+        let read = await Task.detached {
+          var read: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
+          for (id, lastActivity) in stale {
+            let args: [String: JSON] = ["session": .string(id), "limit": .number(Double(Self.searchedMessageCount))]
+            guard let messages = Self.chatMessages(send, args) else { continue }
+            read[id] = (lastActivity, SessionSearch.Transcript(messages.map(\.text)))
+          }
+          return read
+        }.value
+        self.searchTranscripts.merge(read) { $1 }
+        self.transcriptReads = nil
+      }
+      transcriptReads = reading
+      await reading.value
     }
-    return searchTranscripts.mapValues(\.transcript)
+    return searchTranscripts.filter { current[$0.key] == $0.value.lastActivity }.mapValues(\.transcript)
   }
 
   /// The messages that `chat-log` answers for `args`, or nil when the read fails.

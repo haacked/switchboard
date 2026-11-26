@@ -583,8 +583,7 @@ private func transcript(_ messages: [String]) -> SessionSearch.Transcript { Sess
     let hint = try self.hint(message)
 
     #expect(hint.text.hasPrefix("…"))
-    var shown = String(hint.text.dropFirst())
-    if shown.hasSuffix("…") { shown.removeLast() }
+    let shown = String(hint.text.dropFirst())
     let start = try #require(message.range(of: shown)?.lowerBound)
     let before = message[message.index(before: start)]
     #expect(!before.isLetter && !before.isNumber, "\(hint.text)")
