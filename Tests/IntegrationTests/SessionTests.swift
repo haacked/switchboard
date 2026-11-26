@@ -545,7 +545,7 @@ import Testing
     let sbd = try Instance()
     let repo = try Repos.create("\(sbd.home.path)/repo")
     let first = try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"], as: SessionSummary.self)
-    try sbd.sb("stop", first.id)
+    try sbd.stop(first.id)
     _ = try sbd.git(first.cwd, "switch", "-c", "feature-b")
     #expect(throws: APIError.self) {
       try sbd.client.call("new", ["path": .string(repo), "branch": "feature-a"])
