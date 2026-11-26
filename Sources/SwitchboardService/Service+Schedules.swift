@@ -41,13 +41,17 @@ extension Service {
         "\(id) has \(Schedule.maxPerSession) schedules, the most a session can have. Remove one with: sb schedule rm <id>"
       )
     }
-    let request = try JSONCoding.convert(args, to: ScheduleRequest.self)
+    var request = try JSONCoding.convert(args, to: ScheduleRequest.self)
     let runner = try Schedule.Runner(parsing: request.runner)
-    if runner == .headless { throw APIError("sbd doesn't run headless schedules yet") }
     if runner != .session, session.host != nil {
       throw APIError("--headless and --script run only for a session on this Mac")
     }
     if runner == .script { try requireScriptAuthority(args, origin: origin, caller: caller) }
+    if runner == .headless {
+      try checkHeadlessCaller(id, args, origin: origin, caller: caller)
+      if request.account == nil, let refusal = codexLaunchRefusal(id) { throw APIError(refusal) }
+      request.account = try request.account.map(headlessAccountFolder)
+    }
     let group = try request.gate.flatMap { try topupGroup($0, args, origin: origin, caller: caller) }
     let taken = entries.values.flatMap(\.session.allSchedules).map(\.id)
     let schedule = try request.makeSchedule(id: shortId("r", taken: taken), now: nowMs(), group: group)
@@ -151,6 +155,24 @@ extension Service {
     return isKind(inside, in: [.manager]) && args["group"] == nil ? .manager(inside) : .propose(inside)
   }
 
+  /// Refuses a request that adds a headless schedule to a Manager conversation or the Operator, or changes such a
+  /// schedule's prompt, account, or model, unless a Manager conversation, the Operator, or the user sent it. The run
+  /// gets the coordinator's switchboard MCP server and its permission mode, so it can arm actions unattended. It runs
+  /// on the state queue, after `install` of a fresh snapshot.
+  private func checkHeadlessCaller(_ id: String, _ args: JSON, origin: RequestOrigin, caller: Caller) throws {
+    guard isKind(id, in: [.manager, .operator]) else { return }
+    try checkActionCaller(
+      args, origin: origin, caller: caller, command: "sb schedule", option: "headless",
+      arms: "a headless schedule on \(mention(id))", notFrom: nil)
+  }
+
+  /// The folder of the Claude account that a headless schedule's `ref` names. It refuses a Codex account. An empty
+  /// `ref` comes back as it is: an add refuses it, and an edit reads it as a reset to the session's account.
+  private func headlessAccountFolder(_ ref: String) throws -> String {
+    let name = ref.trimmingCharacters(in: .whitespacesAndNewlines)
+    return name.isEmpty ? ref : try resolveClaudeAccount(name).folder
+  }
+
   private func refuseScriptFromHost(_ origin: RequestOrigin) throws {
     guard case .mac = origin else {
       throw APIError("a script schedule can't come from a host, because sbd runs it on this Mac")
@@ -197,21 +219,22 @@ extension Service {
     return try JSON(encoding: scheduleRow(id, schedule))
   }
 
-  /// True when the schedule that `args` names has a gate or runs a script, so its edit can run a caller check. It
-  /// runs on the state queue.
+  /// True when the schedule that `args` names has a gate, or runs headless or as a script, so its edit can run a
+  /// caller check. It runs on the state queue.
   func editChecksCaller(_ args: JSON) -> Bool {
     guard let schedule = (try? ownedSchedule(args))?.schedule else { return false }
-    return schedule.gate != nil || schedule.runner == .script
+    return schedule.gate != nil || (schedule.runner ?? .session) != .session
   }
 
-  /// Changes the interval, the prompt or command, the timeout, or several. It sends nothing: a next run that the
-  /// edit makes due fires through `fireDueSchedules`. A schedule's runner never changes. A change to a script's
-  /// command or timeout needs the authority of `requireScriptAuthority`, and a change to its interval doesn't,
-  /// because the interval changes when the script runs and not what runs.
+  /// Changes the interval, the prompt or command, the timeout, a headless schedule's account or model, or several.
+  /// It sends nothing: a next run that the edit makes due fires through `fireDueSchedules`. A schedule's runner
+  /// never changes. A change to a script's command or timeout needs the authority of `requireScriptAuthority`, and a
+  /// change to a coordinator's headless prompt, account, or model needs that of `checkHeadlessCaller`. A change to
+  /// the interval needs neither, because the interval changes when the run happens and not what runs.
   private func editSchedule(_ args: JSON, origin: RequestOrigin, caller: Caller) throws -> JSON {
     let (id, found) = try ownedSchedule(args)
     if found.gate != nil { try checkTopupCaller(args, origin: origin, caller: caller) }
-    let request = try JSONCoding.convert(args, to: ScheduleRequest.self)
+    var request = try JSONCoding.convert(args, to: ScheduleRequest.self)
     let runner = found.runner ?? .session
     if request.runner != nil, try Schedule.Runner(parsing: request.runner) != runner {
       throw APIError(
@@ -220,6 +243,12 @@ extension Service {
     }
     if runner == .script, request.prompt != nil || request.timeout != nil {
       try requireScriptAuthority(args, origin: origin, caller: caller)
+    }
+    if runner == .headless {
+      if request.prompt != nil || request.account != nil || request.model != nil {
+        try checkHeadlessCaller(id, args, origin: origin, caller: caller)
+      }
+      request.account = try request.account.map(headlessAccountFolder)
     }
     let schedule = try found.edited(
       every: request.every, prompt: request.prompt, account: request.account, model: request.model,
@@ -281,8 +310,8 @@ extension Service {
   /// them either, because the job may be stopping its claude. Its schedules
   /// stay due, so Undo lets them run.
   ///
-  /// A script starts on `scheduleRunQueue` only while fewer than `Schedule.maxRunning` runs are in flight, and a
-  /// schedule whose run is in flight stays due, as a top-up does.
+  /// A headless or script run starts on `scheduleRunQueue` only while fewer than `Schedule.maxRunning` runs are in
+  /// flight, and a schedule whose run is in flight stays due, as a top-up does.
   ///
   /// A schedule with a gate checks the gate first. A closed gate sends
   /// nothing, so its check runs while the session is busy. A short group
@@ -307,8 +336,8 @@ extension Service {
     }
   }
 
-  /// Checks a due schedule's gate, then sends its prompt, or starts its script, when the gate is open and the session
-  /// is free. `subjects` holds the action waits that the pass read at its first gate.
+  /// Checks a due schedule's gate, then sends its prompt, or starts its headless or script run, when the gate is open
+  /// and the session is free. `subjects` holds the action waits that the pass read at its first gate.
   private func fireDue(_ id: String, _ schedule: Schedule, subjects: inout ActionSubjects?, now: Int64) {
     var opened: (gate: Schedule.Gate, status: QueueStatus)?
     if let gate = schedule.gate {
@@ -331,7 +360,7 @@ extension Service {
       Schedule.blocker(facts: e.facts, process: promptProcess(id), messageWaiting: messageWaiting(e, now: now))
         == nil
     else { return }
-    if schedule.runner == .script {
+    if (schedule.runner ?? .session) != .session {
       if runsInFlight.count < Schedule.maxRunning { dispatchRun(id, schedule, now: now) }
       return
     }

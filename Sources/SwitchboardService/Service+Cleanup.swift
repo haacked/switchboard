@@ -46,7 +46,10 @@ extension Service {
         try requireNoTurn(e)
         install(fresh, of: session)
         try scope.require()
-        return try beginPaneStop(session.id, ancestry: ancestry, command: command)
+        let stop = try beginPaneStop(session.id, ancestry: ancestry, command: command)
+        // A run sbd started is below no pane, so no pane stop reaches it.
+        cancelRuns(of: session.id)
+        return stop
       }
       try finishPaneStop(session, stop, again: "run `\(command)` again")
       _ = try checkCleanup(session, pr: pr, sharedWith: sharedWith, at: at)

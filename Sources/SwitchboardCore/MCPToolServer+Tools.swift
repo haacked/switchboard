@@ -207,7 +207,7 @@ extension MCPToolServer {
       ], required: ["plan", "kind"]),
     Tool(
       "add_schedule",
-      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits. With `script` instead of a prompt, Switchboard runs the shell command in the session's folder on the interval, outside the conversation, and keeps each run's exit status and output. Only a Manager conversation or the user can add a script.",
+      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits. With `script` instead of a prompt, Switchboard runs the shell command in the session's folder on the interval, outside the conversation, and keeps each run's exit status and output. Only a Manager conversation or the user can add a script. With `headless`, Switchboard runs the prompt as its own one-shot claude -p turn in the session's folder instead of sending it, under the account and model you pick, so a cheap model can run a recurring check.",
       [
         "session": session,
         "every": interval,
@@ -234,8 +234,16 @@ extension MCPToolServer {
           "A shell command to run on each run instead of sending a prompt. It runs in the session's folder with the user's login shell. Send script or prompt, not both."
         ),
         "timeout": string(
-          "How long a script's run may take, one number and one unit, such as 5m: 10s to 2h, and no longer than the interval. The default is 10m, or the interval when that is shorter."
+          "How long a headless or script run may take, one number and one unit, such as 5m: 10s to 2h, and no longer than the interval. The default is 30m for a headless run and 10m for a script, or the interval when that is shorter."
         ),
+        "headless": boolean(
+          "Runs the prompt as its own claude -p turn in the session's folder instead of sending it. Each run starts with empty context, and its reply goes to the run's log and never reaches the conversation. The run has the session's permission mode and MCP servers. Only a Manager conversation, the Operator, or the user can add one to a Manager conversation or the Operator."
+        ),
+        "account": string(
+          "The Claude account of a headless run, by name. The default is the account of the session. It needs headless."
+        ),
+        "model": string(
+          "The model of a headless run, such as haiku. The default is the session's model. It needs headless."),
       ], required: ["every"]),
     Tool(
       "list_schedules",
@@ -247,13 +255,15 @@ extension MCPToolServer {
       required: ["schedule"]),
     Tool(
       "edit_schedule",
-      "Changes a schedule's interval, its prompt or command, its timeout, or several. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing.",
+      "Changes a schedule's interval, its prompt or command, its timeout, a headless schedule's account or model, or several. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing.",
       [
         "schedule": schedule,
         "every": interval,
         "prompt": string("The new prompt to send on each run."),
         "script": string("The new command of a script schedule. Send script or prompt, not both."),
-        "timeout": string("The new timeout of a script schedule, such as 5m."),
+        "timeout": string("The new timeout of a headless or script schedule, such as 5m."),
+        "account": string("The new account of a headless schedule. An empty value resets it to the session's account."),
+        "model": string("The new model of a headless schedule. An empty value resets it to the session's model."),
       ], required: ["schedule"]),
     Tool(
       "run_schedule",

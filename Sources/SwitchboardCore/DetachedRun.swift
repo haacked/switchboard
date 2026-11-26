@@ -261,6 +261,13 @@ public enum DetachedRun {
     }
   }
 
+  /// The first line of the text that isn't blank, cleaned and cut as `Result.tail` is, or nil when every line is blank.
+  public static func firstLine(_ text: String) -> String? {
+    text.split(whereSeparator: \.isNewline).lazy.map(printable).first { !$0.isEmpty }.map {
+      truncated($0, max: tailMax)
+    }
+  }
+
   /// The line without terminal escape sequences and control characters, and without spaces at its ends. A terminal
   /// would act on them where `sb` prints the tail.
   static func printable(_ line: Substring) -> String {

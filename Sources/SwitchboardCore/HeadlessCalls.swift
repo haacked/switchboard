@@ -4,6 +4,8 @@ import Foundation
 public enum HeadlessKind: String, Codable, Sendable {
   case triage, mergeBrief, quickAsk, planUpdate, skillLabel, replyGate, ciFailure, topupPick, sessionName, slackThreads,
     slackSelf
+  /// A headless schedule's run.
+  case schedule
 }
 
 /// One `claude -p` call that sbd made for itself, as the `headless_calls` table stores it. `kind` is a

@@ -52,13 +52,14 @@ import Testing
 
   /// A top-up's prompt is optional, so the schema may or may not require `prompt`. sbd still refuses a plain
   /// schedule without one (`addScheduleWithoutAnIntervalOrAPromptReturnsAnError`).
-  @Test func addScheduleTakesASessionAnOptionalTopupScriptAndTimeoutAndRequiresAnInterval() throws {
+  @Test func addScheduleTakesASessionAnOptionalTopupScriptTimeoutHeadlessAccountAndModelAndRequiresAnInterval() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let add = try tool(mcp, "add_schedule")
 
-    #expect(properties(add) == ["session", "every", "prompt", "topup", "script", "timeout"])
+    #expect(
+      properties(add) == ["session", "every", "prompt", "topup", "script", "timeout", "headless", "account", "model"])
     #expect(required(add).contains("every"))
     #expect(required(add).isSubset(of: ["every", "prompt"]))
   }
@@ -108,13 +109,18 @@ import Testing
     #expect(required(remove) == ["schedule"])
   }
 
-  @Test func editScheduleRequiresAScheduleIdAndTakesAnIntervalAPromptAScriptAndATimeout() throws {
+  /// Decision 5 lists `headless` for both tools. A runner never changes, so the edit schema may leave it out.
+  @Test func editScheduleRequiresAScheduleIdAndTakesAnIntervalAPromptAScriptATimeoutAnAccountAndAModel() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let edit = try tool(mcp, "edit_schedule")
 
-    #expect(properties(edit) == ["schedule", "every", "prompt", "script", "timeout"])
+    #expect(properties(edit).isSuperset(of: ["schedule", "every", "prompt", "script", "timeout", "account", "model"]))
+    #expect(
+      properties(edit).isSubset(of: [
+        "schedule", "every", "prompt", "script", "timeout", "account", "model", "headless",
+      ]))
     #expect(required(edit) == ["schedule"])
   }
 
@@ -803,6 +809,103 @@ import Testing
     #expect(ran.schedule.id == row.schedule.id)
     #expect(ran.status?.state == .due)
     #expect(try runNow.requested(sbd, c.id).count == 1)
+  }
+
+  // MARK: Headless schedules
+
+  /// Decision 5: a headless run is its own `claude -p` turn, and its reply never reaches the conversation.
+  @Test func addSchedulesHeadlessDescriptionSaysTheReplyDoesNotReachTheConversation() throws {
+    let sbd = try Instance()
+    let mcp = try MCPClient(sbd)
+
+    let add = try tool(mcp, "add_schedule")
+
+    let headless = add["inputSchema"]?["properties"]?["headless"]
+    #expect(headless?["type"]?.string == "boolean", Comment(rawValue: add.text))
+    let text = ((add["description"]?.string ?? "") + "\n" + (headless?["description"]?.string ?? "")).lowercased()
+    #expect(text.contains("conversation"), Comment(rawValue: text))
+  }
+
+  @Test func addScheduleWithHeadlessAndAModelAddsAHeadlessSchedule() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let row = try mcp.call(
+      "add_schedule", ["every": "1h", "prompt": "check the queue", "headless": true, "model": "haiku"]
+    )
+    .decode(ScheduleRow.self)
+
+    #expect(row.session == s.id)
+    #expect(row.schedule.runner == .headless)
+    #expect(row.schedule.model == "haiku")
+    #expect(row.schedule.prompt == "check the queue")
+    #expect(try stored(sbd, s.id) == [row.schedule])
+  }
+
+  /// Decision 5: an account or a model alone never makes a schedule headless.
+  @Test(arguments: [["model": "haiku"], ["account": "work"]] as [[String: JSON]])
+  func addScheduleWithAnAccountOrAModelButNotHeadlessReturnsAnError(_ extra: [String: JSON]) throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let result = try mcp.call("add_schedule", extra.merging(["every": "1h", "prompt": "check"]) { $1 })
+
+    #expect(result.isError)
+    #expect(result.text.contains("headless"), "\(result.text)")
+    #expect(try stored(sbd, s.id) == nil)
+  }
+
+  @Test func addScheduleWithABlankOrDashedModelReturnsAnError() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    for model in ["-p", " "] {
+      let result = try mcp.call(
+        "add_schedule", ["every": "1h", "prompt": "check", "headless": true, "model": .string(model)])
+      #expect(result.isError, "\(model)")
+    }
+    #expect(try stored(sbd, s.id) == nil)
+  }
+
+  @Test func editScheduleChangesAHeadlessSchedulesModel() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+    let added = try mcp.call("add_schedule", ["every": "1h", "prompt": "check", "headless": true, "model": "haiku"])
+      .decode(ScheduleRow.self)
+
+    let edited = try edit(mcp, added, ["model": "sonnet"]).decode(ScheduleRow.self)
+
+    #expect(edited.schedule.model == "sonnet")
+    #expect(try stored(sbd, s.id)?.first?.model == "sonnet")
+  }
+
+  @Test func editScheduleRefusesAModelOnAScheduleThatSendsItsPrompt() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let row = try schedule(sbd, s.id)
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let result = try edit(mcp, row, ["model": "haiku"])
+
+    #expect(result.isError)
+    #expect(try stored(sbd, s.id) == [row.schedule])
+  }
+
+  /// Stage 3's refusal stays until the proposal card ships. IntegrationTests/ScheduleScriptTests covers the call from
+  /// inside a work session's pane.
+  @Test func addScheduleWithAScriptFromAWorkSessionStillStoresNothing() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+    let mcp = try MCPClient(sbd, env: inside(s.id))
+
+    let result = try mcp.call("add_schedule", ["every": "1h", "script": "echo hi"])
+
+    #expect(result.isError)
+    #expect(try stored(sbd, s.id) == nil)
   }
 
   // MARK: Status and history

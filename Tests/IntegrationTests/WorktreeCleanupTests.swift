@@ -528,6 +528,25 @@ private func tmuxHas(_ t: Terminals, _ target: String) throws -> Bool {
     #expect(!FileManager.default.fileExists(atPath: s.cwd))
   }
 
+  /// A schedule's run is below no pane, so no pane stop reaches it. The cleanup cancels it before it removes the
+  /// worktree that the run runs in.
+  @Test func cancelsAScheduleRunInFlightAndRemovesTheWorktree() throws {
+    let github = try FakeGitHub()
+    let (sbd, _, s) = try finishedSession(github)
+    let scripts = ScheduleScriptTests()
+    let made = try scripts.addScript(sbd, s.id, try scripts.sleeper(sbd, pidFile: "run.pid"))
+    try scripts.runNow(sbd, made.id)
+    let run = try scripts.runPid(sbd, "run.pid")
+
+    try sbd.sb("cleanup", s.id)
+
+    #expect(!FileManager.default.fileExists(atPath: s.cwd))
+    try sbd.waitFor("the run to end", timeout: 15) { !Processes.exists(Int(run)) }
+    let last = try scripts.waitForRun(sbd, s.id, made.id, timeout: 15)
+    #expect(last.outcome == .failed, "\(last)")
+    #expect(last.error == "cancelled", "\(last)")
+  }
+
   /// ruff ignores its cache with a `.gitignore` of `*` inside it, so git lists the cache's files.
   @Test func removesACacheThatIgnoresItself() throws {
     let github = try FakeGitHub()

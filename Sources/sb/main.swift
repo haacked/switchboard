@@ -265,19 +265,35 @@ let usage = """
                                   timeout. A command that runs a file in the
                                   worktree runs code that the session's Claude
                                   can edit
+    schedule <session> --every <interval> [--timeout <duration>] --headless
+      [--account A] [--model M] <prompt>
+                                  run the prompt on the interval as its own
+                                  claude -p turn in the session's folder, with
+                                  empty context, under the account A and the
+                                  model M (default: the session's), with the
+                                  session's permission mode and MCP servers.
+                                  The reply goes to the run's log, not to the
+                                  session. Each run ends after the timeout
+                                  (default 30m or the interval). Only a Manager
+                                  conversation, the Operator, or you can add
+                                  one to a Manager conversation or the Operator
     schedule ls [<session>]       list the schedules, the next due first
     schedule rm <id>              remove a schedule
     schedule pause|resume <id>    pause a schedule, or resume it one interval
                                   from now
-    schedule edit <id> [--every <interval>] [--timeout <duration>] [<prompt>]
+    schedule edit <id> [--every <interval>] [--timeout <duration>]
+      [--account A] [--model M] [<prompt>]
                                   change a schedule's interval, its prompt or
-                                  command, a script's timeout, or several. A
-                                  new interval brings the next run to one
-                                  interval from now when that is sooner
+                                  command, a headless or script schedule's
+                                  timeout, a headless schedule's account or
+                                  model (an empty value resets it to the
+                                  session's), or several. A new interval
+                                  brings the next run to one interval from now
+                                  when that is sooner
     schedule run <id>             run a schedule now, or once its session is
                                   free
-    schedule log <id> [--run N]   print the output of a script's newest run,
-                                  or of its Nth newest
+    schedule log <id> [--run N]   print the output of a headless or script
+                                  schedule's newest run, or of its Nth newest
     note <session> [<text>]       add a note, or list the notes: open to-dos,
                                   then plain notes, then resolved to-dos
     note <session> --todo <text>  add a to-do, a task for you that blocks

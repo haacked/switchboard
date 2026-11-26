@@ -596,9 +596,11 @@ public final class Service {
           return try approveWait(request.args, caller: caller)
         })
     case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log":
-      // The caller checks of a top-up and a script read the client's panes, so they take a new snapshot.
+      // The caller checks of a top-up, a script, and a coordinator's headless schedule read the client's panes, so
+      // they take a new snapshot.
       let checksCaller =
-        (request.op == "schedule" && (request.args["gate"] != nil || request.args["runner"]?.string == "script"))
+        (request.op == "schedule"
+          && (request.args["gate"] != nil || ["script", "headless"].contains(request.args["runner"]?.string)))
         || (request.op == "edit-schedule" && queue.sync { editChecksCaller(request.args) })
       let fresh = checksCaller ? buildSnapshot() : nil
       return try .success(

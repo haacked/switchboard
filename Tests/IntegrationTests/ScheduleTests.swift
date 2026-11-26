@@ -237,21 +237,34 @@ import Testing
     #expect(try sbd.get(s.id).schedules == nil)
   }
 
-  /// sbd runs no headless schedule yet, and its tick would send one's prompt into the session. An account or a model
-  /// belongs only to a headless schedule.
-  @Test func theScheduleRequestRefusesAHeadlessSchedule() throws {
+  /// An account or a model belongs only to a headless schedule, so a schedule that sends its prompt into the session
+  /// refuses both.
+  @Test func theScheduleRequestRefusesAnAccountOrAModelWithoutTheHeadlessRunner() throws {
     let sbd = try Instance()
     let s = try sbd.new()
     let session = JSON.string(s.id)
     let base: [String: JSON] = ["session": session, "every": "30m", "prompt": "git fetch"]
 
-    for extra: [String: JSON] in [
-      ["runner": "headless"], ["runner": "headless", "model": "haiku"], ["account": "work"], ["model": "haiku"],
-    ] {
+    for extra: [String: JSON] in [["account": "work"], ["model": "haiku"], ["runner": "session", "model": "haiku"]] {
       let error = failure(sbd, "schedule", base.merging(extra) { $1 })
-      #expect(error.contains("headless"), "\(extra) failed with \(error)")
+      #expect(error.contains("--headless"), "\(extra) failed with \(error)")
     }
     #expect(try sbd.get(s.id).schedules == nil)
+  }
+
+  /// The headless runner is stored in `jobs` and listed with the session's schedules.
+  @Test func theScheduleRequestStoresAHeadlessSchedule() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    let added = try sbd.client.call(
+      "schedule",
+      ["session": .string(s.id), "every": "30m", "prompt": "git fetch", "runner": "headless", "model": "haiku"],
+      as: ScheduleRow.self)
+
+    #expect(added.schedule.runner == .headless)
+    #expect(added.schedule.model == "haiku")
+    #expect(try sbd.get(s.id).schedules == [added.schedule])
   }
 
   /// A schedule that sends its prompt into the session has no run of its own to time out.
@@ -825,7 +838,9 @@ extension ScheduleTests {
     let result = try sbd.run(["schedule", "edit", r.schedule.id])
 
     #expect(result.status != 0)
-    #expect(result.stderr.contains("schedule edit needs --every, --timeout, or a prompt"), "\(result.stderr)")
+    #expect(
+      result.stderr.contains("schedule edit needs --every, --timeout, --account, --model, or a prompt"),
+      "\(result.stderr)")
     #expect(try sbd.get(s.id).schedules == [r.schedule])
   }
 

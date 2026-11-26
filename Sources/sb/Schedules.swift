@@ -9,11 +9,12 @@ let scheduleSubcommands = ["ls", "rm", "pause", "resume", "edit", "run", "log"]
 let topupFlags = ["--group", "--repo", "--target", "--template-file", "--rubric-file"]
 
 /// `sb schedule <session> --every <interval> <prompt>` adds a schedule, and
-/// `--topup` with each of `topupFlags` adds a gate to it. `--script` makes the
-/// text a shell command that sbd runs, and `--timeout` limits each run.
+/// `--topup` with each of `topupFlags` adds a gate to it. `--headless` runs the
+/// prompt as its own claude -p turn under `--account` and `--model`, `--script`
+/// makes the text a shell command that sbd runs, and `--timeout` limits each run.
 /// `ls [<session>]` lists the schedules, `rm <id>` removes one, `pause <id>`
 /// and `resume <id>` pause and resume one, `edit <id> [--every <interval>]
-/// [--timeout <duration>] [<prompt>]` changes one, `run <id>` makes one due now,
+/// [--timeout <duration>] [--account A] [--model M] [<prompt>]` changes one, `run <id>` makes one due now,
 /// and `log <id> [--run N]` prints a run's output.
 func scheduleCommand(_ a: Args) {
   let first = a.session("schedule")
@@ -60,7 +61,10 @@ func scheduleCommand(_ a: Args) {
     if a.positional.count > 2 { args["prompt"] = .string(a.positional.dropFirst(2).joined(separator: " ")) }
     if let every = a.values["--every"] { args["every"] = .string(every) }
     if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
-    guard args.count > 1 else { die("schedule edit needs --every, --timeout, or a prompt") }
+    // An empty account or model goes to sbd, which resets it to the session's.
+    if let account = a.values["--account"] { args["account"] = .string(account) }
+    if let model = a.values["--model"] { args["model"] = .string(model) }
+    guard args.count > 1 else { die("schedule edit needs --every, --timeout, --account, --model, or a prompt") }
     args.merge(callerArg) { $1 }
     result = call("edit-schedule", args)
   default:
@@ -71,6 +75,13 @@ func scheduleCommand(_ a: Args) {
     if let every = a.values["--every"] { args["every"] = .string(every) }
     if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
     if a.switches.contains("--script") { args["runner"] = "script" }
+    if a.switches.contains("--headless") {
+      if a.switches.contains("--script") { die("pass --headless or --script, not both") }
+      args["runner"] = "headless"
+    }
+    // sbd refuses an account or a model without --headless, with the reason.
+    if let account = a.values["--account"] { args["account"] = .string(account) }
+    if let model = a.values["--model"] { args["model"] = .string(model) }
     if let gate = topupGate(a) { args["gate"] = gate }
     args.merge(callerArg) { $1 }
     result = call("schedule", args)
@@ -126,10 +137,18 @@ func scheduleText(_ r: ScheduleRow, groupNames: [String: String]) -> String {
   scheduleText(r.schedule, status: r.status?.text ?? r.schedule.nextText(), groupNames: groupNames)
 }
 
-/// The prompt on one line, or `$ ` and a script's command, then the interval, the status, the last result, and a
-/// gate's last check.
+/// The prompt on one line, `$ ` and a script's command, or `headless <model> on <account> · ` and the prompt, then
+/// the interval, the status, the last result, and a gate's last check. A headless schedule without its own model or
+/// account leaves that part out, because it runs on the session's.
 func scheduleText(_ s: Schedule, status: String, groupNames: [String: String]) -> String {
-  let what = s.runner == .script ? "$ \(oneLine(s.prompt))" : oneLine(s.prompt)
+  let what =
+    switch s.runner ?? .session {
+    case .session: oneLine(s.prompt)
+    case .script: "$ \(oneLine(s.prompt))"
+    case .headless:
+      (["headless", s.model, s.account.map { "on \(Account.name(ofFolder: $0))" }].compactMap { $0 }
+        .joined(separator: " ")) + " · \(oneLine(s.prompt))"
+    }
   let line = "\(what)  \(s.timingText(status)) · \(s.lastText())"
   guard let gate = s.gate else { return line }
   return "\(line)  \(gate.statusText(groupName: groupNames[gate.group] ?? gate.group))"
