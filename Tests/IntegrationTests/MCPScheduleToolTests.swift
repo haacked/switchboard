@@ -52,13 +52,13 @@ import Testing
 
   /// A top-up's prompt is optional, so the schema may or may not require `prompt`. sbd still refuses a plain
   /// schedule without one (`addScheduleWithoutAnIntervalOrAPromptReturnsAnError`).
-  @Test func addScheduleTakesASessionAndAnOptionalTopupAndRequiresAnInterval() throws {
+  @Test func addScheduleTakesASessionAnOptionalTopupScriptAndTimeoutAndRequiresAnInterval() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let add = try tool(mcp, "add_schedule")
 
-    #expect(properties(add) == ["session", "every", "prompt", "topup"])
+    #expect(properties(add) == ["session", "every", "prompt", "topup", "script", "timeout"])
     #expect(required(add).contains("every"))
     #expect(required(add).isSubset(of: ["every", "prompt"]))
   }
@@ -108,13 +108,13 @@ import Testing
     #expect(required(remove) == ["schedule"])
   }
 
-  @Test func editScheduleRequiresAScheduleIdAndTakesAnIntervalAndAPrompt() throws {
+  @Test func editScheduleRequiresAScheduleIdAndTakesAnIntervalAPromptAScriptAndATimeout() throws {
     let sbd = try Instance()
     let mcp = try MCPClient(sbd)
 
     let edit = try tool(mcp, "edit_schedule")
 
-    #expect(properties(edit) == ["schedule", "every", "prompt"])
+    #expect(properties(edit) == ["schedule", "every", "prompt", "script", "timeout"])
     #expect(required(edit) == ["schedule"])
   }
 

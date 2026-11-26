@@ -237,25 +237,36 @@ import Testing
     #expect(try sbd.get(s.id).schedules == nil)
   }
 
-  /// sbd runs no headless or script schedule yet, and its tick would send one's prompt or command into the session.
-  @Test func theScheduleRequestRefusesAHeadlessOrScriptSchedule() throws {
+  /// sbd runs no headless schedule yet, and its tick would send one's prompt into the session. An account or a model
+  /// belongs only to a headless schedule.
+  @Test func theScheduleRequestRefusesAHeadlessSchedule() throws {
     let sbd = try Instance()
     let s = try sbd.new()
     let session = JSON.string(s.id)
     let base: [String: JSON] = ["session": session, "every": "30m", "prompt": "git fetch"]
 
     for extra: [String: JSON] in [
-      ["runner": "script"], ["runner": "headless"], ["runner": "headless", "model": "haiku"],
-      ["account": "work"], ["model": "haiku"], ["timeout": "5m"],
+      ["runner": "headless"], ["runner": "headless", "model": "haiku"], ["account": "work"], ["model": "haiku"],
     ] {
       let error = failure(sbd, "schedule", base.merging(extra) { $1 })
-      #expect(error.contains("headless or script"), "\(extra) failed with \(error)")
+      #expect(error.contains("headless"), "\(extra) failed with \(error)")
     }
+    #expect(try sbd.get(s.id).schedules == nil)
+  }
+
+  /// A schedule that sends its prompt into the session has no run of its own to time out.
+  @Test func aTimeoutOnAScheduleThatSendsItsPromptIsRefused() throws {
+    let sbd = try Instance()
+    let s = try sbd.new()
+
+    let added = failure(
+      sbd, "schedule", ["session": .string(s.id), "every": "30m", "prompt": "check", "timeout": "5m"])
+    #expect(added.contains("has no timeout"), "\(added)")
     #expect(try sbd.get(s.id).schedules == nil)
 
     let id = try schedule(sbd, s.id).schedule.id
-    let error = failure(sbd, "edit-schedule", ["schedule": .string(id), "timeout": "5m"])
-    #expect(error.contains("headless or script"), "\(error)")
+    let edited = failure(sbd, "edit-schedule", ["schedule": .string(id), "timeout": "5m"])
+    #expect(edited.contains("has no timeout"), "\(edited)")
   }
 
   @Test func refusesAnEleventhScheduleOnASession() throws {
@@ -814,7 +825,7 @@ extension ScheduleTests {
     let result = try sbd.run(["schedule", "edit", r.schedule.id])
 
     #expect(result.status != 0)
-    #expect(result.stderr.contains("schedule edit needs --every or a prompt"), "\(result.stderr)")
+    #expect(result.stderr.contains("schedule edit needs --every, --timeout, or a prompt"), "\(result.stderr)")
     #expect(try sbd.get(s.id).schedules == [r.schedule])
   }
 

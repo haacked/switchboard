@@ -125,7 +125,7 @@ public struct ProcessTable: Sendable {
     return found
   }
 
-  private static func startTime(_ kp: kinfo_proc) -> Int64 {
+  static func startTime(_ kp: kinfo_proc) -> Int64 {
     let start = kp.kp_proc.p_un.__p_starttime
     return Int64(start.tv_sec) * 1_000_000 + Int64(start.tv_usec)
   }

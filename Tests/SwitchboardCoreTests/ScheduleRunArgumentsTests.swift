@@ -67,6 +67,22 @@ struct ScheduleRunShape: Sendable, CustomTestStringConvertible {
 private let shapes = kinds.flatMap { kind in StartMode.allCases.map { ScheduleRunShape(kind: kind, mode: $0) } }
 
 /// Decisions 6 and 16: the argv of a script run and of a headless run.
+/// Risk 5 of the plan: `sb hook` sends nothing inside a headless or script run.
+@Suite struct ScheduleRunHookTests {
+  @Test func aHookOutsideARunPostsForTheSession() {
+    #expect(ScheduleRun.hookSession(["SB_SESSION_ID": "s1"]) == "s1")
+  }
+
+  @Test(arguments: ["r1:1800000000000", ""])
+  func aHookInsideARunPostsNothing(_ marker: String) {
+    #expect(ScheduleRun.hookSession(["SB_SESSION_ID": "s1", ScheduleRun.marker: marker]) == nil)
+  }
+
+  @Test func aHookWithNoSessionPostsNothing() {
+    #expect(ScheduleRun.hookSession([:]) == nil)
+  }
+}
+
 @Suite struct ScheduleRunArgumentsTests {
   // MARK: Headless: every shape
 

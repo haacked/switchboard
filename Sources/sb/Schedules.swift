@@ -3,16 +3,18 @@ import SwitchboardCore
 
 /// The words after `sb schedule` that name a subcommand. A session with one
 /// of these names is scheduled by its id.
-let scheduleSubcommands = ["ls", "rm", "pause", "resume", "edit", "run"]
+let scheduleSubcommands = ["ls", "rm", "pause", "resume", "edit", "run", "log"]
 
 /// The flags of `sb schedule <session> --topup` that set the gate.
 let topupFlags = ["--group", "--repo", "--target", "--template-file", "--rubric-file"]
 
 /// `sb schedule <session> --every <interval> <prompt>` adds a schedule, and
-/// `--topup` with each of `topupFlags` adds a gate to it.
+/// `--topup` with each of `topupFlags` adds a gate to it. `--script` makes the
+/// text a shell command that sbd runs, and `--timeout` limits each run.
 /// `ls [<session>]` lists the schedules, `rm <id>` removes one, `pause <id>`
 /// and `resume <id>` pause and resume one, `edit <id> [--every <interval>]
-/// [<prompt>]` changes one, and `run <id>` makes one due now.
+/// [--timeout <duration>] [<prompt>]` changes one, `run <id>` makes one due now,
+/// and `log <id> [--run N]` prints a run's output.
 func scheduleCommand(_ a: Args) {
   let first = a.session("schedule")
   let result: JSON
@@ -28,6 +30,21 @@ func scheduleCommand(_ a: Args) {
       print("\(r.schedule.id)  \(r.name) (\(r.session))  \(scheduleText(r, groupNames: names))".printable)
     }
     return
+  case "log":
+    guard a.positional.count == 2 else { die("schedule log needs a schedule id") }
+    var args: [String: JSON] = ["schedule": .string(a.positional[1])]
+    if let run = a.values["--run"] {
+      guard let n = Int(run), n >= 1 else { die("--run needs a run number, 1 for the newest, not \(run)") }
+      args["run"] = .number(Double(n))
+    }
+    let answer = call("schedule-log", args)
+    if a.json { return printJSON(answer) }
+    // A command can print escape sequences that a terminal would act on, so each line prints with them escaped.
+    let text = answer["text"]?.string ?? ""
+    print(
+      text.split(separator: "\n", omittingEmptySubsequences: false).map { String($0).printable }.joined(
+        separator: "\n"), terminator: "")
+    return
   case "rm", "pause", "resume", "run":
     guard a.positional.count == 2 else { die("schedule \(first) needs a schedule id") }
     let id = JSON.string(a.positional[1])
@@ -42,7 +59,8 @@ func scheduleCommand(_ a: Args) {
     // An empty prompt argument still goes to sbd, which refuses it and keeps the interval too.
     if a.positional.count > 2 { args["prompt"] = .string(a.positional.dropFirst(2).joined(separator: " ")) }
     if let every = a.values["--every"] { args["every"] = .string(every) }
-    guard args.count > 1 else { die("schedule edit needs --every or a prompt") }
+    if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
+    guard args.count > 1 else { die("schedule edit needs --every, --timeout, or a prompt") }
     args.merge(callerArg) { $1 }
     result = call("edit-schedule", args)
   default:
@@ -51,6 +69,8 @@ func scheduleCommand(_ a: Args) {
     // A top-up's prompt is optional, and sbd stores a default for an empty one.
     if !(a.switches.contains("--topup") && prompt.isEmpty) { args["prompt"] = .string(prompt) }
     if let every = a.values["--every"] { args["every"] = .string(every) }
+    if let timeout = a.values["--timeout"] { args["timeout"] = .string(timeout) }
+    if a.switches.contains("--script") { args["runner"] = "script" }
     if let gate = topupGate(a) { args["gate"] = gate }
     args.merge(callerArg) { $1 }
     result = call("schedule", args)
@@ -106,9 +126,11 @@ func scheduleText(_ r: ScheduleRow, groupNames: [String: String]) -> String {
   scheduleText(r.schedule, status: r.status?.text ?? r.schedule.nextText(), groupNames: groupNames)
 }
 
-/// The prompt on one line, then the interval, the status, the last result, and a gate's last check.
+/// The prompt on one line, or `$ ` and a script's command, then the interval, the status, the last result, and a
+/// gate's last check.
 func scheduleText(_ s: Schedule, status: String, groupNames: [String: String]) -> String {
-  let line = "\(oneLine(s.prompt))  \(s.timingText(status)) · \(s.lastText())"
+  let what = s.runner == .script ? "$ \(oneLine(s.prompt))" : oneLine(s.prompt)
+  let line = "\(what)  \(s.timingText(status)) · \(s.lastText())"
   guard let gate = s.gate else { return line }
   return "\(line)  \(gate.statusText(groupName: groupNames[gate.group] ?? gate.group))"
 }

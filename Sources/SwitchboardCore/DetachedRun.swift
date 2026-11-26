@@ -35,11 +35,14 @@ public enum DetachedRun {
   /// group get the same signals, so no process of the run outlives it. A process that holds the output open from a
   /// session of its own doesn't hold the run past the group's end.
   ///
+  /// The child starts stopped, and it continues only after `onStart` returns with its pid. A caller that records the
+  /// pid in `onStart` has it recorded before the child runs any code.
+  ///
   /// It throws only when the child never starts: a NUL in an argument or in the environment, a log that can't be
   /// opened, or a program or folder that can't be used.
   public static func run(
     executable: String, arguments: [String], env: [String: String], folder: String, log: String, timeout: Double,
-    cancelled: () -> Bool = { false }
+    cancelled: () -> Bool = { false }, onStart: (pid_t) -> Void = { _ in }
   ) throws -> Result {
     if ([executable] + arguments + Array(env.keys) + Array(env.values)).contains(where: \.hasNul) {
       throw APIError(
@@ -61,6 +64,8 @@ public enum DetachedRun {
       defer { close(writeFd) }
       pid = try spawn(executable, arguments, env: env, folder: folder, output: writeFd)
     }
+    onStart(pid)
+    kill(pid, SIGCONT)
     var output = Output(logFd: logFd)
     let ended = watch(pid, readFd: readFd, timeout: timeout, cancelled: cancelled, output: &output)
     output.finish()
@@ -90,7 +95,10 @@ public enum DetachedRun {
     posix_spawnattr_init(&attr)
     defer { posix_spawnattr_destroy(&attr) }
     posix_spawnattr_setflags(
-      &attr, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+      &attr,
+      Int16(
+        POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK
+          | POSIX_SPAWN_START_SUSPENDED))
     var all = ~sigset_t(0)
     var none = sigset_t(0)
     posix_spawnattr_setsigdefault(&attr, &all)

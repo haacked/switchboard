@@ -162,6 +162,13 @@ public final class Service {
   let topupQueue = DispatchQueue(label: "sbd.topup")
   /// The schedules whose top-up runs on `topupQueue`. The tick skips them, so they stay due until the top-up ends.
   var topupsInFlight: Set<String> = []
+  /// Runs headless and script schedules off the state queue, up to `Schedule.maxRunning` at once.
+  let scheduleRunQueue = DispatchQueue(label: "sbd.schedule-run", attributes: .concurrent)
+  /// Each headless or script run in flight, keyed by the schedule's id. Only the state queue reads and writes it.
+  var runsInFlight: [String: RunInFlight] = [:]
+  /// The schedules whose run in flight sbd cancels. The lock guards it, because each run reads it on
+  /// `scheduleRunQueue`.
+  let cancelledRuns = OSAllocatedUnfairLock(initialState: Set<String>())
   /// The operator settings that `operatorSettings` last read, with config.json's modification date at that read.
   /// The lock guards it, because the follow-through and top-up queues read the settings too.
   let operatorSettingsRead = OSAllocatedUnfairLock<(stamp: Date?, settings: OperatorSettings)?>(initialState: nil)
@@ -450,6 +457,7 @@ public final class Service {
       if entries[id]?.session.host == nil { try settleUncertain(id, texts) } else { unsettled[id] = texts }
     }
     markInterruptedPosts()
+    recoverRuns()
     // Replay gives no session its Operator items. The parent marks must include them, or the next digest tells each
     // parent again about an ask that it already heard about.
     syncOperatorItems()
@@ -587,11 +595,11 @@ public final class Service {
           install(fresh)
           return try approveWait(request.args, caller: caller)
         })
-    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule":
-      // A top-up's caller check reads the client's panes, so it takes a new snapshot.
+    case "schedule", "schedules", "remove-schedule", "pause-schedule", "edit-schedule", "run-schedule", "schedule-log":
+      // The caller checks of a top-up and a script read the client's panes, so they take a new snapshot.
       let checksCaller =
-        (request.op == "schedule" && request.args["gate"] != nil)
-        || (request.op == "edit-schedule" && queue.sync { editsGatedSchedule(request.args) })
+        (request.op == "schedule" && (request.args["gate"] != nil || request.args["runner"]?.string == "script"))
+        || (request.op == "edit-schedule" && queue.sync { editChecksCaller(request.args) })
       let fresh = checksCaller ? buildSnapshot() : nil
       return try .success(
         prepared(request, origin: origin) {
@@ -2296,6 +2304,8 @@ public final class Service {
       install(fresh, of: session)
       if whileIdle, let e = entries[session.id], turnRuns(e) { throw TurnRunsError(name: session.name) }
       try scope.require()
+      // A run sbd started is below no pane, so no pane stop reaches it.
+      cancelRuns(of: session.id)
       if worktree { return try beginPaneStop(session.id, ancestry: ancestry, command: Self.removalCommand) }
       try stopForRemoval(session, at: site(for: session))
       return nil

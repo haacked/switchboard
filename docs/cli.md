@@ -26,8 +26,11 @@ sb schedule <session> --every 30m "Run the Waiting audit"
 sb schedule Operator --every 30m --topup --group Infra --repo owner/name --target 5 --template-file template.md --rubric-file rubric.md
 sb schedule ls                # the schedules, the next due first; ls <session> for one session's
 sb schedule pause|resume|rm <id>
+sb schedule <session> --every 1h --timeout 5m --script 'git fetch --prune'   # runs a shell command; see Script schedules
 sb schedule edit <id> --every 1h "Run the Waiting audit"   # change the interval, the prompt, or both
+sb schedule edit <id> --timeout 2m 'git fetch'   # a script's timeout and command
 sb schedule run <id>          # run it now, or once its session is free
+sb schedule log <id> --run 2  # a script run's output: the newest without --run, 2 for the one before
 sb note <session> Stacked on #1190
 sb note <session> --todo Tell Alex in #flags that the fix shipped
 sb note <session> --resolve <id>   # resolves a to-do; only you can
@@ -88,6 +91,16 @@ A session is an id, a unique id prefix, or a unique name. A session id looks lik
 ## Brief output
 
 `sb get --brief` and `sb ls --brief` show only what a caller needs to decide whether to act on a session, for a few hundred bytes per session where the full form takes 2 to 13 KB. The text form is one line per session. With `--json`, each session is an object with `id`, `name`, `url`, `state`, and `reason`, plus `acknowledged` and `snoozedUntil` when set, `pr` with the PR's `number`, `repo`, `state`, `status`, and `checks` when the session has a PR, and `waitLine` when it has open waits. `reason` is the reason on one line, cut at 200 characters. `waitLine` names what each open wait waits on, joined with `; `, and stops at 200 characters with a count of the waits left out. The MCP `list_sessions` and `get_session` tools return this form unless they are called with `full: true`. Plain `sb get` and `sb ls` don't change.
+
+## Script schedules
+
+`sb schedule <session> --every <interval> --script <command>` stores a shell command that `sbd` runs on the interval in the session's folder, with your login shell (`$SHELL -l -c`) and stdin from `/dev/null`. It runs outside the session's conversation and under the same holds as a prompt schedule: it waits while the session's turn runs, while a card or a message waits, and while the session is paused, done, or being removed, and then it runs once. A session on a remote host refuses a script. The run's environment holds the session's `SB_SESSION_ID`, so `sb` inside the run acts as the session, and `SB_SCHEDULE_RUN`, which names the schedule and the run.
+
+`--timeout` takes one number and one unit, from 10s to 2h, and no longer than the interval. Without it, a run may take 10m, or the interval when that is shorter. When a run passes its timeout, `sbd` sends SIGTERM to every process that the run started, then SIGKILL 5 seconds later, and records the run as failed. At most 2 script runs run at once across `sbd`, and a schedule never has two runs in flight. A due script that finds 2 runs in flight, or its own run still in flight, waits and runs once after one ends. Removing the schedule or the session ends its run. A run that was in flight when `sbd` restarted is recorded as failed with "sbd restarted during the run", and `sbd` stops its processes.
+
+Each run records its exit status, how long it took, and its last line of output. Exit status 0 records `ran`, and anything else records `failed`, which the Loops tab shows. `sb schedule ls` shows the command after `$ ` and the last run, such as `last: ran 5m ago · exit 0 · Fetched 3 refs`. Each run's output, stdout and stderr together, goes to `~/.sb/sessions/<session>/schedules/<schedule>/<run time>.log`, cut at 1 MiB, and `sb schedule log <id> [--run N]` prints it. `sbd` keeps the logs of the 10 newest runs.
+
+Only you, from a terminal outside Switchboard or the app, or a Manager conversation can add a script, or change a script's command or timeout. A work session or a group chat is refused, by `sb` or through MCP, and so is anything below a run of a work session's script. The Operator is refused too. Anyone who may edit the schedule may change its interval, pause it, resume it, run it, or remove it, because none of those changes what runs. A command that runs a file inside the session's worktree, such as `bin/sync`, `make`, or `npm run sync`, runs code that the session's Claude can edit.
 
 ## Slack threads
 

@@ -125,7 +125,7 @@ extension Service {
       throw APIError("a session can't arm \(arms) on itself")
     }
     let refusal = "only a Manager conversation, the Operator, or you can arm \(arms)"
-    let mayArm = { (id: String) in [SessionKind.manager, .operator].contains(self.entries[id]?.session.kind) }
+    let mayArm = { (id: String) in self.isKind(id, in: [.manager, .operator]) }
     if let claimed, !mayArm(claimed) {
       throw APIError("\(refusal), and the request comes from \(entries[claimed] == nil ? claimed : mention(claimed))")
     }
@@ -138,6 +138,11 @@ extension Service {
         throw APIError("\(refusal), and `\(command)` runs in sbd's tmux server, where the sessions run")
       }
     }
+  }
+
+  /// Whether sbd has the session and its kind is one of `kinds`. It runs on the state queue.
+  func isKind(_ id: String, in kinds: Set<SessionKind>) -> Bool {
+    entries[id].map { kinds.contains($0.session.kind) } ?? false
   }
 
   /// The data of a `wait` or `wait-resolved` event, with `from` naming the

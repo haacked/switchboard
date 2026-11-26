@@ -254,16 +254,30 @@ let usage = """
                                   rubric, and the template. Without a prompt
                                   sbd writes one. Only a Manager conversation,
                                   the Operator, or you can add or edit one
+    schedule <session> --every <interval> [--timeout <duration>] --script
+      <command>                   run the shell command in the session's
+                                  folder on the interval, with your login
+                                  shell, under the same holds as a prompt.
+                                  Each run ends after the timeout, 10s to 2h
+                                  and no longer than the interval (default 10m
+                                  or the interval). Only a Manager conversation
+                                  or you can add one or change its command or
+                                  timeout. A command that runs a file in the
+                                  worktree runs code that the session's Claude
+                                  can edit
     schedule ls [<session>]       list the schedules, the next due first
     schedule rm <id>              remove a schedule
     schedule pause|resume <id>    pause a schedule, or resume it one interval
                                   from now
-    schedule edit <id> [--every <interval>] [<prompt>]
-                                  change a schedule's interval, its prompt, or
-                                  both. A new interval brings the next run to
-                                  one interval from now when that is sooner
+    schedule edit <id> [--every <interval>] [--timeout <duration>] [<prompt>]
+                                  change a schedule's interval, its prompt or
+                                  command, a script's timeout, or several. A
+                                  new interval brings the next run to one
+                                  interval from now when that is sooner
     schedule run <id>             run a schedule now, or once its session is
                                   free
+    schedule log <id> [--run N]   print the output of a script's newest run,
+                                  or of its Nth newest
     note <session> [<text>]       add a note, or list the notes: open to-dos,
                                   then plain notes, then resolved to-dos
     note <session> --todo <text>  add a to-do, a task for you that blocks
@@ -636,7 +650,7 @@ struct Args {
       "--plan", "--text", "--wait",
       "--set", "--description", "--artifact", "--kind", "--version", "--limit", "--org", "--next",
       "--preset", "--label", "--person", "--backlog", "--steps", "--for",
-      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent",
+      "--reason", "--message", "--drop", "--template-file", "--rubric-file", "--input", "--agent", "--run",
     ]).union(waitFlags.keys)
     var rest = argv
     while let arg = rest.popFirst() {
@@ -833,11 +847,12 @@ func sessionCommand(_ op: String, _ a: Args, session: String? = nil, extra: [Str
 
 /// Forwards a Claude Code hook payload to sbd and prints sbd's answer. It
 /// prints nothing and exits 0 when sbd is down, because Claude Code shows a
-/// failed hook in the conversation.
+/// failed hook in the conversation. Inside a schedule's run, it sends nothing, as `ScheduleRun.hookSession` says.
 func hook() -> Never {
   let input = FileHandle.standardInput.readDataToEndOfFile()
   let env = ProcessInfo.processInfo.environment
-  guard let session = env["SB_SESSION_ID"], let payload = try? JSONCoding.decoder.decode(JSON.self, from: input) else {
+  guard let session = ScheduleRun.hookSession(env), let payload = try? JSONCoding.decoder.decode(JSON.self, from: input)
+  else {
     exit(0)
   }
   // The timeout stays below the 30 s hook timeout in the session's claude-settings.json. A

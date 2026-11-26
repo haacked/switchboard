@@ -13,4 +13,15 @@ extension MCPToolServer {
     }
     return try client.call(op, request)
   }
+
+  /// The arguments of `keys`, with a `script` sent as the request's `prompt` and `runner` script. sbd refuses
+  /// `runner` on an edit of a schedule that runs otherwise. It throws for arguments with both a prompt and a script.
+  func scheduleRequest(_ args: JSON, _ keys: [String]) throws -> [String: JSON] {
+    var request = pick(args, keys)
+    guard let script = args["script"] else { return request }
+    if args["prompt"] != nil { throw APIError("send script or prompt, not both") }
+    request["prompt"] = script
+    request["runner"] = "script"
+    return request
+  }
 }

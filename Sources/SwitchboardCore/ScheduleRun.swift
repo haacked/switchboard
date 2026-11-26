@@ -3,6 +3,17 @@ import Foundation
 /// The argv of a headless or script schedule's run. sbd passes the session's own permission mode and MCP arguments,
 /// so a run can do no more than a prompt sent into the session.
 public enum ScheduleRun {
+  /// The variable that a run's environment holds, as `<schedule id>:<run t>`, where the run's t is its start in ms
+  /// since the epoch. sbd finds a run that it lost at a restart by it.
+  public static let marker = "SB_SCHEDULE_RUN"
+
+  /// The session that `sb hook` posts a hook payload for: `SB_SESSION_ID`, or nil inside a run. A headless run's
+  /// claude can fire `sb hook` from the account's or the worktree's settings, and its hooks would read as the
+  /// session's. Its SessionStart would point the session at a conversation that the run never saves.
+  public static func hookSession(_ env: [String: String]) -> String? {
+    env[marker] == nil ? env["SB_SESSION_ID"] : nil
+  }
+
   /// `claude -p` with the prompt, in the order that `Service.startClaude` uses: the MCP arguments, the model,
   /// `claudeArgs`, then the permission mode, so the session's mode wins over one in `claudeArgs`. The run passes no
   /// `--settings` file, so sbd's hooks never fire for it, and it saves no conversation. A Manager conversation's or

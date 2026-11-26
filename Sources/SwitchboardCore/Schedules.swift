@@ -101,6 +101,8 @@ public struct Schedule: Codable, Equatable, Sendable {
 
   public static let maxPerSession = 10
   public static let maxRuns = 10
+  /// The most headless and script runs that sbd runs at once, across every session.
+  public static let maxRunning = 2
   /// One minute, in ms.
   public static let minInterval: Int64 = 60_000
   /// The shortest and the longest timeout of a headless or script run, in ms.
@@ -133,7 +135,7 @@ public struct Schedule: Codable, Equatable, Sendable {
   public var account: String?
   /// The model of a headless run. Nil means the model of the session's next launch.
   public var model: String?
-  /// How long a headless or script run may take, in ms. Nil means the runner's default.
+  /// How long a headless or script run may take, in ms. Nil means the runner's default, which `runTimeout` gives.
   public var timeout: Int64?
   /// The start of the headless or script run in flight, in ms since the epoch. Nil when no run is in flight.
   public var running: Int64?
@@ -152,6 +154,12 @@ public struct Schedule: Codable, Equatable, Sendable {
     self.last = last
     self.runs = runs
     self.gate = gate
+  }
+
+  /// How long a run may take, in ms: the stored timeout, or else 30m for a headless run and 10m for a script, cut to
+  /// the interval, so a run ends before the next one is due.
+  public var runTimeout: Int64 {
+    timeout ?? min(runner == .headless ? 1_800_000 : 600_000, every)
   }
 
   /// The known runs, newest first. A row stored before sbd kept the history shows its `last`.
@@ -189,7 +197,7 @@ public struct Schedule: Codable, Equatable, Sendable {
     now: Int64
   ) throws -> Schedule {
     guard every != nil || prompt != nil || account != nil || model != nil || timeout != nil else {
-      throw APIError("an edit needs every, an interval such as 30m, or a prompt")
+      throw APIError("an edit needs every, an interval such as 30m, a prompt, an account, a model, or a timeout")
     }
     let runner = self.runner ?? .session
     if account != nil || model != nil, runner != .headless {
@@ -381,7 +389,8 @@ public struct Schedule: Codable, Equatable, Sendable {
   public static func duplicate(of schedule: Schedule, in existing: [Schedule]) -> String? {
     let prompt = schedule.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     for other in existing where other.id != schedule.id {
-      if other.runner == schedule.runner, other.account == schedule.account, other.model == schedule.model,
+      if (other.runner ?? .session) == (schedule.runner ?? .session), other.account == schedule.account,
+        other.model == schedule.model,
         other.prompt.trimmingCharacters(in: .whitespacesAndNewlines) == prompt
       {
         let does =
@@ -420,7 +429,7 @@ extension Session {
 
   /// A schedule with a runner goes to `jobs`, because an older sbd would decode it in `schedules` as a prompt to send.
   public mutating func addSchedule(_ schedule: Schedule) {
-    if schedule.runner == nil {
+    if (schedule.runner ?? .session) == .session {
       schedules = (schedules ?? []) + [schedule]
     } else {
       jobs = (jobs ?? []) + [schedule]

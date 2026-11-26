@@ -203,6 +203,13 @@ public enum Processes {
     return found
   }
 
+  /// The start time of the process, in microseconds since the epoch, as `ProcessTable` reads it. It is nil when no
+  /// process has the pid. A pid that exited and was reused names a process with another start time.
+  public static func startTime(of pid: Int) -> Int64? {
+    guard isValidPid(pid) else { return nil }
+    return info(of: pid_t(pid)).map(ProcessTable.startTime)
+  }
+
   /// The parent pid from sysctl, which reads processes of every user, as `ps` does.
   private static func parent(of pid: Int) -> Int? {
     info(of: pid_t(pid)).map { Int($0.kp_eproc.e_ppid) }

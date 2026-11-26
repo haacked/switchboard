@@ -207,7 +207,7 @@ extension MCPToolServer {
       ], required: ["plan", "kind"]),
     Tool(
       "add_schedule",
-      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits.",
+      "Adds a schedule to a session, by default the calling session. Switchboard sends the prompt to the session on the interval, as is, so a slash command runs as one. The shortest interval is 1m. A run that comes due while the session is busy runs once when the session is free. A stopped session resumes with the prompt. A schedule survives restarts, so use one for a recurring check instead of /loop or a chain of date waits. With `script` instead of a prompt, Switchboard runs the shell command in the session's folder on the interval, outside the conversation, and keeps each run's exit status and output. Only a Manager conversation or the user can add a script.",
       [
         "session": session,
         "every": interval,
@@ -230,6 +230,12 @@ extension MCPToolServer {
           ],
           "required": ["group", "repo", "target", "template", "rubric"],
         ],
+        "script": string(
+          "A shell command to run on each run instead of sending a prompt. It runs in the session's folder with the user's login shell. Send script or prompt, not both."
+        ),
+        "timeout": string(
+          "How long a script's run may take, one number and one unit, such as 5m: 10s to 2h, and no longer than the interval. The default is 10m, or the interval when that is shorter."
+        ),
       ], required: ["every"]),
     Tool(
       "list_schedules",
@@ -241,11 +247,13 @@ extension MCPToolServer {
       required: ["schedule"]),
     Tool(
       "edit_schedule",
-      "Changes a schedule's interval, its prompt, or both. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing.",
+      "Changes a schedule's interval, its prompt or command, its timeout, or several. The schedule keeps its id and run history, so edit a schedule instead of removing it and adding a new one. A new interval brings the next run to one interval from now when that is sooner. It sends nothing.",
       [
         "schedule": schedule,
         "every": interval,
         "prompt": string("The new prompt to send on each run."),
+        "script": string("The new command of a script schedule. Send script or prompt, not both."),
+        "timeout": string("The new timeout of a script schedule, such as 5m."),
       ], required: ["schedule"]),
     Tool(
       "run_schedule",
