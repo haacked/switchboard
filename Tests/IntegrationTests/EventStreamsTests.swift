@@ -181,6 +181,8 @@ extension FakeGitHub {
     github.review(EventStreamsTests.number, by: "alice", "COMMENTED", at: stamp(0))
 
     try sbd.poll(all: true)
+    // The hub tallies a poll's reads when the next poll ends.
+    try sbd.poll()
 
     let source = try sbd.waitForEventSource("the matched signal") { $0["matched"]?.int == 1 }
     #expect(source["misses"]?.int == 0, "\(source.text)")
@@ -193,6 +195,7 @@ extension FakeGitHub {
     github.change(EventStreamsTests.number) { $0["headRefOid"] = "pushed" }
 
     try sbd.poll(all: true)
+    try sbd.poll()
 
     try sbd.waitForEventSource("the miss") { $0["misses"]?.int == 1 }
   }
@@ -204,6 +207,7 @@ extension FakeGitHub {
     github.change(EventStreamsTests.number) { $0["headRefOid"] = "pushed" }
 
     try sbd.poll(all: true)
+    try sbd.poll()
 
     let source = try #require(try sbd.eventSource())
     #expect(source["misses"]?.int == 0, "\(source.text)")

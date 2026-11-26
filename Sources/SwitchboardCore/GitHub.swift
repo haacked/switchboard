@@ -68,7 +68,7 @@ public struct EventSettings: Codable, Equatable, Sendable {
     let c = try decoder.container(keyedBy: CodingKeys.self)
     let d = EventSettings()
     mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? d.mode
-    maxSubscriptions = try c.decodeIfPresent(Int.self, forKey: .maxSubscriptions) ?? d.maxSubscriptions
+    maxSubscriptions = max(0, try c.decodeIfPresent(Int.self, forKey: .maxSubscriptions) ?? d.maxSubscriptions)
   }
 }
 

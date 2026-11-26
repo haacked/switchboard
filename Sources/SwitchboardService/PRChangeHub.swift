@@ -80,6 +80,20 @@ final class PRChangeHub {
   private var counts: [String: Counts] = [:]
   /// What shadow mode measured for each provider, by provider id.
   private var tallies: [String: ShadowTally] = [:]
+
+  /// A read that the next poll's tally takes.
+  private struct HeldRead {
+    var id: String
+    var ref: PRRef
+    var snapshot: ShadowTally.Snapshot
+    /// When the poll that read the PR started and ended, in ms.
+    var polled: Int64
+    var ended: Int64
+  }
+
+  private var heldReads: [HeldRead] = []
+  /// Each PR's last read that a tally took, with the time its poll started, by node id.
+  private var tallied: [String: (snapshot: ShadowTally.Snapshot, polled: Int64)] = [:]
   private var pendingReads = 0
   private var reviewOnlyReads = 0
 
@@ -108,7 +122,12 @@ final class PRChangeHub {
       self.hub = hub
     }
 
-    func signal(_ s: PRSignal) { hub?.onQueue { $0.receive(s, from: self.provider) } }
+    /// Stamps the signal's arrival here, because the poller's queue can hold it until a poll ends.
+    func signal(_ s: PRSignal) {
+      guard let hub else { return }
+      let at = hub.now()
+      hub.onQueue { $0.receive(s, from: self.provider, at: at) }
+    }
     func coverage(_ change: CoverageChange) { hub?.onQueue { $0.receive(change, from: self.provider) } }
     func availability(_ provider: String, _ a: Availability) {
       hub?.onQueue { $0.receive(a, from: self.provider) }
@@ -126,7 +145,10 @@ final class PRChangeHub {
   /// that hasn't happened.
   func cycleEnded(known: [String: KnownPR], interest: [PRRef]) {
     dispatchPrecondition(condition: .onQueue(queue))
-    if shadow { tally(known) }
+    if shadow {
+      tallyLastPoll()
+      holdForTally(known)
+    }
     self.known = known
     seen = seen.filter { now() - $0.value < Self.dedupeMs }
     ids = Dictionary(known.map { ($0.value.ref, $0.key) }) { a, _ in a }
@@ -153,26 +175,40 @@ final class PRChangeHub {
     reviewOnlyReads += reviewOnly
   }
 
-  /// Gives each provider's tally the PRs that this poll read, with their last read, and logs each miss.
-  private func tally(_ reads: [String: KnownPR]) {
+  /// Keeps the PRs that this poll read, with the time the poll ended, for the next poll's tally. A signal that a
+  /// provider sends during a poll waits on the poller's queue until the poll ends, so the tally runs once those
+  /// signals are in. Must run before `known` takes the new reads.
+  private func holdForTally(_ reads: [String: KnownPR]) {
+    let ended = now()
+    heldReads = reads.compactMap { id, pr in
+      guard let snapshot = pr.snapshot, known[id].map({ pr.polled > $0.polled }) ?? true else { return nil }
+      return HeldRead(id: id, ref: pr.ref, snapshot: snapshot, polled: pr.polled, ended: ended)
+    }.sorted { $0.id < $1.id }
+  }
+
+  /// Gives each provider's tally the reads that the last poll held, with each PR's read before them, and logs each
+  /// miss. A read shows its change at the time its poll ended. The read before it counts from when its poll started,
+  /// so a source that went live during that poll can't count a miss.
+  private func tallyLastPoll() {
     let now = now()
-    let reads = reads.sorted { $0.key < $1.key }
     for p in providers {
       var t = tallies.removeValue(forKey: p.id) ?? ShadowTally()
-      for (id, pr) in reads {
-        guard let snapshot = pr.snapshot, let old = known[id], pr.polled > old.polled else { continue }
-        let previous = old.snapshot.map { (snapshot: $0, polled: old.polled) }
+      for read in heldReads {
         let missed = t.read(
-          id, previous: previous, now: snapshot, polled: pr.polled, liveSince: live(p.id, for: pr.ref)?.since)
+          read.id, previous: tallied[read.id], now: read.snapshot, polled: read.ended,
+          liveSince: live(p.id, for: read.ref)?.since)
         if !missed.isEmpty {
           logLine(
-            "github: \(p.id) sent no signal for \(pr.ref.repo)#\(pr.ref.number) before a poll showed its "
+            "github: \(p.id) sent no signal for \(read.ref.repo)#\(read.ref.number) before a poll showed its "
               + missed.joined(separator: ", ") + " change")
         }
       }
       t.prune(now: now)
       tallies[p.id] = t
     }
+    for read in heldReads { tallied[read.id] = (read.snapshot, read.polled) }
+    tallied = tallied.filter { known[$0.key] != nil }
+    heldReads = []
   }
 
   /// The signals of the provider that covers each covered PR, by node id. The poll rates read it.
@@ -208,7 +244,7 @@ final class PRChangeHub {
 
   // MARK: The providers' side
 
-  private func receive(_ s: PRSignal, from provider: String) {
+  private func receive(_ s: PRSignal, from provider: String, at arrived: Int64) {
     let now = now()
     counts[provider, default: Counts()].signals += 1
     counts[provider]?.lastSignalAt = now
@@ -217,7 +253,7 @@ final class PRChangeHub {
     seen[key] = now
     for id in targets(of: s.target).sorted() {
       if shadow {
-        tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: now)
+        tallies[provider, default: ShadowTally()].signal(id, kind: s.kind, at: arrived)
       } else {
         requestSignalRead(id, s, provider: provider, now: now)
       }

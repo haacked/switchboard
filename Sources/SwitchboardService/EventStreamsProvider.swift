@@ -120,8 +120,9 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     }
   }
 
+  /// Runs on the provider's queue before it returns, so `sb sources --recheck` shows the new state.
   func recheck() {
-    queue.async { [self] in
+    queue.sync { [self] in
       guard case .unavailable = availability else { return }
       (listBackoff, limitedUntil) = (Backoff(), 0)
       createFailures = [:]
@@ -250,7 +251,8 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
   }
 
   /// Deletes a subscription that sbd no longer wants. GitHub ends every stream of the subscription, including a
-  /// `gh event listen` that uses the same one. A place it frees ends the wait after a refused create.
+  /// `gh event listen` that uses the same one. A delete frees a place under the account's limit, so the next update
+  /// tries the creates that the limit refused.
   private func delete(_ sub: String, of ref: PRRef) {
     do {
       guard let (status, json) = try rest("DELETE", "event-subscriptions/\(sub)") else { return }
@@ -344,15 +346,9 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     case .signal(let s): sink?.signal(s)
     case .ignored: break
     case .end(let outcome, let reason):
-      let why = "GitHub ended the stream: \(outcome)" + (reason.map { " (\($0))" } ?? "")
-      drop(ref, reason: why)
-      if outcome == "reconnect" {
-        streams[ref]?.backoff.retryAt = 0
-      } else {
-        subscriptions[ref] = nil
-        streams[ref] = nil
-      }
-      update()
+      // A stream that GitHub ends again as soon as it opens backs off like any other failure.
+      failed(ref, reason: "GitHub ended the stream: \(outcome)" + (reason.map { " (\($0))" } ?? ""))
+      if outcome != "reconnect" { subscriptions[ref] = nil }
     }
   }
 
@@ -400,20 +396,21 @@ final class EventStreamsProvider: NSObject, PRChangeProvider, URLSessionDataDele
     switch status {
     case 200, 0:
       failed(ref, reason: error.map { "the stream dropped: \($0.localizedDescription)" } ?? "the stream closed")
-    case 401 where !stream.refreshed:
-      _ = client.streamFailed(status: status, headers: stream.headers, json: json)
-      streams[ref]?.refreshed = true
-      open(ref)
-    case 403 where !client.streamFailed(status: status, headers: stream.headers, json: json):
-      refuse(GitHub.message(json))
-    case 404:
-      // The subscription expired or someone deleted it.
-      drop(ref, reason: "the subscription is gone")
-      subscriptions[ref] = nil
-      update()
     default:
-      _ = client.streamFailed(status: status, headers: stream.headers, json: json)
-      failed(ref, reason: "GitHub answered \(status) \(GitHub.message(json))")
+      let rateLimited = client.streamFailed(status: status, headers: stream.headers, json: json)
+      switch status {
+      case 401 where !stream.refreshed:
+        streams[ref]?.refreshed = true
+        open(ref)
+      case 403 where !rateLimited:
+        refuse(GitHub.message(json))
+      case 404:
+        // The subscription expired or someone deleted it, so the next update creates a new one.
+        failed(ref, reason: "the subscription is gone")
+        subscriptions[ref] = nil
+      default:
+        failed(ref, reason: "GitHub answered \(status) \(GitHub.message(json))")
+      }
     }
   }
 

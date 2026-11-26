@@ -75,11 +75,13 @@ private final class ShadowHarness {
     queue.sync {}
   }
 
-  /// Stores a read of the PR at `t` that shows `snapshot`, and ends the cycle.
+  /// Stores a read of the PR at `t` that shows `snapshot`, and ends the cycle. The hub tallies a poll's reads when
+  /// the next poll ends, so a second cycle without a read follows.
   func read(_ id: String = "PR_7", _ snapshot: ShadowTally.Snapshot = ShadowHarness.base, at t: Int64) {
     clock.now = t
     known[id]?.polled = t
     known[id]?.snapshot = snapshot
+    endCycle()
     endCycle()
   }
 
@@ -328,6 +330,28 @@ private func withHead(_ head: String) -> ShadowTally.Snapshot {
 
     #expect(h.source?.misses == 0)
     #expect(h.source?.matched == 1)
+  }
+
+  /// A signal that arrives while a poll holds the poller's queue reaches the hub after that poll ends. The read of
+  /// that poll still counts it, because the hub tallies a poll's reads when the next poll ends.
+  @Test func aSignalThatArrivesDuringThePollThatShowsItsChangeIsMatched() {
+    let h = ShadowHarness()
+    h.coverage(.live(.pr(prRef(7)), since: h.now, gap: true))
+    h.read(at: t0 + 10_000)
+    h.known["PR_7"]?.polled = t0 + 200_000
+    h.known["PR_7"]?.snapshot = withHead("head7b")
+    h.setNow(t0 + 201_000)
+
+    let interest = [prRef(7), prRef(8)]
+    h.queue.sync {
+      h.provider.emit(.pr(prRef(7)), kind: .head)
+      h.hub.cycleEnded(known: h.known, interest: interest)
+    }
+    h.endCycle()
+
+    #expect(h.source?.misses == 0)
+    #expect(h.source?.matched == 1)
+    #expect(h.source?.unmatched == 0)
   }
 
   @Test func countPendingReadsAddsUpInTheReport() {

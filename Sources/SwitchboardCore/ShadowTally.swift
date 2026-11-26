@@ -31,9 +31,10 @@ public struct ShadowTally: Equatable, Sendable {
     }
 
     public init(_ pr: PullRequest) {
+      let submitted = pr.reviews.filter { !$0.isPending }
       self.init(
-        head: pr.headSha, state: pr.state.rawValue, draft: pr.draft, reviews: pr.reviews.count, checks: pr.checks,
-        mergeable: pr.mergeable?.rawValue, lastReview: pr.reviews.last?.submittedAt)
+        head: pr.headSha, state: pr.state.rawValue, draft: pr.draft, reviews: submitted.count, checks: pr.checks,
+        mergeable: pr.mergeable?.rawValue, lastReview: submitted.last?.submittedAt)
     }
 
     /// The kinds of signal that announce a change from `old` to this snapshot.

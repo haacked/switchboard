@@ -366,6 +366,21 @@ import Testing
     #expect(ShadowTally.Snapshot(pr) != ShadowTally.Snapshot(samplePR(checks: "PENDING")))
   }
 
+  /// The status query reads the last 20 reviews, so a new review can leave the count at 20.
+  @Test func aNewestReviewAtTheSameCountIsAReviewChange() {
+    let old = ShadowTally.Snapshot(
+      head: "h", state: "OPEN", draft: false, reviews: 20, checks: nil, mergeable: nil,
+      lastReview: "2026-11-25T10:00:00Z")
+    var new = old
+    new.lastReview = "2026-11-25T11:00:00Z"
+    var t = ShadowTally()
+    t.signal("PR_7", kind: .review, at: 1_000)
+
+    t.read("PR_7", previous: (old, 500), now: new, polled: 2_000, liveSince: nil)
+
+    #expect(t.matched == 1)
+  }
+
   @Test func fieldsThatNoSignalAnnouncesLeaveTheSnapshotTheSame() {
     var pr = samplePR(checks: "PENDING")
     pr.title = "a new title"
