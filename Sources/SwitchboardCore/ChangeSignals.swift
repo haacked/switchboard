@@ -40,6 +40,17 @@ extension Wait.Kind {
     case .session, .date, .manual, .reply: .all
     }
   }
+
+  /// The kinds of signal that report the change a wait of this kind waits for, or nil for a kind whose change no
+  /// signal reports. No source reports the comments that a `queue` or `deploy` wait reads.
+  public var signalKinds: Set<PRSignal.Kind>? {
+    switch self {
+    case .ci: [.checks, .head]
+    case .review, .botReview, .approval: [.review]
+    case .merge: [.state]
+    case .queue, .deploy, .session, .date, .manual, .reply: nil
+    }
+  }
 }
 
 extension Wait {

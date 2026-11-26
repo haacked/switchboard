@@ -5,14 +5,14 @@ import Testing
 @testable import SwitchboardService
 
 /// A clock that only the test moves, in ms.
-private final class TestClock {
+final class TestClock {
   var now: Int64
   init(_ now: Int64) { self.now = now }
 }
 
 /// The poller's side of the hub. It keeps the requests in a real `ReadRequests` at the test clock's time, so a
 /// request that `ReadRequests` merges with an earlier one is merged here too.
-private final class FakeReader: PRReader {
+final class FakeReader: PRReader {
   let clock: TestClock
   var requests = ReadRequests()
 
@@ -33,8 +33,9 @@ private final class FakeReader: PRReader {
 
 /// A hub with fake providers and a fake poller on a test clock. The poller knows PR_7 and PR_8 in acme/widgets and
 /// PR_9 in acme/gadgets, and it read each a minute before the test starts. `advance` runs a poll at the time of
-/// each timed read, as the poller's wake does, and each poll stores its reads and ends with `cycleEnded`.
-private final class HubHarness {
+/// each timed read, as the poller's wake does, and each poll stores its reads and ends with `cycleEnded`. The hub runs
+/// in `mode`, which by default is the one where signals cause reads and coverage slows the poll rates.
+final class HubHarness {
   static let t0: Int64 = 1_000_000_000_000
 
   struct Read: Equatable, CustomStringConvertible {
@@ -57,10 +58,10 @@ private final class HubHarness {
   /// The reads that the polls ran, in order.
   private(set) var reads: [Read] = []
 
-  init(providers: [FakeProvider] = [FakeProvider()]) {
+  init(providers: [FakeProvider] = [FakeProvider()], mode: PRChangeHub.Mode = .slowsPolling) {
     reader = FakeReader(clock: clock)
     self.providers = providers
-    hub = PRChangeHub(providers: providers, queue: queue)
+    hub = PRChangeHub(providers: providers, queue: queue, mode: mode)
     hub.now = { [clock] in clock.now }
     hub.reader = reader
     hub.start()

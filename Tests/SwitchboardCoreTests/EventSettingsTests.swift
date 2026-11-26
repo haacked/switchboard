@@ -37,13 +37,24 @@ import Testing
     #expect(s.events.maxSubscriptions == 12)
   }
 
+  @Test func readModeDecodesInsideTheGitHubSettings() throws {
+    let c = try JSONCoding.decode(Config.self, from: #"{"github": {"events": {"mode": "read"}}}"#)
+
+    #expect(c.github.events.mode == .read)
+    #expect(c.github.events.maxSubscriptions == 80)
+  }
+
+  @Test func readModeDecodesOnItsOwn() throws {
+    #expect(try JSONCoding.decode(EventSettings.Mode.self, from: #""read""#) == .read)
+  }
+
   @Test func anEmptyEventsObjectUsesTheDefaults() throws {
     #expect(try JSONCoding.decode(EventSettings.self, from: "{}") == EventSettings())
   }
 
   /// A mode that this sbd doesn't know, such as one a later sbd adds, turns the source off and leaves the rest of
   /// the config as written.
-  @Test(arguments: ["auto", "read", "bogus", "", "SHADOW"])
+  @Test(arguments: ["auto", "bogus", "", "SHADOW", "READ"])
   func anUnknownModeDecodesAsOffAndTheRestStillDecodes(_ mode: String) throws {
     let text = #"""
       {"idleStopSeconds": 30,
@@ -68,6 +79,14 @@ import Testing
   @Test func shadowModeSurvivesARoundTrip() throws {
     var s = GitHubSettings()
     s.events.mode = .shadow
+    s.events.maxSubscriptions = 40
+
+    #expect(try JSONCoding.convert(s, to: GitHubSettings.self) == s)
+  }
+
+  @Test func readModeSurvivesARoundTrip() throws {
+    var s = GitHubSettings()
+    s.events.mode = .read
     s.events.maxSubscriptions = 40
 
     #expect(try JSONCoding.convert(s, to: GitHubSettings.self) == s)

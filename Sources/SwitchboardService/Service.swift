@@ -2996,6 +2996,7 @@ public final class Service {
       openPrompt: facts.openPermission != nil || facts.openQuestion != nil, pr: facts.pr.map(PRSummary.init),
       markedDone: s.done)
     out.url = SessionLink.url(for: id).absoluteString
+    if let pr = facts.pr { out.pr?.source = github?.hub.source(of: PRRef(repo: pr.repo, number: pr.number)) }
     // `prNumbers` keeps no repo, so a host could read the number of an earlier PR in a repo that it may not read.
     // `shownFacts` keeps every number, because `seedParentMarks` reads them to skip PRs that a parent already heard about.
     if origin == .mac {

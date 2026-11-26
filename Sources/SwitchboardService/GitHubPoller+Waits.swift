@@ -108,6 +108,7 @@ extension GitHubPoller {
           session: s.session, wait: s.wait.id, outcome: s.settlement.outcome, changedAt: s.settlement.changedAt,
           met: s.settlement.met)
         stats.resolved += 1
+        hub.waitResolved(s.prId, kind: s.wait.kind, created: s.wait.created)
       } catch {
         logLine("github: can't resolve wait \(s.wait.id) of \(s.session): \(error)")
       }
@@ -183,7 +184,9 @@ extension GitHubPoller {
     let verdict = wait.kind == .ci && pr.ciFailed ? "failed" : outcome
     guard let first = confirming[wait.id], first.sha == pr.headSha, first.outcome == verdict else {
       confirming[wait.id] = (pr.headSha, verdict, s.polled)
-      if let after = confirmReadAfter { requestRead([s.prId], after: after, trigger: .confirm) }
+      if let after = confirmReadAfter ?? hub.confirmDelay(s.prId) {
+        requestRead([s.prId], after: after, trigger: .confirm)
+      }
       return false
     }
     return s.polled > first.polled

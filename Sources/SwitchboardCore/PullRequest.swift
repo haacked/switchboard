@@ -450,6 +450,9 @@ public struct PRSummary: Codable, Equatable, Sendable {
   public var rereview: Rereview?
   /// The number of commits on the PR. nil until sbd reads it.
   public var commitCount: Int?
+  /// How sbd learns of the PR's changes: `events` when a source of PR changes covers it, else `polling`. nil when
+  /// sbd runs no source.
+  public var source: String?
 
   public init(_ pr: PullRequest) {
     number = pr.number

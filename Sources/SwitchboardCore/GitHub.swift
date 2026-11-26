@@ -49,6 +49,9 @@ public struct EventSettings: Codable, Equatable, Sendable {
     case off
     /// sbd subscribes and counts what the streams report, but a signal causes no read and changes no poll rate.
     case shadow
+    /// A signal and each attach of a stream cause a read of the PR. The poll rates stay as they are with the source
+    /// off.
+    case read
 
     /// A mode that this sbd doesn't know, such as one that a later sbd added, turns the source off, so the rest of
     /// the config still applies.

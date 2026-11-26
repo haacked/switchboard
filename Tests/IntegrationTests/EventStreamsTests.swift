@@ -24,8 +24,39 @@ extension Instance {
   }
 }
 
+extension Instance {
+  /// The reads of `sb poll --stats --json` under each trigger, summed over the owners.
+  fileprivate func readsByTrigger() throws -> [String: Int] {
+    let output = try sb("poll", "--stats", "--json")
+    let stats = try #require(JSON.parse(output), "sb poll --stats --json printed \(output)")
+    var reads: [String: Int] = [:]
+    for (trigger, owners) in stats["reads"]?.object ?? [:] {
+      reads[trigger] = (owners.object ?? [:]).values.map { $0["reads"]?.int ?? 0 }.reduce(0, +)
+    }
+    return reads
+  }
+
+  fileprivate func reads(_ trigger: String) throws -> Int { try readsByTrigger()[trigger] ?? 0 }
+
+  /// Waits until `sb poll --stats` counts `count` catch-up reads. The hub asks for one 5 s after each attach.
+  fileprivate func waitForCatchUps(_ count: Int) throws {
+    try waitFor("\(count) catch-up reads", timeout: 30) { try reads("catchup") >= count }
+  }
+
+  /// The `pr:` line of `sb get`, or nil when it prints none.
+  fileprivate func prLine(_ id: String) throws -> String? {
+    try sb("get", id).split(separator: "\n").first { $0.hasPrefix("  pr:") }.map(String.init)
+  }
+}
+
 extension FakeGitHub {
   fileprivate var creates: [RESTRequest] { restRequests(to: "event-subscriptions").filter { $0.method == "POST" } }
+
+  /// How many status requests after the first `since` GraphQL requests read PR `number`.
+  fileprivate func statusReads(of number: Int, since: Int) throws -> Int {
+    let id = try #require(pr(number)["id"]?.string)
+    return requests.dropFirst(since).filter { $0.kind == "status" && $0.ids.contains(id) }.count
+  }
 
   /// The requests that opened a stream of the subscription.
   fileprivate func streamRequests(_ id: String) -> [RESTRequest] {
@@ -33,9 +64,11 @@ extension FakeGitHub {
   }
 }
 
-/// sbd's Event Streams provider in shadow mode, against the Event Streams API
-/// of FakeGitHub. In shadow mode the provider subscribes and counts signals,
-/// and sbd's reads stay what they are with the provider off.
+/// sbd's Event Streams provider against the Event Streams API of FakeGitHub. In
+/// shadow mode the provider subscribes and counts signals, and sbd's reads stay
+/// what they are with the provider off. In read mode a signal and each attach
+/// of a stream cause a read, and the poll rates stay what they are with the
+/// provider off.
 @Suite(.blocking(timeLimit: .seconds(180))) struct EventStreamsTests {
   static let number = StatsPR.charts.number
   /// How long a test waits for the provider to open a stream again. Its backoff after a drop is jittered from 1 s.
@@ -344,5 +377,174 @@ extension FakeGitHub {
     }
     #expect(!github.eventRequests.dropFirst(mark).contains { $0.method == "POST" })
     #expect(github.subscriptions.map(\.id) == [id])
+  }
+
+  // MARK: Read mode
+
+  /// The message that resumes a session whose review wait on #18303 resolved.
+  static let reviewResumed = "a review from alex on the session's PR: alex requested changes."
+
+  /// A fake GitHub whose account has Event Streams, and a read-mode sbd with a session on #18303 whose PR's checks are
+  /// `checks`. The session has the wait that `wait` gives `sb wait`, set before the first poll, so that no read
+  /// after the poll counts under the `wait` trigger. The poll timer is off. The test waits for the stream and for
+  /// the catch-up read after it, so a change that the test makes afterwards is one that the catch-up read didn't see.
+  private func readMode(checks: String? = nil, wait: [String] = []) throws -> (
+    github: FakeGitHub, sbd: Instance, session: SessionSummary, subscription: String
+  ) {
+    let github = try FakeGitHub()
+    github.eventsEnabled = true
+    if let checks { github.checks(Self.number, checks) }
+    let sbd = try Instance.withGitHub(github, events: "read")
+    let s = try sbd.session(in: StatsPR.charts.repo, branch: StatsPR.charts.branch)
+    if !wait.isEmpty { try sbd.sb(["wait", s.id] + wait) }
+    try sbd.poll()
+    let subscription = try sbd.waitForStream(github)
+    try sbd.waitForCatchUps(1)
+    return (github, sbd, s, subscription)
+  }
+
+  /// With the poll timer off and no `sb poll` after the stream opens, a check suite event causes the read that shows
+  /// the passed checks, and the read that confirms it comes 10 s later. The fake's Actions answer has no run of the
+  /// head commit, so one read can't resolve the wait. `sb sources` then shows the time from the event to
+  /// `wait-resolved` under the wait's kind.
+  @Test func aCheckSuiteEventResolvesACIWaitWithAReadAndTheConfirmingRead() throws {
+    let (github, sbd, s, _) = try readMode(checks: "PENDING", wait: ["--kind", "ci", "--note", "then merge"])
+    #expect(try sbd.count("wait-resolved", of: s.id) == 0)
+    let mark = github.requests.count
+
+    github.checks(Self.number, "SUCCESS")
+    github.emit(Self.number, type: FakeGitHub.checkSuiteEvent)
+
+    try sbd.waitFor("the wait to resolve", timeout: 45) { try sbd.count("wait-resolved", of: s.id) == 1 }
+    #expect(try github.statusReads(of: Self.number, since: mark) == 2)
+    try resumed(sbd, s, with: "CI on the session's PR: the checks passed. Your note: then merge.")
+    #expect(try sbd.count("wait-resolved", of: s.id) == 1)
+    let reads = try sbd.readsByTrigger()
+    #expect((reads["event"] ?? 0) >= 1, "\(reads)")
+    #expect((reads["confirm"] ?? 0) >= 1, "\(reads)")
+    // The time from the event's GitHub time to wait-resolved covers the event read's 2 s and the confirming read's
+    // 10 s. sbd's clock stays on real time in this test, as the fake's event time does.
+    let source = try sbd.waitForEventSource("the time to wait-resolved") {
+      $0["resolveLatency"]?["ci"]?["count"]?.int == 1
+    }
+    let median = try #require(source["resolveLatency"]?["ci"]?["medianMs"]?.int, "\(source.text)")
+    #expect(median >= 10_000 && median < 120_000, "\(source.text)")
+    let text = try sbd.sb("sources")
+    #expect(text.contains("event to wait-resolved: ci "), "\(text)")
+    #expect(source["shadow"]?.bool == false, "\(source.text)")
+  }
+
+  /// The poll that `sb poll` runs and the read that the event asks for both see the review. The wait resolves once
+  /// and sends one message.
+  @Test func anEventAndAConcurrentPollResolveAWaitOnce() throws {
+    let (github, sbd, s, _) = try readMode(wait: ["--kind", "review", "--who", "alex"])
+    let sent = try sbd.count("sent", of: s.id)
+
+    github.review(Self.number, by: "alex", "CHANGES_REQUESTED", at: stamp(60))
+    github.emit(Self.number, type: FakeGitHub.reviewEvent)
+    let poll = try BackgroundSb(sbd, ["poll"])
+
+    _ = try poll.finish(within: 30)
+    try resumed(sbd, s, with: Self.reviewResumed)
+    try sbd.waitForEventSource("the review signal") { ($0["signals"]?.int ?? 0) >= 1 }
+    // The event's read comes 2 s after the signal, unless the poll's read served the signal first.
+    usleep(4_000_000)
+    #expect(try sbd.count("wait-resolved", of: s.id) == 1)
+    #expect(try sbd.count("sent", of: s.id) == sent + 1)
+  }
+
+  /// A change while the stream is down sends no event. The catch-up read after the stream reopens finds it.
+  @Test func theCatchUpReadAfterAReattachResolvesAWaitWithoutAnEvent() throws {
+    let (github, sbd, s, id) = try readMode(wait: ["--kind", "review", "--who", "alex"])
+
+    github.dropStreams()
+    github.review(Self.number, by: "alex", "CHANGES_REQUESTED", at: stamp(60))
+
+    try sbd.waitFor("the stream to reopen", timeout: Self.reconnectTimeout) {
+      github.streamRequests(id).count == 2 && github.openStreams(Self.number) == 1
+    }
+    try sbd.waitFor("the catch-up read to resolve the wait", timeout: 30) {
+      try sbd.count("wait-resolved", of: s.id) == 1
+    }
+    try resumed(sbd, s, with: Self.reviewResumed)
+    let reads = try sbd.readsByTrigger()
+    #expect((reads["catchup"] ?? 0) >= 2, "\(reads)")
+    #expect((reads["event"] ?? 0) == 0, "\(reads)")
+    let source = try #require(try sbd.eventSource())
+    #expect(source["resolveLatency"]?["review"] == nil, "\(source.text)")
+  }
+
+  /// The reads under each trigger other than the ones that a source of PR changes asks for, after the same steps
+  /// with Event Streams in `events` mode: a draft PR and an approved one, which both poll at the idle rate, and four
+  /// `sb poll` runs at the same times after the first poll. The PRs are due at the second and fourth run. The
+  /// catch-up read in read mode moves a PR's last read by 5 s and the wait for the stream, so each run is at least
+  /// 40 s from the 300 s at which a PR becomes due.
+  private func cadence(events: String) throws -> [String: Int] {
+    let github = try FakeGitHub()
+    github.eventsEnabled = true
+    let sbd = try Instance.withGitHub(github, events: events)
+    let prs = [StatsPR.charts, StatsPR.haacked]
+    for pr in prs { _ = try sbd.session(in: pr.repo, branch: pr.branch) }
+    try sbd.poll()
+    let start = try sbd.now()
+    if events == "read" {
+      for pr in prs { _ = try sbd.waitForStream(github, pr.number) }
+      try sbd.waitForCatchUps(prs.count)
+    }
+
+    for offset in [100_000, 360_000, 460_000, 720_000] as [Int64] {
+      try sbd.advanceClock(max(0, start + offset - (try sbd.now())))
+      try sbd.poll()
+    }
+    // A stream that reopened would cause another catch-up read, which moves the PR's last read.
+    for subscription in github.subscriptions {
+      #expect(github.streamRequests(subscription.id).count == 1, "\(subscription.number) reopened its stream")
+    }
+
+    return try sbd.readsByTrigger().filter { !["event", "catchup", "confirm"].contains($0.key) }
+  }
+
+  @Test func readModeKeepsThePollCadenceOfOff() throws {
+    let off = try cadence(events: "off")
+
+    let read = try cadence(events: "read")
+
+    #expect(read == off)
+    #expect((off["idle"] ?? 0) >= 4, "\(off)")
+  }
+
+  @Test func sbGetNamesThePRPolledUntilItsStreamCoversIt() throws {
+    let (_, sbd, s, _) = try readMode()
+
+    let line = try #require(try sbd.prLine(s.id))
+
+    #expect(line.contains("(polling)"), "\(line)")
+    #expect(!line.contains("(events)"), "\(line)")
+  }
+
+  /// A PR is covered once its stream has been open 60 s and a read came 5 s after the stream opened. The poll after
+  /// the clock moves gives the hub a cycle at the new time.
+  @Test func sbGetNamesThePRCoveredByEventsOnceTheStreamHasBeenOpenSixtySeconds() throws {
+    let (github, sbd, s, _) = try readMode()
+
+    try sbd.advanceClock(61_000)
+    try sbd.poll()
+
+    let line = try sbd.waitFor(
+      "the PR line to name events", fetch: { try sbd.prLine(s.id) }, until: { $0.contains("(events)") })
+    #expect(!line.contains("(polling)"), "\(line)")
+    // The fake closes its streams when it goes away, which would end the coverage.
+    withExtendedLifetime(github) {}
+  }
+
+  @Test func sbGetNamesNoSourceWithEventStreamsOff() throws {
+    let github = try FakeGitHub()
+    github.eventsEnabled = true
+    let sbd = try Instance.withGitHub(github, events: "off")
+    let s = try prSession(sbd)
+
+    let line = try #require(try sbd.prLine(s.id))
+
+    #expect(!line.contains("(polling)") && !line.contains("(events)"), "\(line)")
   }
 }

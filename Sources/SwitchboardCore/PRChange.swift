@@ -154,12 +154,15 @@ public struct PRSources: Codable, Equatable, Sendable {
     public var misses: Int
     /// In shadow mode, the median time from a matched signal to the poll that showed its change, in ms.
     public var medianLeadMs: Int64?
+    /// Outside shadow mode, the time from the source's change to `wait-resolved`, by wait kind. nil from an sbd that
+    /// doesn't measure it.
+    public var resolveLatency: [String: Latency]?
 
     public init(
       id: String, state: String, reason: String? = nil, retryAt: Int64? = nil, changedAt: Int64? = nil,
       wanted: Int = 0, covered: Int = 0, signals: Int = 0, reads: Int = 0, lastSignalAt: Int64? = nil,
       counts: [String: Int] = [:], shadow: Bool = false, matched: Int = 0, unmatched: Int = 0, misses: Int = 0,
-      medianLeadMs: Int64? = nil
+      medianLeadMs: Int64? = nil, resolveLatency: [String: Latency]? = nil
     ) {
       self.id = id
       self.state = state
@@ -177,6 +180,19 @@ public struct PRSources: Codable, Equatable, Sendable {
       self.unmatched = unmatched
       self.misses = misses
       self.medianLeadMs = medianLeadMs
+      self.resolveLatency = resolveLatency
+    }
+  }
+
+  /// The waits of one kind that resolved after a signal, and the median time from the signal's change to the
+  /// resolution.
+  public struct Latency: Codable, Equatable, Sendable {
+    public var count: Int
+    public var medianMs: Int64
+
+    public init(count: Int, medianMs: Int64) {
+      self.count = count
+      self.medianMs = medianMs
     }
   }
 
@@ -191,8 +207,9 @@ public struct PRSources: Codable, Equatable, Sendable {
     self.pendingReads = pendingReads
     self.reviewOnlyReads = reviewOnlyReads
   }
-  /// The lines of `sb sources`: one line for each source, or one line that says sbd polls every PR. A source in
-  /// shadow mode adds a line of what it measured, and the pending reads add a line once there are some.
+  /// The lines of `sb sources`: one line for each source, or one line that says sbd polls every PR. A source adds a
+  /// line of what it measured: in shadow mode the matches, outside it the misses. The time to `wait-resolved` adds a
+  /// line once a wait resolved after a signal, and the pending reads add a line once there are some.
   public func lines(now: Int64) -> [String] {
     guard !providers.isEmpty else { return ["no sources of PR changes: sbd polls GitHub for every PR"] }
     var lines = providers.flatMap { s -> [String] in
@@ -204,10 +221,21 @@ public struct PRSources: Codable, Equatable, Sendable {
       parts.append("\(s.signals) signals, \(s.reads) reads")
       if let at = s.lastSignalAt { parts.append("last signal \(ago(at, now: now)) ago") }
       parts += s.counts.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }
-      guard s.shadow else { return [parts.joined(separator: ", ")] }
-      var shadow = "  shadow: \(s.matched) matched, \(s.unmatched) unmatched, \(s.misses) misses"
-      if let lead = s.medianLeadMs { shadow += ", median lead \(lead / 1000) s" }
-      return [parts.joined(separator: ", "), shadow]
+      var lines = [parts.joined(separator: ", ")]
+      if s.shadow {
+        var shadow = "  shadow: \(s.matched) matched, \(s.unmatched) unmatched, \(s.misses) misses"
+        if let lead = s.medianLeadMs { shadow += ", median lead \(lead / 1000) s" }
+        lines.append(shadow)
+      } else {
+        lines.append("  misses: \(s.misses)")
+      }
+      if let latency = s.resolveLatency, !latency.isEmpty {
+        let kinds = latency.sorted { $0.key < $1.key }.map {
+          "\($0.key) \($0.value.medianMs / 1000) s (\($0.value.count))"
+        }
+        lines.append("  event to wait-resolved: " + kinds.joined(separator: ", "))
+      }
+      return lines
     }
     if pendingReads > 0 { lines.append("pending reads: \(reviewOnlyReads) of \(pendingReads) only await review") }
     return lines
