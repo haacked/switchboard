@@ -118,7 +118,8 @@ struct ContentView: View {
       } message: { offer in
         Text(model.sessionNames.replacingIDs(in: offer.message))
       }
-      .mainToolbar(showsImport: model.shownSession == nil, showsViewPicker: !column.isSession)
+      // A session view sets `shownSession` when it appears. `isSession` covers the frame before that.
+      .mainToolbar(showsSessionItems: model.shownSession != nil || column.isSession)
     }
     .removingToolbarTitle()
     // The rule reads only whether the window is narrower than `collapseBelow`. Wider widths need no update.

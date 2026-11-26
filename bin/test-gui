@@ -1202,10 +1202,10 @@ check_header() {
   app show-terminal >/dev/null
   wait_for 60 terminal_shows || fail "the Inbox did not show the Claude terminal of $s: $(app panes) panes"
   pinned
+  app snapshot "$shots/inbox.png" >/dev/null
   wait_for 10 toolbar_has "Pause" "Mark Done" "Remove Session…" ||
     fail "the toolbar does not show the session items beside the Inbox's terminal: $result"
   echo "header: the toolbar beside the Inbox's terminal: $result"
-  app snapshot "$shots/inbox.png" >/dev/null
   app width restore >/dev/null
   end_app
   save_shots
