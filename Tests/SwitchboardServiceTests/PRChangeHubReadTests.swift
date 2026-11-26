@@ -20,7 +20,9 @@ extension HubHarness {
     queue.sync { hub.waitResolved(id, kind: kind, created: created) }
   }
 
-  fileprivate func confirmDelay(_ id: String = "PR_7") -> Int64? { queue.sync { hub.confirmDelay(id) } }
+  fileprivate func confirmDelay(_ id: String = "PR_7", kind: Wait.Kind = .ci) -> Int64? {
+    queue.sync { hub.confirmDelay(id, kind: kind) }
+  }
 
   fileprivate var sources: PRSources { queue.sync { hub.report() } }
 
@@ -181,6 +183,17 @@ extension HubHarness {
     h.coverage(.live(scope, since: t0, gap: true))
 
     #expect(h.confirmDelay() == 10_000)
+  }
+
+  /// A read during GitHub's merge can show the PR outside the merge queue before it shows the merge, so only a `ci`
+  /// wait's confirming read comes early.
+  @Test(arguments: [Wait.Kind.queue, .review, .merge, .deploy])
+  func aWaitOtherThanCIHasNoDelay(_ kind: Wait.Kind) {
+    let h = HubHarness(mode: .read)
+
+    h.coverage(.live(.pr(prRef(7)), since: t0, gap: true))
+
+    #expect(h.confirmDelay(kind: kind) == nil)
   }
 
   @Test func liveWithoutAGapAlsoConfirmsAfterTenSeconds() {

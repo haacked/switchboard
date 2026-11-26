@@ -280,13 +280,14 @@ final class PRChangeHub {
     return known.compactMapValues { coveringProvider(of: $0)?.signals }
   }
 
-  /// How long after the read that shows a `ci` wait's outcome the confirming read comes, for the PR with node id
-  /// `id`. It is nil unless a provider is live for the PR and its signals cause reads.
-  func confirmDelay(_ id: String) -> Int64? {
+  /// How long after the read that shows a wait's outcome the confirming read comes, for the PR with node id `id`.
+  /// It is nil unless the wait is a `ci` wait, a provider is live for the PR, and its signals cause reads. A read
+  /// during GitHub's merge can show the PR outside the merge queue before it shows the merge, so a `queue` wait's
+  /// confirming read waits for the PR's next due poll.
+  func confirmDelay(_ id: String, kind: Wait.Kind) -> Int64? {
     dispatchPrecondition(condition: .onQueue(queue))
-    guard !shadow, let ref = known[id]?.ref, providers.contains(where: { live($0.id, for: ref) != nil }) else {
-      return nil
-    }
+    guard kind == .ci, !shadow, let ref = known[id]?.ref, providers.contains(where: { live($0.id, for: ref) != nil })
+    else { return nil }
     return Self.confirmMs
   }
 
