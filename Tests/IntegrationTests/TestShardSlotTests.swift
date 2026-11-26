@@ -81,10 +81,13 @@ private final class ShardRig {
         id=$(grep -E "$filter" "$FAKE_SWIFT_TESTS" | sed 's|/.*||; s|.*[.]||' | sort -u | paste -sd+ -)
         [ -n "$id" ] || id=test.$$
       fi
+      # Shards can run at once. sh writes each line of its output separately,
+      # so cat appends the whole record in one write.
       {
         echo "--- $id $(ls "$SB_BUILD_SLOTS_DIR" 2>/dev/null | grep -c '[.]ticket$')"
         for arg in "$@"; do printf '%s\\n' "$arg"; done
-      } >> "$FAKE_SWIFT_CALLS"
+      } > "$FAKE_SWIFT_DIR/record.$$"
+      cat "$FAKE_SWIFT_DIR/record.$$" >> "$FAKE_SWIFT_CALLS"
       printf '%s' "${SB_BUILD_SLOT_HELD-}" > "$FAKE_SWIFT_DIR/held.$id"
       echo "$PPID" > "$FAKE_SWIFT_DIR/ppid.$id"
       if [ "$id" = list ]; then
