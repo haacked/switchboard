@@ -453,6 +453,8 @@ public struct PRSummary: Codable, Equatable, Sendable {
   /// How sbd learns of the PR's changes: `events` when a source of PR changes covers it, else `polling`. nil when
   /// sbd runs no source.
   public var source: String?
+  /// The source as `sb get` and the session header print it after the PR's line, or "" without one.
+  public var sourceSuffix: String { source.map { " (\($0))" } ?? "" }
 
   public init(_ pr: PullRequest) {
     number = pr.number

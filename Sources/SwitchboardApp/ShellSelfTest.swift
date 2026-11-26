@@ -1,6 +1,7 @@
 import AppKit
 import SwiftTerm
 import SwiftUI
+import SwitchboardCore
 
 /// A scripted check of the shell pane, run by `bin/test-gui`. SB_SHELL_TEST=<folder> makes the app run each
 /// command that a script writes to <folder>/cmd, one at a time. When the command is done, the app appends
@@ -32,7 +33,8 @@ import SwiftUI
 /// sessions have started since launch from the view each drag pressed or one of its superviews. `settings-key`
 /// sends ⌘, to the menu bar and reports the menu item that ran, as `nav-keys` does. `settings` reports `shown
 /// <tab>` while the Settings window is on screen, else `hidden`. `open-settings <tab>` opens Settings at the tab,
-/// as the Issues view's gear button does. `width <points>` sets the window's content width and keeps its height. It
+/// as the Issues view's gear button does. `pr-updates` reports the title and detail of Settings ▸ General's GitHub row,
+/// joined by " | ". `width <points>` sets the window's content width and keeps its height. It
 /// stops AppKit from saving the window's frame until `width restore` puts the frame from before the first `width`
 /// back. It reports `width <content width>`, and `width restore` reports `restored`. `anchors <prefix>
 /// [<container>]` scrolls each click anchor whose name starts with the prefix into view, in every window, and
@@ -150,6 +152,9 @@ enum ShellSelfTest {
       return menuItem(running: KeyboardShortcut(","), in: window)
     case "settings":
       return model.settingsShown ? "shown \(model.settingsTab.rawValue)" : "hidden"
+    case "pr-updates":
+      let text = PRUpdatesRow.text(model.prSources, now: nowMs())
+      return [text.title, text.detail].compactMap { $0 }.joined(separator: " | ")
     case "open-settings":
       guard let tab = SettingsTab(rawValue: rest) else { return "no tab \(rest)" }
       model.openSettings(tab)

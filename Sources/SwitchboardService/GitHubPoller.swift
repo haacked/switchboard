@@ -305,9 +305,11 @@ final class GitHubPoller {
   /// The sources of PR changes, for `sb sources`. With `recheck`, each provider first tries again what made it
   /// unavailable.
   func sources(recheck: Bool = false) -> PRSources {
-    guard !hub.providers.isEmpty else { return PRSources(providers: []) }
+    guard !hub.providers.isEmpty else { return PRSources(providers: [], pollSeconds: settings.pollSeconds) }
     if recheck { hub.providers.forEach { $0.recheck() } }
-    return queue.sync { hub.report() }
+    var report = queue.sync { hub.report() }
+    report.pollSeconds = settings.pollSeconds
+    return report
   }
 
   /// The GitHub requests and points since sbd started, without polling.

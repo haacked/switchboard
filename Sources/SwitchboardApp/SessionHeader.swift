@@ -100,7 +100,14 @@ enum SessionHeaderLine {
       items.append(Item(kind: .repo, text: repo, help: "The repo this session works in"))
     }
     if let pr = s.pr, let url = pr.link {
-      items.append(Item(kind: .pr, text: pr.line, help: "\(pr.repo): \(pr.title)", url: url))
+      var item = Item(kind: .pr, text: pr.line, help: "\(pr.repo): \(pr.title)", url: url)
+      if let source = pr.source {
+        item.text += pr.sourceSuffix
+        item.help +=
+          source == "events"
+          ? "\nsbd learns of this PR's changes from GitHub Event Streams." : "\nsbd polls GitHub for this PR's changes."
+      }
+      items.append(item)
     }
     if let issues = s.issues, !issues.isEmpty {
       let prRepo = s.pr?.repo

@@ -751,11 +751,11 @@ private final class HubPoller {
     }
   }
 
-  /// The poller's own hub has no provider and reports no sources.
+  /// The poller's own hub has no provider and reports no sources, with the poll interval that the row shows.
   @Test func thePollerWithoutProvidersReportsNoSources() throws {
     let h = try PollerHarness()
 
-    #expect(h.poller.sources() == PRSources(providers: []))
+    #expect(h.poller.sources() == PRSources(providers: [], pollSeconds: h.poller.settings.pollSeconds))
   }
 }
 
