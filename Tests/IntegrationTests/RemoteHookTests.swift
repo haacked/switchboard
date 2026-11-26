@@ -286,6 +286,8 @@ private func runBoxShim(_ sbd: Instance, session: String, payload: JSON) throws 
     sbd.stopSbd()
     try sbd.startSbd()
     try sbd.waitForLink("mini", .connected)
+    // sbd answers a hook on the host's socket only after it reconciles the host on the new connection.
+    try sbd.waitFor(s.id, "the reconcile after the restart") { $0.claudePid != nil }
     try sbd.sendProbe(marker, session: s.id, id: id)
     let fresh = "after-restart-\(UUID().uuidString)"
     try sbd.sendProbe(fresh, session: s.id)
