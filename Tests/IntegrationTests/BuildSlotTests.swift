@@ -8,6 +8,16 @@ import Testing
 /// logs "end <id>" and exits. The log's order is the order the commands ran.
 final class SlotQueue {
   static let helper = Instance.root.appendingPathComponent("bin/lib/build-slot").path
+  static let script = Instance.root.appendingPathComponent("bin/lib/build-slot.py").path
+  /// Makes the command log "signal <id>" and exit 42 on SIGTERM, SIGINT, or SIGHUP.
+  static let signalTrap = #"trap 'echo "signal $1" >> "$2/log"; exit 42' TERM INT HUP"#
+
+  /// The python3 that bin/lib/build-slot runs.
+  static func toolchainPython() throws -> String {
+    let r = try runCommand("/usr/bin/xcrun", ["--find", "python3"], timeout: 60)
+    try #require(r.status == 0, "\(r.stderr)")
+    return r.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
 
   let root: String
   /// The queue folder. Its name has a space in it.
@@ -271,17 +281,13 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
 }
 
 @Suite(.blocking(timeLimit: .seconds(120))) struct BuildSlotTests {
-  /// -S leaves out site-packages, so an import outside the standard library
-  /// fails. The python3 is the one that bin/lib/build-slot runs.
+  /// -S leaves out site-packages, so an import outside the standard library fails.
   @Test func theHelperRunsUnderTheToolchainsPythonWithOnlyTheStandardLibrary() throws {
     let q = try SlotQueue()
     defer { q.stop() }
-    let python = try runCommand("/usr/bin/xcrun", ["--find", "python3"], timeout: 60)
-    try #require(python.status == 0, "\(python.stderr)")
-    let script = Instance.root.appendingPathComponent("bin/lib/build-slot.py").path
 
     let r = try runCommand(
-      python.stdout.trimmingCharacters(in: .whitespacesAndNewlines), ["-I", "-S", script, "--", "/usr/bin/true"],
+      try SlotQueue.toolchainPython(), ["-I", "-S", SlotQueue.script, "--", "/usr/bin/true"],
       env: q.environment(), timeout: 60)
 
     #expect(r.status == 0, "\(r.stderr)")
@@ -421,8 +427,7 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
   func aSignalToAHoldingHelperReachesTheCommandAndTheHelperExitsWithItsStatus(_ signal: Int32) throws {
     let q = try SlotQueue()
     defer { q.stop() }
-    let trap = #"trap 'echo "signal $1" >> "$2/log"; exit 42' TERM INT HUP"#
-    let holder = try q.startHolder("A", command: q.command("A", before: trap))
+    let holder = try q.startHolder("A", command: q.command("A", before: SlotQueue.signalTrap))
 
     kill(holder.processIdentifier, signal)
     let exited = try q.waitForExit("A")
@@ -430,6 +435,46 @@ private struct BadSetting: Sendable, CustomTestStringConvertible {
     #expect(exited.terminationReason == .exit)
     #expect(exited.terminationStatus == 42)
     #expect(q.logLines().contains("signal A"))
+    #expect(q.tickets().isEmpty)
+  }
+
+  /// The child can exec and run before Popen returns in the helper. The
+  /// driver sends the signal from inside Popen, after the command sets its
+  /// trap and before the helper records the command's process.
+  @Test(arguments: [SIGTERM, SIGINT, SIGHUP])
+  func aSignalWhileTheHelperStartsTheCommandReachesTheCommand(_ signal: Int32) throws {
+    let q = try SlotQueue()
+    defer { q.stop() }
+    let driver = #"""
+      import importlib.util, os, subprocess, sys, time
+      script, log, signum = sys.argv[1], sys.argv[2], int(sys.argv[3])
+      spec = importlib.util.spec_from_file_location("build_slot", script)
+      slot = importlib.util.module_from_spec(spec)
+      spec.loader.exec_module(slot)
+
+      class SignalDuringStart(subprocess.Popen):
+          def __init__(self, *args, **kwargs):
+              super().__init__(*args, **kwargs)
+              deadline = time.time() + 15
+              while "start A" not in open(log).read():
+                  if time.time() > deadline:
+                      os._exit(99)
+                  time.sleep(0.01)
+              os.kill(os.getpid(), signum)
+
+      slot.subprocess.Popen = SignalDuringStart
+      sys.exit(slot.main(sys.argv[4:]))
+      """#
+
+    let r = try runCommand(
+      try SlotQueue.toolchainPython(),
+      ["-I", "-S", "-c", driver, SlotQueue.script, q.log, "\(signal)", "--"]
+        + q.command("A", before: SlotQueue.signalTrap),
+      env: q.environment(), timeout: 60)
+
+    #expect(!r.timedOut, "the helper dropped the signal and waited for the timeout's SIGTERM")
+    #expect(r.status == 42, "\(r.stderr)")
+    #expect(q.logLines().contains("signal A"), "\(q.diagnostics())")
     #expect(q.tickets().isEmpty)
   }
 

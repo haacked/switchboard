@@ -21,8 +21,9 @@ a lower number.
 The helper starts the command as a child and does not pass it the ticket's
 file descriptor. A daemon that the command starts, such as a tmux server, then
 cannot keep the slot. The helper forwards SIGINT, SIGTERM, and SIGHUP to the
-child and exits with the child's status. If the helper itself is SIGKILLed,
-its slot frees while the child may keep running.
+child and exits with the child's status. A signal that arrives while the
+helper starts the child reaches the child once it runs. If the helper itself
+is SIGKILLed, its slot frees while the child may keep running.
 
 The child gets SB_BUILD_SLOT_HELD set to the ticket's path. When that ticket
 is live, a nested call runs its command at once without a second slot.
@@ -249,22 +250,34 @@ def exit_status(returncode):
 
 
 class Child:
-    """The command's process, once started. A signal before then interrupts the wait."""
+    """The command's process, once started. A signal before the start
+    interrupts the wait. A signal while Popen starts the command waits in
+    `pending` and reaches the command after Popen returns."""
 
     def __init__(self):
         self.process = None
+        self.starting = False
+        self.pending = []
 
     def on_signal(self, signum, _frame):
-        if self.process is None:
+        if self.process is not None:
+            self.process.send_signal(signum)
+        elif self.starting:
+            # The command may already run, because Popen returns after the
+            # child execs.
+            self.pending.append(signum)
+        else:
             raise Interrupted(signum)
-        self.process.send_signal(signum)
 
     def run(self, command, ticket):
         env = dict(os.environ, SB_BUILD_SLOT_HELD=ticket)
+        self.starting = True
         try:
             self.process = subprocess.Popen(command, env=env, close_fds=True)
         except OSError as error:
             return cannot_run(command, error)
+        for signum in self.pending:
+            self.process.send_signal(signum)
         return exit_status(self.process.wait())
 
 
