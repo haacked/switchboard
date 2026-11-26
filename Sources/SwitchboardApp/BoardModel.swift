@@ -1714,7 +1714,7 @@ final class BoardModel: ObservableObject {
 
   /// The recent messages of the archived Manager conversations among `sessions`, for ⌘K, by session id. It reads
   /// the `searchedTranscriptCount` most recent ones. It reads a transcript again only when its session's
-  /// `lastActivity` changed. A failed read leaves that conversation out. The reads run off the main thread and off
+  /// `lastActivity` changed. A failed or empty read leaves that conversation out. The reads run off the main thread and off
   /// `poller`, so they never delay a refresh. Each call starts after the previous call finishes, so two opens never
   /// read at once and the second one reuses what the first one read.
   func archivedTranscripts(for sessions: [SessionSummary]) async -> [String: SessionSearch.Transcript] {
@@ -1739,7 +1739,9 @@ final class BoardModel: ObservableObject {
         var read: [String: (lastActivity: Int64, transcript: SessionSearch.Transcript)] = [:]
         for (id, lastActivity) in stale {
           let args: [String: JSON] = ["session": .string(id), "limit": .number(Double(Self.searchedMessageCount))]
-          guard let messages = Self.chatMessages(send, args) else { continue }
+          // `chat-log` answers an empty list when it cannot read the transcript. An archived conversation always has
+          // messages, so an empty answer counts as a failed read and the next open tries again.
+          guard let messages = Self.chatMessages(send, args), !messages.isEmpty else { continue }
           read[id] = (lastActivity, SessionSearch.Transcript(messages.map(\.text)))
         }
         return read

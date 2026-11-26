@@ -638,4 +638,14 @@ private func transcript(_ messages: [String]) -> SessionSearch.Transcript { Sess
 
     #expect(hint.text.prefix(90).contains("Kafka"), "\(hint.text)")
   }
+
+  /// "off" matches part of the folded "ffi" of the ligature in "oﬃce", which a search of the message itself does not
+  /// find. The hint then shows the folded text around the match.
+  @Test func aMatchInsideALigatureShowsTheFoldedTextAroundIt() throws {
+    let message = String(repeating: "alpha beta ", count: 60) + "oﬃce"
+
+    let hint = try self.hint(message, query: "off")
+
+    #expect(hint.text.prefix(90).contains("office"), "\(hint.text)")
+  }
 }

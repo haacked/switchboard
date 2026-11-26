@@ -679,4 +679,24 @@ private func groupedModel(_ list: [SessionSummary]) -> BoardModel {
     #expect(Array(readIDs(sent).dropFirst(first)) == ["a"])
     #expect(Set(transcripts.keys) == ["a", "b"])
   }
+
+  /// `chat-log` answers an empty list when it cannot read the transcript, so an empty answer is not cached.
+  @Test func anEmptyReadIsTriedAgainOnTheNextOpen() async throws {
+    let sent = SentRequests()
+    let model = model([conversation("a", lastActivity: 2, archived: true)], sent)
+    let answer = answering(sent)
+    let empty = try JSONCoding.convert([ChatMessage](), to: JSON.self)
+    model.send = { op, args in
+      _ = try answer(op, args)
+      return op == "chat-log" ? empty : .null
+    }
+    let first = await model.archivedTranscripts(for: model.board)
+    model.send = answering(sent)
+
+    let second = await model.archivedTranscripts(for: model.board)
+
+    #expect(first.isEmpty)
+    #expect(readIDs(sent) == ["a", "a"])
+    #expect(Set(second.keys) == ["a"])
+  }
 }

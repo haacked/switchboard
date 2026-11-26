@@ -117,7 +117,12 @@ public enum SessionSearch {
         } else if let message = transcript?.messages.first(where: { containsBytes($0.folded, term) }) {
           // Every other field outranks a transcript match, so `rank` searches the transcript only when none matched.
           score += substring * Field.transcript.weight
-          if hint == nil { hint = Hit(field: .transcript, text: excerpt(message.text, around: term)) }
+          if hint == nil {
+            // A term that matches part of a ligature's folded letters, such as "off" in "oﬃce", is found only in the
+            // folded text. The hint then shows the folded spelling.
+            let text = excerpt(message.text, around: term) ?? excerpt(message.folded, around: term) ?? message.text
+            hint = Hit(field: .transcript, text: text)
+          }
         } else {
           continue sessions
         }
@@ -221,10 +226,11 @@ public enum SessionSearch {
   static let excerptLead = 30
 
   /// `text` from a word start up to `excerptLead` characters before the first match of the folded `term`, so that a
-  /// hint that the row cuts at its end still shows the match. A cut start gets a leading ellipsis. The search runs on
-  /// `text` itself, because a position in the folded text can point elsewhere in `text`.
-  static func excerpt(_ text: String, around term: String) -> String {
-    guard let match = text.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) else { return text }
+  /// hint that the row cuts at its end still shows the match. A cut start gets a leading ellipsis. Nil when `text`
+  /// does not hold `term`. The search runs on `text` itself, because a position in the folded text can point
+  /// elsewhere in `text`.
+  static func excerpt(_ text: String, around term: String) -> String? {
+    guard let match = text.range(of: term, options: [.caseInsensitive, .diacriticInsensitive]) else { return nil }
     let lead = text.index(match.lowerBound, offsetBy: -excerptLead, limitedBy: text.startIndex) ?? text.startIndex
     guard lead > text.startIndex else { return text }
     let start = text[lead..<match.lowerBound].firstIndex(where: \.isWhitespace).map(text.index(after:)) ?? lead
